@@ -57,7 +57,13 @@ def participant_data(participant: Participant) -> dict:
         "name": participant.name,
         "email": participant.email,
         "sub2api_user_id": participant.sub2api_user_id,
-        "sub2api_username": participant.sub2api_username or participant.name,
+        "sub2api_username": participant.sub2api_username,
+        "sub2api_email": participant.sub2api_email,
+        "sub2api_identity": (
+            participant.sub2api_username
+            or participant.sub2api_email
+            or f"账号 {participant.sub2api_user_id}"
+        ),
         "share_percent": float(participant.share_percent),
         "is_owner": participant.is_owner,
         "enabled": participant.enabled,

@@ -1,6 +1,10 @@
 """观测、通知和登录审计只读 API。"""
 
+from django.core.paginator import Paginator
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from .base import AdminAPIView, error, ok
 from .presenters import bounded_query_int, iso, snapshot_data
@@ -10,8 +14,35 @@ from ..models import (
     LoginEvent,
     NotificationEvent,
     Observation,
+    Participant,
 )
 from ..serializers import BlockedIPAddressSerializer
+
+
+def query_datetime(request, name: str):
+    """读取 ISO 日期时间查询参数；无时区值按 Django 当前时区解释。"""
+    value = request.query_params.get(name)
+    if not value:
+        return None
+    parsed = parse_datetime(value)
+    if parsed is None:
+        raise ValueError(f"{name} 不是有效的日期时间")
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed)
+    return parsed
+
+
+def paginated_rows(request, queryset, default_size: int = 20) -> tuple[list, dict]:
+    """统一记录接口的分页结构，防止审计表随数据库增长而一次性加载。"""
+    page_size = bounded_query_int(request, "page_size", default_size, 100)
+    paginator = Paginator(queryset, page_size)
+    page = paginator.get_page(request.query_params.get("page", 1))
+    return list(page.object_list), {
+        "page": page.number,
+        "page_size": page_size,
+        "total": paginator.count,
+        "total_pages": paginator.num_pages,
+    }
 
 
 class BlockedIPAddressListView(AdminAPIView):
@@ -49,10 +80,43 @@ class BlockedIPAddressDetailView(AdminAPIView):
 
 class ObservationListView(AdminAPIView):
     def get(self, request):
-        limit = bounded_query_int(request, "limit", 50, 200)
-        rows = Observation.objects.select_related("cycle").prefetch_related(
+        queryset = Observation.objects.select_related("cycle").prefetch_related(
             "participant_snapshots__participant"
-        )[:limit]
+        )
+        try:
+            observed_from = query_datetime(request, "from")
+            observed_to = query_datetime(request, "to")
+        except ValueError as exc:
+            return error(str(exc), 400)
+        if observed_from:
+            queryset = queryset.filter(observed_at__gte=observed_from)
+        if observed_to:
+            queryset = queryset.filter(observed_at__lte=observed_to)
+
+        source = request.query_params.get("source")
+        valid_sources = {value for value, _label in Observation.SOURCE_CHOICES}
+        if source:
+            if source not in valid_sources:
+                return error("来源筛选值无效", 400)
+            queryset = queryset.filter(source=source)
+
+        query_mode = request.query_params.get("query_mode")
+        if query_mode:
+            if query_mode not in {"passive", "direct"}:
+                return error("查询方式筛选值无效", 400)
+            if query_mode == "passive":
+                queryset = queryset.filter(raw_window__query_mode="passive")
+            else:
+                # 旧观测尚未写 query_mode 时，展示层一直将它解释为上游直查。
+                queryset = queryset.filter(
+                    Q(raw_window__query_mode="direct")
+                    | ~Q(raw_window__has_key="query_mode")
+                )
+
+        total = queryset.count()
+        valid_count = queryset.filter(valid_sample=True).count()
+        passive_count = queryset.filter(raw_window__query_mode="passive").count()
+        rows, pagination = paginated_rows(request, queryset)
         result = []
         for item in rows:
             result.append(
@@ -84,7 +148,10 @@ class ObservationListView(AdminAPIView):
                     ),
                     "valid_sample": item.valid_sample,
                     "sample_note": item.sample_note,
-                    "rate_method": item.raw_window.get("rate_method", "incremental_legacy"),
+                    "rate_method": item.raw_window.get(
+                        "rate_method",
+                        "incremental_legacy",
+                    ),
                     "query_mode": item.raw_window.get("query_mode", "direct"),
                     "snapshot_sampled_at": item.raw_window.get("sampled_at"),
                     "participants": [
@@ -93,42 +160,117 @@ class ObservationListView(AdminAPIView):
                     ],
                 }
             )
-        return ok(result)
+        return ok(
+            {
+                "items": result,
+                "pagination": pagination,
+                "summary": {
+                    "total": total,
+                    "valid_count": valid_count,
+                    "passive_count": passive_count,
+                },
+            }
+        )
 
 
 class NotificationListView(AdminAPIView):
     def get(self, request):
-        limit = bounded_query_int(request, "limit", 100, 300)
-        rows = NotificationEvent.objects.select_related("participant")[:limit]
+        queryset = NotificationEvent.objects.select_related("participant")
+        try:
+            created_from = query_datetime(request, "from")
+            created_to = query_datetime(request, "to")
+        except ValueError as exc:
+            return error(str(exc), 400)
+        if created_from:
+            queryset = queryset.filter(created_at__gte=created_from)
+        if created_to:
+            queryset = queryset.filter(created_at__lte=created_to)
+
+        event_type = request.query_params.get("event_type")
+        valid_types = {value for value, _label in NotificationEvent.TYPE_CHOICES}
+        if event_type:
+            if event_type not in valid_types:
+                return error("通知类型筛选值无效", 400)
+            queryset = queryset.filter(event_type=event_type)
+
+        participant = request.query_params.get("participant")
+        if participant:
+            if participant == "system":
+                queryset = queryset.filter(participant__isnull=True)
+            else:
+                try:
+                    participant_id = int(participant)
+                except ValueError:
+                    return error("参与者筛选值无效", 400)
+                queryset = queryset.filter(participant_id=participant_id)
+
+        subject = request.query_params.get("subject", "").strip()
+        if subject:
+            queryset = queryset.filter(subject__icontains=subject)
+
+        event_status = request.query_params.get("status")
+        valid_statuses = {
+            value for value, _label in NotificationEvent.STATUS_CHOICES
+        }
+        if event_status:
+            if event_status not in valid_statuses:
+                return error("通知状态筛选值无效", 400)
+            queryset = queryset.filter(status=event_status)
+
+        total = queryset.count()
+        sent_count = queryset.filter(status="sent").count()
+        failed_count = queryset.filter(status="failed").count()
+        rows, pagination = paginated_rows(request, queryset)
         return ok(
-            [
-                {
-                    "id": item.id,
-                    "event_type": item.event_type,
-                    "event_type_label": item.get_event_type_display(),
-                    "severity": item.severity,
-                    "participant_name": (
-                        item.participant.name if item.participant else None
-                    ),
-                    "recipient": item.recipient,
-                    "subject": item.subject,
-                    "body": item.body,
-                    "status": item.status,
-                    "status_label": item.get_status_display(),
-                    "error": item.error,
-                    "created_at": iso(item.created_at),
-                    "sent_at": iso(item.sent_at),
-                }
-                for item in rows
-            ]
+            {
+                "items": [
+                    {
+                        "id": item.id,
+                        "event_type": item.event_type,
+                        "event_type_label": item.get_event_type_display(),
+                        "severity": item.severity,
+                        "participant_name": (
+                            item.participant.name if item.participant else None
+                        ),
+                        "recipient": item.recipient,
+                        "subject": item.subject,
+                        "body": item.body,
+                        "status": item.status,
+                        "status_label": item.get_status_display(),
+                        "error": item.error,
+                        "created_at": iso(item.created_at),
+                        "sent_at": iso(item.sent_at),
+                    }
+                    for item in rows
+                ],
+                "pagination": pagination,
+                "summary": {
+                    "total": total,
+                    "sent_count": sent_count,
+                    "failed_count": failed_count,
+                },
+                "filter_options": {
+                    "types": [
+                        {"value": value, "label": label}
+                        for value, label in NotificationEvent.TYPE_CHOICES
+                    ],
+                    "participants": [
+                        {"id": item.id, "name": item.name}
+                        for item in Participant.objects.all()
+                    ],
+                    "statuses": [
+                        {"value": value, "label": label}
+                        for value, label in NotificationEvent.STATUS_CHOICES
+                    ],
+                },
+            }
         )
 
 
 class LoginEventListView(AdminAPIView):
     def get(self, request):
-        limit = bounded_query_int(request, "limit", 100, 300)
         queryset = LoginEvent.objects.all()
-        rows = list(queryset[:limit])
+        rows, pagination = paginated_rows(request, queryset)
         return ok(
             {
                 "success_count": queryset.filter(success=True).count(),
@@ -152,5 +294,6 @@ class LoginEventListView(AdminAPIView):
                     }
                     for item in rows
                 ],
+                "pagination": pagination,
             }
         )

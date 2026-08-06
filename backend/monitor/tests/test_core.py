@@ -1014,6 +1014,12 @@ def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch)
         sub2api_user_id=51,
         share_percent=Decimal("50"),
     )
+    blank_name_participant = Participant.objects.create(
+        name="不应作为账号身份",
+        sub2api_user_id=52,
+        sub2api_username="错误的旧缓存",
+        share_percent=Decimal("50"),
+    )
 
     class FakeClient:
         def __init__(self, _config):
@@ -1033,7 +1039,14 @@ def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch)
                     "username": "rider",
                     "status": "active",
                     "role": "user",
-                }
+                },
+                {
+                    "id": 52,
+                    "email": "blank-name@example.com",
+                    "username": "",
+                    "status": "active",
+                    "role": "user",
+                },
             ]
 
     monkeypatch.setattr("monitor.views.participants.Sub2APIClient", FakeClient)
@@ -1043,6 +1056,194 @@ def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch)
     assert response.json()["data"][0]["id"] == 51
     participant.refresh_from_db()
     assert participant.sub2api_username == "rider"
+    assert participant.sub2api_email == "rider@example.com"
+    blank_name_participant.refresh_from_db()
+    assert blank_name_participant.sub2api_username == ""
+    assert blank_name_participant.sub2api_email == "blank-name@example.com"
+    participants = client.get("/api/participants", **headers).json()["data"]
+    blank_name_data = next(
+        item for item in participants if item["id"] == blank_name_participant.id
+    )
+    assert blank_name_data["sub2api_identity"] == "blank-name@example.com"
+
+@pytest.mark.django_db
+def test_observation_records_paginate_and_filter_server_side():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    now = timezone.now()
+    cycle = QuotaCycle.objects.create(
+        account_id=7,
+        starts_at=now - timedelta(days=2),
+        resets_at=now + timedelta(days=5),
+    )
+
+    def create_observation(
+        *,
+        minutes_ago: int,
+        source: str,
+        query_mode: str | None,
+        valid: bool,
+    ):
+        raw_window = {}
+        if query_mode:
+            raw_window["query_mode"] = query_mode
+        return Observation.objects.create(
+            cycle=cycle,
+            source=source,
+            observed_at=now - timedelta(minutes=minutes_ago),
+            upstream_used_percent=10,
+            selected_total_cost=200,
+            total_standard_cost=200,
+            total_actual_cost=200,
+            effective_usd_per_percent=20,
+            valid_sample=valid,
+            raw_window=raw_window,
+        )
+
+    newest = create_observation(
+        minutes_ago=5,
+        source="manual",
+        query_mode="direct",
+        valid=True,
+    )
+    legacy_direct = create_observation(
+        minutes_ago=10,
+        source="manual",
+        query_mode=None,
+        valid=False,
+    )
+    create_observation(
+        minutes_ago=15,
+        source="manual",
+        query_mode="passive",
+        valid=True,
+    )
+    create_observation(
+        minutes_ago=20,
+        source="scheduled",
+        query_mode="direct",
+        valid=True,
+    )
+
+    response = client.get(
+        "/api/observations",
+        {
+            "page": 1,
+            "page_size": 1,
+            "from": (now - timedelta(minutes=12)).isoformat(),
+            "to": now.isoformat(),
+            "source": "manual",
+            "query_mode": "direct",
+        },
+        **headers,
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["summary"] == {
+        "total": 2,
+        "valid_count": 1,
+        "passive_count": 0,
+    }
+    assert data["pagination"] == {
+        "page": 1,
+        "page_size": 1,
+        "total": 2,
+        "total_pages": 2,
+    }
+    assert [item["id"] for item in data["items"]] == [newest.id]
+
+    second_page = client.get(
+        "/api/observations",
+        {
+            "page": 2,
+            "page_size": 1,
+            "from": (now - timedelta(minutes=12)).isoformat(),
+            "to": now.isoformat(),
+            "source": "manual",
+            "query_mode": "direct",
+        },
+        **headers,
+    ).json()["data"]
+    assert [item["id"] for item in second_page["items"]] == [legacy_direct.id]
+
+
+@pytest.mark.django_db
+def test_notification_records_paginate_and_apply_all_filters():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    participant = Participant.objects.create(
+        name="筛选车友",
+        sub2api_user_id=88,
+        share_percent=100,
+    )
+    now = timezone.now()
+    target = NotificationEvent.objects.create(
+        event_type="test",
+        participant=participant,
+        dedupe_key="target",
+        recipient="rider@example.com",
+        subject="Quota notice",
+        body="target",
+        status="sent",
+    )
+    NotificationEvent.objects.create(
+        event_type="collection_error",
+        participant=participant,
+        dedupe_key="wrong-type",
+        recipient="rider@example.com",
+        subject="Quota notice",
+        body="wrong type",
+        status="failed",
+    )
+    old = NotificationEvent.objects.create(
+        event_type="test",
+        participant=participant,
+        dedupe_key="old",
+        recipient="rider@example.com",
+        subject="Quota notice",
+        body="old",
+        status="sent",
+    )
+    NotificationEvent.objects.filter(pk=old.pk).update(
+        created_at=now - timedelta(days=2)
+    )
+
+    response = client.get(
+        "/api/notifications",
+        {
+            "page_size": 1,
+            "from": (now - timedelta(hours=1)).isoformat(),
+            "to": (now + timedelta(hours=1)).isoformat(),
+            "event_type": "test",
+            "participant": participant.id,
+            "subject": "quota",
+            "status": "sent",
+        },
+        **headers,
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["summary"] == {
+        "total": 1,
+        "sent_count": 1,
+        "failed_count": 0,
+    }
+    assert data["pagination"]["total"] == 1
+    assert [item["id"] for item in data["items"]] == [target.id]
+    assert {"id": participant.id, "name": participant.name} in data[
+        "filter_options"
+    ]["participants"]
+
 
 
 
@@ -1337,10 +1538,27 @@ def test_login_audit_records_server_and_webrtc_addresses(settings):
     assert rows[1].webrtc_ips == ["192.168.1.8", "203.0.113.9"]
     assert rows[1].user_agent == "Audit Browser/1.0"
 
-    audit = client.get("/api/login-events", **headers).json()["data"]
+    audit = client.get(
+        "/api/login-events",
+        {"page": 1, "page_size": 1},
+        **headers,
+    ).json()["data"]
     assert audit["success_count"] == 1
     assert audit["failure_count"] == 1
     assert audit["unique_request_ips"] == 1
+    assert audit["pagination"] == {
+        "page": 1,
+        "page_size": 1,
+        "total": 2,
+        "total_pages": 2,
+    }
+    assert [item["id"] for item in audit["items"]] == [rows[1].id]
+    second_page = client.get(
+        "/api/login-events",
+        {"page": 2, "page_size": 1},
+        **headers,
+    ).json()["data"]
+    assert [item["id"] for item in second_page["items"]] == [rows[0].id]
 
 
 @pytest.mark.django_db

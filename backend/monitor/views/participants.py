@@ -14,26 +14,36 @@ class Sub2APIUserListView(AdminAPIView):
         try:
             with Sub2APIClient(AppSettings.load()) as client:
                 users = client.list_users()
-            # 用户名是展示元数据；读取 Admin 用户列表时顺手刷新本地缓存，
-            # 首页此后不需要为了显示名称再次请求 Sub2API。
-            usernames = {
-                int(item["id"]): str(item.get("username") or "")
+            # 用户名可能为空，仍必须用本次 Admin API 结果覆盖旧缓存；否则曾经
+            # 错存的本地参与者名称会永久残留。邮箱用于空用户名时的稳定展示。
+            metadata = {
+                int(item["id"]): {
+                    "username": str(item.get("username") or ""),
+                    "email": str(item.get("email") or ""),
+                }
                 for item in users
-                if item.get("username")
+                if item.get("id") is not None
             }
             cached = list(
                 Participant.objects.filter(
-                    sub2api_user_id__in=usernames,
+                    sub2api_user_id__in=metadata,
                 )
             )
             changed = []
             for participant in cached:
-                username = usernames[participant.sub2api_user_id]
-                if participant.sub2api_username != username:
-                    participant.sub2api_username = username
+                current = metadata[participant.sub2api_user_id]
+                if (
+                    participant.sub2api_username != current["username"]
+                    or participant.sub2api_email != current["email"]
+                ):
+                    participant.sub2api_username = current["username"]
+                    participant.sub2api_email = current["email"]
                     changed.append(participant)
             if changed:
-                Participant.objects.bulk_update(changed, ["sub2api_username"])
+                Participant.objects.bulk_update(
+                    changed,
+                    ["sub2api_username", "sub2api_email"],
+                )
         except (Sub2APIError, ValueError) as exc:
             return error(str(exc), status.HTTP_502_BAD_GATEWAY)
         return ok(users)

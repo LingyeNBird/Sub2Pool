@@ -30,6 +30,7 @@ const form = reactive({
   email: "",
   sub2api_user_id: 0,
   sub2api_username: "",
+  sub2api_email: "",
   share_percent: 50,
   is_owner: false,
   enabled: true,
@@ -87,6 +88,18 @@ function userRoleLabel(role: string) {
   return role || "未知角色";
 }
 
+function participantIdentity(user: {
+  sub2api_username: string;
+  sub2api_email: string;
+  sub2api_user_id: number;
+}) {
+  return (
+    user.sub2api_username ||
+    user.sub2api_email ||
+    `账号 ${user.sub2api_user_id}`
+  );
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -132,11 +145,11 @@ function applySelectedUser() {
     (item) => item.id === form.sub2api_user_id,
   );
   if (!user) return;
-  form.sub2api_username =
-    user.username || user.email.split("@")[0] || `用户 ${user.id}`;
+  form.sub2api_username = user.username;
+  form.sub2api_email = user.email;
   if (editingId.value) return;
   if (!form.email) form.email = user.email;
-  if (!form.name) form.name = form.sub2api_username;
+  if (!form.name) form.name = user.username || user.email || `用户 ${user.id}`;
 }
 
 function openNew() {
@@ -148,6 +161,7 @@ function openNew() {
     email: "",
     sub2api_user_id: 0,
     sub2api_username: "",
+    sub2api_email: "",
     share_percent: participants.value.length ? 50 : 100,
     is_owner: participants.value.length === 0,
     enabled: true,
@@ -166,6 +180,7 @@ function openEdit(participant: Participant) {
     email: participant.email,
     sub2api_user_id: participant.sub2api_user_id,
     sub2api_username: participant.sub2api_username,
+    sub2api_email: participant.sub2api_email,
     share_percent: participant.share_percent,
     is_owner: participant.is_owner,
     enabled: participant.enabled,
@@ -257,34 +272,40 @@ onMounted(() => {
     class="stats col-span-12 stats-vertical bg-base-200 shadow-xs xl:stats-horizontal"
   >
     <div class="stat">
-      <div class="stat-figure">
-        <AppIcon name="users" class="size-7 opacity-40" />
+      <div class="flex h-full items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="stat-title">启用参与者</div>
+          <div class="stat-value text-xl font-semibold tabular-nums">
+            {{ enabledCount }}
+          </div>
+        </div>
+        <AppIcon name="users" class="size-7 shrink-0 opacity-40" />
       </div>
-      <div class="stat-title">启用参与者</div>
-      <div class="stat-value text-xl font-semibold tabular-nums">
-        {{ enabledCount }}
-      </div>
-      <div class="stat-desc">共 {{ participants.length }} 条记录</div>
     </div>
     <div class="stat">
-      <div class="stat-figure">
-        <AppIcon name="scale" class="size-7 opacity-40" />
+      <div class="flex h-full items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="stat-title">权益比例合计</div>
+          <div class="stat-value text-xl font-semibold tabular-nums">
+            {{ percent(shareTotal) }}
+          </div>
+        </div>
+        <AppIcon name="scale" class="size-7 shrink-0 opacity-40" />
       </div>
-      <div class="stat-title">权益比例合计</div>
-      <div class="stat-value text-xl font-semibold tabular-nums">
-        {{ percent(shareTotal) }}
-      </div>
-      <div class="stat-desc">启用记录不能超过 100%</div>
     </div>
     <div class="stat">
-      <div class="stat-figure">
-        <AppIcon name="clipboard-document-check" class="size-7 opacity-40" />
+      <div class="flex h-full items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="stat-title">建议调整</div>
+          <div class="stat-value text-xl font-semibold tabular-nums">
+            {{ updateCount }}
+          </div>
+        </div>
+        <AppIcon
+          name="clipboard-document-check"
+          class="size-7 shrink-0 opacity-40"
+        />
       </div>
-      <div class="stat-title">建议调整</div>
-      <div class="stat-value text-xl font-semibold tabular-nums">
-        {{ updateCount }}
-      </div>
-      <div class="stat-desc">需在 Sub2API 手动操作</div>
     </div>
   </section>
 
@@ -370,7 +391,7 @@ onMounted(() => {
                   <p class="mt-1 text-sm opacity-60">
                     {{ participant.email || "未填写邮箱" }} · Sub2API 账号
                     <span class="font-medium">{{
-                      participant.sub2api_username
+                      participant.sub2api_identity
                     }}</span>
                   </p>
                 </div>
@@ -616,9 +637,7 @@ onMounted(() => {
                   "
                   :value="form.sub2api_user_id"
                 >
-                  当前用户（{{
-                    form.sub2api_username || `ID ${form.sub2api_user_id}`
-                  }}）
+                  当前用户（{{ participantIdentity(form) }}）
                 </option>
                 <option
                   v-for="user in sub2apiUsers"

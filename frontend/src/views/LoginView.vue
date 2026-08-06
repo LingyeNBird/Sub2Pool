@@ -81,9 +81,6 @@ onMounted(checkLoginNetwork);
               Sub2API 拼车额度
             </div>
             <h1 class="card-title text-2xl">用户登录</h1>
-            <p class="mt-2 text-sm opacity-60">
-              登录后查看权限范围内的额度统计与管理功能。
-            </p>
           </div>
           <div v-if="message" class="alert alert-soft text-sm alert-error">
             <AppIcon name="exclamation-triangle" class="size-5" />

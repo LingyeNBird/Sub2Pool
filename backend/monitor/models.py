@@ -134,6 +134,8 @@ class Participant(models.Model):
     sub2api_user_id = models.BigIntegerField(unique=True)
     # Sub2API 用户名随参与者关系一起缓存，避免首页为了显示名称额外访问 Admin API。
     sub2api_username = models.CharField(max_length=150, blank=True)
+    # 邮箱与用户名来自同一次 Admin 用户列表读取；用户名为空时用邮箱展示账号身份。
+    sub2api_email = models.EmailField(blank=True)
     share_percent = models.DecimalField(max_digits=7, decimal_places=3, validators=PERCENT_VALIDATORS)
     is_owner = models.BooleanField(default=False)
     enabled = models.BooleanField(default=True)

@@ -19,6 +19,8 @@ export interface Participant {
   email: string;
   sub2api_user_id: number;
   sub2api_username: string;
+  sub2api_email: string;
+  sub2api_identity: string;
   share_percent: number;
   is_owner: boolean;
   enabled: boolean;
@@ -35,6 +37,18 @@ export interface Sub2APIUserOption {
   username: string;
   status: string;
   role: string;
+}
+
+export interface PaginationMeta {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+}
+
+export interface PaginatedData<T> {
+  items: T[];
+  pagination: PaginationMeta;
 }
 
 export interface SystemUser {
@@ -138,11 +152,36 @@ export interface LoginEventRecord {
   created_at: string;
 }
 
-export interface LoginEventData {
+export interface LoginEventData extends PaginatedData<LoginEventRecord> {
   success_count: number;
   failure_count: number;
   unique_request_ips: number;
-  items: LoginEventRecord[];
+}
+
+export interface ObservationListData extends PaginatedData<Observation> {
+  summary: {
+    total: number;
+    valid_count: number;
+    passive_count: number;
+  };
+}
+
+export interface SelectOption {
+  value: string;
+  label: string;
+}
+
+export interface NotificationListData extends PaginatedData<NotificationRecord> {
+  summary: {
+    total: number;
+    sent_count: number;
+    failed_count: number;
+  };
+  filter_options: {
+    types: SelectOption[];
+    participants: { id: number; name: string }[];
+    statuses: SelectOption[];
+  };
 }
 
 export type BlockedIPSource = "request" | "remote" | "webrtc";

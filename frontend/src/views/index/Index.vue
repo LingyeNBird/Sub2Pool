@@ -112,57 +112,60 @@ onMounted(load);
     class="stats col-span-12 stats-vertical bg-base-200 shadow-xs xl:stats-horizontal"
   >
     <div class="stat">
-      <div class="stat-figure">
-        <AppIcon name="gauge" class="size-7 opacity-40" />
-      </div>
-      <div class="stat-title">上游周限已用</div>
-      <div class="stat-value text-xl font-semibold tabular-nums">
-        {{ percent(data.cycle?.upstream_used_percent) }}
-      </div>
-      <div class="stat-desc">按 OpenAI 七天窗口</div>
-    </div>
-    <div class="stat">
-      <div class="stat-figure">
-        <AppIcon name="banknotes" class="size-7 opacity-40" />
-      </div>
-      <div class="stat-title">保守美元 / 1%</div>
-      <div class="flex items-baseline gap-2">
-        <div class="stat-value text-xl font-semibold tabular-nums">
-          {{ currency(data.cycle?.effective_usd_per_percent) }}
+      <div class="flex h-full items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="stat-title">上游周限已用</div>
+          <div class="stat-value text-xl font-semibold tabular-nums">
+            {{ percent(data.cycle?.upstream_used_percent) }}
+          </div>
         </div>
-        <button
-          v-if="data.cycle?.rate_calculated"
-          type="button"
-          class="cursor-pointer text-xs underline underline-offset-2 opacity-50"
-          @click="openRateBasis"
-        >
-          查看依据
-        </button>
-      </div>
-      <div class="stat-desc">
-        {{ data.cycle?.sample_note || "等待有效样本" }}
+        <AppIcon name="gauge" class="size-7 shrink-0 opacity-40" />
       </div>
     </div>
     <div class="stat">
-      <div class="stat-figure">
-        <AppIcon name="clipboard-document-check" class="size-7 opacity-40" />
+      <div class="flex h-full items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="stat-title">保守美元 / 1%</div>
+          <div class="flex items-baseline gap-2">
+            <div class="stat-value text-xl font-semibold tabular-nums">
+              {{ currency(data.cycle?.effective_usd_per_percent) }}
+            </div>
+            <button
+              v-if="data.cycle?.rate_calculated"
+              type="button"
+              class="cursor-pointer text-xs underline underline-offset-2 opacity-50"
+              @click="openRateBasis"
+            >
+              查看依据
+            </button>
+          </div>
+        </div>
+        <AppIcon name="banknotes" class="size-7 shrink-0 opacity-40" />
       </div>
-      <div class="stat-title">需要手动调整</div>
-      <div class="stat-value text-xl font-semibold tabular-nums">
-        {{ data.needs_manual_update_count }}
-      </div>
-      <div class="stat-desc">本服务不会自动修改额度</div>
     </div>
     <div class="stat">
-      <div class="stat-figure">
-        <AppIcon name="calendar-days" class="size-7 opacity-40" />
+      <div class="flex h-full items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="stat-title">需要手动调整</div>
+          <div class="stat-value text-xl font-semibold tabular-nums">
+            {{ data.needs_manual_update_count }}
+          </div>
+        </div>
+        <AppIcon
+          name="clipboard-document-check"
+          class="size-7 shrink-0 opacity-40"
+        />
       </div>
-      <div class="stat-title">上游重置时间</div>
-      <div class="stat-value text-lg font-semibold tabular-nums">
-        {{ dateTime(data.cycle?.resets_at) }}
-      </div>
-      <div class="stat-desc">
-        快照：{{ dateTime(data.cycle?.snapshot_sampled_at) }}
+    </div>
+    <div class="stat">
+      <div class="flex h-full items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="stat-title">上游重置时间</div>
+          <div class="stat-value text-lg font-semibold tabular-nums">
+            {{ dateTime(data.cycle?.resets_at) }}
+          </div>
+        </div>
+        <AppIcon name="calendar-days" class="size-7 shrink-0 opacity-40" />
       </div>
     </div>
   </section>
@@ -192,7 +195,7 @@ onMounted(load);
                 participant.name
               }}</strong>
               （Sub2API 账号
-              <span class="font-bold">{{ participant.sub2api_username }}</span
+              <span class="font-bold">{{ participant.sub2api_identity }}</span
               >），
               <template v-if="participant.snapshot">
                 建议把 Sub2API 用户余额设置为

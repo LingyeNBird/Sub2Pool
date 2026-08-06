@@ -482,7 +482,21 @@ onMounted(load);
           <AppIcon name="calculator" class="size-5" />分配模型
         </h2>
         <fieldset class="fieldset max-w-full min-w-0 grid-cols-[minmax(0,1fr)]">
-          <label class="label">成本口径</label>
+          <label class="label justify-start gap-1">
+            成本口径
+            <span
+              class="tooltip tooltip-right"
+              data-tip="实际扣费会应用 Sub2API 的计费倍率，并与用户余额真实扣减一致；标准计费只按模型标准单价计算。余额分配建议通常应选择实际扣费。"
+            >
+              <button
+                type="button"
+                class="btn btn-circle cursor-help btn-ghost btn-xs"
+                aria-label="查看成本口径说明"
+              >
+                ?
+              </button>
+            </span>
+          </label>
           <select
             v-model="settings.cost_basis"
             class="select w-full max-w-full min-w-0"
@@ -490,10 +504,6 @@ onMounted(load);
             <option value="actual">实际扣费（推荐）</option>
             <option value="standard">标准计费</option>
           </select>
-          <p class="label">
-            实际扣费会应用 Sub2API
-            的计费倍率，并与用户余额真实扣减一致；标准计费只按模型标准单价计算。余额分配建议通常应选择实际扣费。
-          </p>
         </fieldset>
         <div class="grid gap-3 md:grid-cols-2">
           <fieldset class="fieldset min-w-0">

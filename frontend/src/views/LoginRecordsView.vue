@@ -2,11 +2,13 @@
 import { onMounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import PaginationControls from "@/components/common/PaginationControls.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
 import type {
   BlockedIPAddress,
   BlockedIPSource,
   LoginEventData,
+  PaginationMeta,
 } from "@/types";
 
 interface PendingBlockAction {
@@ -26,6 +28,12 @@ const message = ref("");
 const notes = ref("");
 const pendingAction = ref<PendingBlockAction | null>(null);
 const blockDialog = ref<HTMLDialogElement | null>(null);
+const pagination = ref<PaginationMeta>({
+  page: 1,
+  page_size: 20,
+  total: 0,
+  total_pages: 1,
+});
 
 function dateTime(value: string) {
   return new Date(value).toLocaleString("zh-CN");
@@ -73,10 +81,13 @@ async function load() {
   message.value = "";
   try {
     const [events, blocks] = await Promise.all([
-      api<LoginEventData>("login-events?limit=200"),
+      api<LoginEventData>(
+        `login-events?page=${pagination.value.page}&page_size=${pagination.value.page_size}`,
+      ),
       api<BlockedIPAddress[]>("ip-blocks"),
     ]);
     data.value = events;
+    pagination.value = events.pagination;
     blockedAddresses.value = blocks;
   } catch (error) {
     message.value =
@@ -117,6 +128,11 @@ async function confirmBlockAction() {
   }
 }
 
+function changePage(page: number) {
+  pagination.value.page = page;
+  void load();
+}
+
 onMounted(load);
 </script>
 
@@ -144,34 +160,40 @@ onMounted(load);
     class="stats col-span-12 stats-vertical bg-base-200 shadow-xs xl:stats-horizontal"
   >
     <div class="stat">
-      <div class="stat-figure">
-        <AppIcon name="shield-check" class="size-7 opacity-40" />
+      <div class="flex h-full items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="stat-title">成功登录</div>
+          <div class="stat-value text-xl font-semibold tabular-nums">
+            {{ data?.success_count ?? 0 }}
+          </div>
+          <div class="stat-desc">包含管理员和普通用户登录</div>
+        </div>
+        <AppIcon name="shield-check" class="size-7 shrink-0 opacity-40" />
       </div>
-      <div class="stat-title">成功登录</div>
-      <div class="stat-value text-xl font-semibold tabular-nums">
-        {{ data?.success_count ?? 0 }}
-      </div>
-      <div class="stat-desc">包含管理员和普通用户登录</div>
     </div>
     <div class="stat">
-      <div class="stat-figure">
-        <AppIcon name="shield-exclamation" class="size-7 opacity-40" />
+      <div class="flex h-full items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="stat-title">失败尝试</div>
+          <div class="stat-value text-xl font-semibold tabular-nums">
+            {{ data?.failure_count ?? 0 }}
+          </div>
+          <div class="stat-desc">密码错误、无权限或被限流</div>
+        </div>
+        <AppIcon name="shield-exclamation" class="size-7 shrink-0 opacity-40" />
       </div>
-      <div class="stat-title">失败尝试</div>
-      <div class="stat-value text-xl font-semibold tabular-nums">
-        {{ data?.failure_count ?? 0 }}
-      </div>
-      <div class="stat-desc">密码错误、无权限或被限流</div>
     </div>
     <div class="stat">
-      <div class="stat-figure">
-        <AppIcon name="globe-alt" class="size-7 opacity-40" />
+      <div class="flex h-full items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="stat-title">服务端来源 IP</div>
+          <div class="stat-value text-xl font-semibold tabular-nums">
+            {{ data?.unique_request_ips ?? 0 }}
+          </div>
+          <div class="stat-desc">按可信代理配置解析</div>
+        </div>
+        <AppIcon name="globe-alt" class="size-7 shrink-0 opacity-40" />
       </div>
-      <div class="stat-title">服务端来源 IP</div>
-      <div class="stat-value text-xl font-semibold tabular-nums">
-        {{ data?.unique_request_ips ?? 0 }}
-      </div>
-      <div class="stat-desc">按可信代理配置解析</div>
     </div>
   </section>
 
@@ -352,6 +374,13 @@ onMounted(load);
           </tbody>
         </table>
       </div>
+      <PaginationControls
+        v-if="!loading"
+        :page="pagination.page"
+        :total-pages="pagination.total_pages"
+        :total="pagination.total"
+        @change="changePage"
+      />
     </div>
   </section>
   <dialog ref="blockDialog" class="modal">

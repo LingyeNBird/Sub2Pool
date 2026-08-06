@@ -95,10 +95,19 @@ onMounted(load);
               name="presentation-chart-line"
               class="size-5"
             />周限等效额度估算
+            <span
+              class="tooltip tooltip-right"
+              data-tip="本周期估算使用官方七天周期累计用量；今日估算只使用今天已覆盖观测区间的增量。"
+            >
+              <button
+                type="button"
+                class="btn btn-circle cursor-help btn-ghost btn-xs"
+                aria-label="查看周限等效额度估算说明"
+              >
+                ?
+              </button>
+            </span>
           </h2>
-          <p class="mt-1 text-sm opacity-60">
-            本周期估算使用官方七天周期累计用量；今日估算只使用今天已覆盖观测区间的增量。
-          </p>
         </div>
         <div class="flex flex-wrap gap-2">
           <fieldset class="fieldset">
@@ -220,12 +229,19 @@ onMounted(load);
         <div>
           <h2 class="card-title">
             <AppIcon name="chart-bar" class="size-5" />参与者账号用量
+            <span
+              class="tooltip tooltip-right"
+              :data-tip="`展示 Sub2API 用量日志中按所选 OpenAI 上游账号和参与者聚合的本周期累计用量。后台当前每 ${data?.sample_interval_minutes ?? '—'} 分钟探测一次。`"
+            >
+              <button
+                type="button"
+                class="btn btn-circle cursor-help btn-ghost btn-xs"
+                aria-label="查看参与者账号用量说明"
+              >
+                ?
+              </button>
+            </span>
           </h2>
-          <p class="mt-1 text-sm opacity-60">
-            展示 Sub2API 用量日志中按所选 OpenAI
-            上游账号和参与者聚合的本周期累计用量。后台当前每
-            {{ data?.sample_interval_minutes ?? "—" }} 分钟探测一次。
-          </p>
         </div>
         <div class="flex flex-wrap gap-2">
           <fieldset class="fieldset">

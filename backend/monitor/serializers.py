@@ -107,6 +107,7 @@ class ParticipantWriteSerializer(serializers.ModelSerializer):
             "email",
             "sub2api_user_id",
             "sub2api_username",
+            "sub2api_email",
             "share_percent",
             "is_owner",
             "enabled",
