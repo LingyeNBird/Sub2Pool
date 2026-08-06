@@ -88,7 +88,7 @@ onMounted(load);
 
   <section class="card col-span-12 bg-base-200 shadow-xs">
     <div class="card-body gap-5">
-      <div class="flex flex-wrap items-end justify-between gap-3">
+      <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 class="card-title">
             <AppIcon
@@ -225,7 +225,7 @@ onMounted(load);
 
   <section class="card col-span-12 bg-base-200 shadow-xs">
     <div class="card-body gap-5">
-      <div class="flex flex-wrap items-end justify-between gap-3">
+      <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 class="card-title">
             <AppIcon name="chart-bar" class="size-5" />参与者账号用量

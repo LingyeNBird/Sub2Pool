@@ -18,7 +18,7 @@ withDefaults(
 <template>
   <div class="mt-5 overflow-x-auto pb-1">
     <ul class="timeline timeline-horizontal w-full min-w-120">
-      <li class="min-w-0 flex-1">
+      <li class="min-w-0 flex-1 [--timeline-row-end:0]">
         <div class="timeline-start w-full max-w-64 timeline-box text-left">
           <div class="text-xs opacity-60">{{ startLabel }}</div>
           <div class="mt-1 font-semibold">{{ startTime }}</div>
@@ -31,7 +31,7 @@ withDefaults(
         </div>
         <hr class="bg-primary" />
       </li>
-      <li class="min-w-0 flex-1">
+      <li class="min-w-0 flex-1 [--timeline-row-end:0]">
         <hr class="bg-primary" />
         <div class="timeline-middle">
           <span

@@ -315,7 +315,7 @@ onUnmounted(() => window.clearInterval(clockTimer));
                 <th>
                   <button
                     type="button"
-                    class="btn h-auto min-h-0 btn-ghost p-0 btn-xs"
+                    class="btn h-auto min-h-0 btn-ghost p-0 text-sm"
                     @click="openFilter('time')"
                   >
                     观测时间
@@ -327,7 +327,7 @@ onUnmounted(() => window.clearInterval(clockTimer));
                 <th>
                   <button
                     type="button"
-                    class="btn h-auto min-h-0 btn-ghost p-0 btn-xs"
+                    class="btn h-auto min-h-0 btn-ghost p-0 text-sm"
                     @click="openFilter('source')"
                   >
                     来源
@@ -337,7 +337,7 @@ onUnmounted(() => window.clearInterval(clockTimer));
                 <th>
                   <button
                     type="button"
-                    class="btn h-auto min-h-0 btn-ghost p-0 btn-xs"
+                    class="btn h-auto min-h-0 btn-ghost p-0 text-sm"
                     @click="openFilter('query')"
                   >
                     查询方式

@@ -620,13 +620,13 @@ onMounted(() => {
           <label class="label">邮箱（备注用）</label>
           <input v-model="form.email" type="email" class="input w-full" />
         </fieldset>
-        <div class="grid gap-3 md:grid-cols-2">
-          <fieldset class="fieldset">
+        <div class="grid gap-3">
+          <fieldset class="fieldset min-w-0">
             <label class="label">Sub2API 用户</label>
-            <div class="join w-full">
+            <div class="grid min-w-0 gap-2 overflow-hidden">
               <select
                 v-model.number="form.sub2api_user_id"
-                class="select join-item grow"
+                class="select w-full min-w-0 truncate"
                 required
                 @change="applySelectedUser"
               >
@@ -651,7 +651,7 @@ onMounted(() => {
               </select>
               <button
                 type="button"
-                class="btn join-item"
+                class="btn justify-self-end btn-sm"
                 :disabled="loadingUsers"
                 @click="loadSub2APIUsers()"
               >

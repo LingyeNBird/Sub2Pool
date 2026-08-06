@@ -206,7 +206,7 @@ onMounted(load);
                 <th>
                   <button
                     type="button"
-                    class="btn h-auto min-h-0 btn-ghost p-0 btn-xs"
+                    class="btn h-auto min-h-0 btn-ghost p-0 text-sm"
                     @click="openFilter('time')"
                   >
                     时间
@@ -218,7 +218,7 @@ onMounted(load);
                 <th>
                   <button
                     type="button"
-                    class="btn h-auto min-h-0 btn-ghost p-0 btn-xs"
+                    class="btn h-auto min-h-0 btn-ghost p-0 text-sm"
                     @click="openFilter('type')"
                   >
                     类型
@@ -230,7 +230,7 @@ onMounted(load);
                 <th>
                   <button
                     type="button"
-                    class="btn h-auto min-h-0 btn-ghost p-0 btn-xs"
+                    class="btn h-auto min-h-0 btn-ghost p-0 text-sm"
                     @click="openFilter('participant')"
                   >
                     参与者
@@ -242,7 +242,7 @@ onMounted(load);
                 <th>
                   <button
                     type="button"
-                    class="btn h-auto min-h-0 btn-ghost p-0 btn-xs"
+                    class="btn h-auto min-h-0 btn-ghost p-0 text-sm"
                     @click="openFilter('subject')"
                   >
                     主题
@@ -253,7 +253,7 @@ onMounted(load);
                 <th>
                   <button
                     type="button"
-                    class="btn h-auto min-h-0 btn-ghost p-0 btn-xs"
+                    class="btn h-auto min-h-0 btn-ghost p-0 text-sm"
                     @click="openFilter('status')"
                   >
                     状态
