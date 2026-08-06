@@ -21,7 +21,7 @@ from .models import (
     QuotaCycle,
 )
 from .notifications import notify_collection_error, send_notification
-from .sub2api import PlatformQuota, Sub2APIClient, Sub2APIError, UsageStats, WeeklyWindow
+from .sub2api import OPENAI_PLATFORM, PlatformQuota, Sub2APIClient, Sub2APIError, UsageStats, WeeklyWindow
 
 ZERO = Decimal("0")
 CENT = Decimal("0.01")
@@ -95,7 +95,7 @@ def _fetch_local(
             end_date=end_date,
             timezone_name=config.timezone,
         )
-        quota = client.platform_quota(participant.sub2api_user_id, config.quota_platform)
+        quota = client.platform_quota(participant.sub2api_user_id, OPENAI_PLATFORM)
         rows.append(LocalParticipantData(participant=participant, stats=stats, quota=quota))
 
     # 展示字段更新不参与账本计算；即使本次没有访问上游，首页也能看到较新的本地限额状态。

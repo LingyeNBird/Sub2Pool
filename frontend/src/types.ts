@@ -139,12 +139,19 @@ export interface StatisticsData {
   participant_series: ParticipantUsageSeries[];
 }
 
+export interface OpenAIAccountOption {
+  id: number;
+  name: string;
+  type: string;
+  status: string;
+  schedulable: boolean;
+}
+
 export interface AppSettingsData {
   [key: string]: string | number | boolean | null;
   monitoring_enabled: boolean;
   sub2api_base_url: string;
   openai_account_id: number | null;
-  quota_platform: string;
   quota_query_mode: string;
   request_timeout_seconds: number;
   verify_tls: boolean;

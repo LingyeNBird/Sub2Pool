@@ -90,6 +90,82 @@ def test_passive_quota_reads_account_snapshot_without_official_quota_endpoint():
 
 
 @pytest.mark.django_db
+def test_openai_account_discovery_uses_filtered_paginated_admin_api():
+    config = AppSettings.load()
+    config.sub2api_base_url = "https://sub2api.example/"
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.save()
+    requested_pages: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/admin/accounts"
+        assert request.url.params["platform"] == "openai"
+        assert request.url.params["lite"] == "true"
+        assert request.headers["x-api-key"] == "admin-secret"
+        page = int(request.url.params["page"])
+        requested_pages.append(page)
+        item = (
+            {
+                "id": 41,
+                "name": "GPT Pro 主账号",
+                "platform": "openai",
+                "type": "oauth",
+                "status": "active",
+                "schedulable": True,
+            }
+            if page == 1
+            else {
+                "id": 42,
+                "name": "备用账号",
+                "platform": "openai",
+                "type": "oauth",
+                "status": "disabled",
+                "schedulable": False,
+            }
+        )
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "message": "success",
+                "data": {
+                    "items": [item],
+                    "total": 2,
+                    "page": page,
+                    "page_size": 1,
+                    "pages": 2,
+                },
+            },
+        )
+
+    with Sub2APIClient(config) as client:
+        client.client.close()
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"x-api-key": "admin-secret"},
+        )
+        accounts = client.list_openai_accounts()
+
+    assert requested_pages == [1, 2]
+    assert accounts == [
+        {
+            "id": 41,
+            "name": "GPT Pro 主账号",
+            "type": "oauth",
+            "status": "active",
+            "schedulable": True,
+        },
+        {
+            "id": 42,
+            "name": "备用账号",
+            "type": "oauth",
+            "status": "disabled",
+            "schedulable": False,
+        },
+    ]
+
+
+@pytest.mark.django_db
 def test_initial_observation_conserves_percent_and_builds_manual_recommendations(monkeypatch):
     config = AppSettings.load()
     config.openai_account_id = 7
@@ -251,6 +327,125 @@ def test_settings_round_trip_accepts_internal_docker_url_and_decimal_values():
     assert config.sub2api_base_url == "http://host.docker.internal:8080"
     assert config.safety_factor == Decimal("0.95")
     assert config.local_poll_minutes == 11
+
+
+@pytest.mark.django_db
+def test_account_discovery_uses_unsaved_address_and_token(monkeypatch):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, config, **overrides):
+            captured["saved_url"] = config.sub2api_base_url
+            captured.update(overrides)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def list_openai_accounts(self):
+            return [
+                {
+                    "id": 88,
+                    "name": "测试账号",
+                    "type": "oauth",
+                    "status": "active",
+                    "schedulable": True,
+                }
+            ]
+
+    monkeypatch.setattr("monitor.views.settings.Sub2APIClient", FakeClient)
+    response = client.post(
+        "/api/settings/openai-accounts",
+        data=json.dumps(
+            {
+                "sub2api_base_url": "http://unsaved-sub2api:8088",
+                "sub2api_admin_token": "unsaved-admin-token",
+                "request_timeout_seconds": 37,
+                "verify_tls": False,
+            }
+        ),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"][0]["id"] == 88
+    assert captured == {
+        "saved_url": "http://host.docker.internal:8080",
+        "base_url": "http://unsaved-sub2api:8088",
+        "admin_token": "unsaved-admin-token",
+        "request_timeout_seconds": 37,
+        "verify_tls": False,
+    }
+    config = AppSettings.load()
+    assert config.sub2api_base_url == "http://host.docker.internal:8080"
+    assert config.sub2api_admin_token_encrypted == ""
+
+
+@pytest.mark.django_db
+def test_connection_test_uses_unsaved_form_without_persisting(monkeypatch):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, _config, **overrides):
+            captured.update(overrides)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def test_connection(self, account_id, mode):
+            captured["account_id"] = account_id
+            captured["mode"] = mode
+            return {"users_api": "ok", "quota_api": "ok"}
+
+    monkeypatch.setattr("monitor.views.settings.Sub2APIClient", FakeClient)
+    response = client.post(
+        "/api/settings/test-sub2api",
+        data=json.dumps(
+            {
+                "sub2api_base_url": "https://new-sub2api.example",
+                "sub2api_admin_token": "new-admin-token",
+                "openai_account_id": 91,
+                "quota_query_mode": "direct",
+                "request_timeout_seconds": 25,
+                "verify_tls": True,
+            }
+        ),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "base_url": "https://new-sub2api.example",
+        "admin_token": "new-admin-token",
+        "request_timeout_seconds": 25,
+        "verify_tls": True,
+        "account_id": 91,
+        "mode": "direct",
+    }
+    config = AppSettings.load()
+    assert config.openai_account_id is None
+    assert config.quota_query_mode == "passive"
 
 
 def test_django_serves_vue_entry_for_root_and_history_routes():

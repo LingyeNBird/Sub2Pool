@@ -10,7 +10,12 @@ from .views.records import (
     NotificationListView,
     ObservationListView,
 )
-from .views.settings import SettingsView, TestEmailView, TestSub2APIView
+from .views.settings import (
+    OpenAIAccountListView,
+    SettingsView,
+    TestEmailView,
+    TestSub2APIView,
+)
 from .views.statistics import StatisticsView
 
 urlpatterns = [
@@ -29,6 +34,7 @@ urlpatterns = [
     path("observations", ObservationListView.as_view()),
     path("notifications", NotificationListView.as_view()),
     path("settings", SettingsView.as_view()),
+    path("settings/openai-accounts", OpenAIAccountListView.as_view()),
     path("settings/test-sub2api", TestSub2APIView.as_view()),
     path("settings/test-email", TestEmailView.as_view()),
     path("monitor/run", RunMonitorView.as_view()),

@@ -3,7 +3,7 @@ import { onMounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api, jsonBody, setAccessToken } from "@/services/api";
-import type { AppSettingsData } from "@/types";
+import type { AppSettingsData, OpenAIAccountOption } from "@/types";
 
 const settings = ref<AppSettingsData | null>(null);
 const loading = ref(true);
@@ -14,16 +14,63 @@ const success = ref("");
 const adminToken = ref("");
 const smtpPassword = ref("");
 const resendApiKey = ref("");
+const openAIAccounts = ref<OpenAIAccountOption[]>([]);
+const loadingAccounts = ref(false);
 const passwordForm = reactive({
   old_password: "",
   new_password: "",
   confirm_password: "",
 });
 
+function connectionPayload() {
+  if (!settings.value) return {};
+  return {
+    sub2api_base_url: settings.value.sub2api_base_url,
+    sub2api_admin_token: adminToken.value,
+    openai_account_id: settings.value.openai_account_id,
+    quota_query_mode: settings.value.quota_query_mode,
+    request_timeout_seconds: settings.value.request_timeout_seconds,
+    verify_tls: settings.value.verify_tls,
+  };
+}
+
+function hasAccountOption(accountId: number | null) {
+  return openAIAccounts.value.some((account) => account.id === accountId);
+}
+
+async function loadOpenAIAccounts(announce = true) {
+  if (!settings.value) return;
+  loadingAccounts.value = true;
+  if (announce) {
+    message.value = "";
+    success.value = "";
+  }
+  try {
+    openAIAccounts.value = await api<OpenAIAccountOption[]>(
+      "settings/openai-accounts",
+      {
+        method: "POST",
+        body: jsonBody(connectionPayload()),
+      },
+    );
+    if (announce) {
+      success.value = `已读取 ${openAIAccounts.value.length} 个 OpenAI 账号`;
+    }
+  } catch (error) {
+    message.value =
+      error instanceof ApiError ? error.message : "读取 OpenAI 账号失败";
+  } finally {
+    loadingAccounts.value = false;
+  }
+}
+
 async function load() {
   loading.value = true;
   try {
     settings.value = await api<AppSettingsData>("settings");
+    if (settings.value.sub2api_token_configured) {
+      await loadOpenAIAccounts(false);
+    }
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "加载设置失败";
   } finally {
@@ -62,7 +109,10 @@ async function test(kind: "sub2api" | "email") {
   message.value = "";
   success.value = "";
   try {
-    await api(`settings/test-${kind}`, { method: "POST" });
+    await api(`settings/test-${kind}`, {
+      method: "POST",
+      body: kind === "sub2api" ? jsonBody(connectionPayload()) : undefined,
+    });
     success.value =
       kind === "sub2api" ? "Sub2API 连接与额度读取正常" : "测试邮件已发送";
   } catch (error) {
@@ -164,21 +214,48 @@ onMounted(load);
             "
           />
         </fieldset>
-        <div class="grid gap-3 md:grid-cols-2">
-          <fieldset class="fieldset">
-            <label class="label">OpenAI 账号 ID</label>
-            <input
+        <fieldset class="fieldset">
+          <label class="label">OpenAI 上游账号</label>
+          <div class="join w-full">
+            <select
               v-model.number="settings.openai_account_id"
-              type="number"
-              min="1"
-              class="input w-full"
-            />
-          </fieldset>
-          <fieldset class="fieldset">
-            <label class="label">平台额度名称</label>
-            <input v-model="settings.quota_platform" class="input w-full" />
-          </fieldset>
-        </div>
+              class="select join-item grow"
+            >
+              <option :value="null">请选择 OpenAI 账号</option>
+              <option
+                v-if="
+                  settings.openai_account_id &&
+                  !hasAccountOption(settings.openai_account_id)
+                "
+                :value="settings.openai_account_id"
+              >
+                当前已保存账号（ID {{ settings.openai_account_id }}）
+              </option>
+              <option
+                v-for="account in openAIAccounts"
+                :key="account.id"
+                :value="account.id"
+              >
+                {{ account.name }}（ID {{ account.id }} ·
+                {{ account.status || "未知状态"
+                }}{{ account.schedulable ? "" : " · 不可调度" }}）
+              </option>
+            </select>
+            <button
+              class="btn join-item"
+              :disabled="loadingAccounts"
+              @click="loadOpenAIAccounts()"
+            >
+              <span
+                v-if="loadingAccounts"
+                class="loading loading-xs loading-spinner"
+              ></span>
+              <AppIcon v-else name="arrow-path" class="size-4" />
+              读取账号
+            </button>
+          </div>
+          <p class="label">使用当前填写的地址和 Token 读取，不必先保存设置。</p>
+        </fieldset>
         <fieldset class="fieldset">
           <label class="label">额度百分比查询方式</label>
           <select v-model="settings.quota_query_mode" class="select w-full">

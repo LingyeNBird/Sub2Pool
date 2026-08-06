@@ -11,7 +11,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import AppSettings, Participant
+from .models import AppSettings, Participant, validate_service_url
 from .secrets import encrypt_secret
 
 
@@ -24,6 +24,36 @@ class LoginSerializer(serializers.Serializer):
 class PasswordChangeSerializer(serializers.Serializer):
     old_password = serializers.CharField(trim_whitespace=False, write_only=True)
     new_password = serializers.CharField(trim_whitespace=False, write_only=True)
+
+class Sub2APIConnectionSerializer(serializers.Serializer):
+    """设置页临时连接参数；校验后仅用于本次请求，不会写入数据库。"""
+
+    sub2api_base_url = serializers.CharField(
+        required=False,
+        max_length=500,
+        validators=[validate_service_url],
+    )
+    sub2api_admin_token = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+        write_only=True,
+    )
+    openai_account_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        min_value=1,
+    )
+    quota_query_mode = serializers.ChoiceField(
+        required=False,
+        choices=("passive", "direct"),
+    )
+    request_timeout_seconds = serializers.IntegerField(
+        required=False,
+        min_value=1,
+    )
+    verify_tls = serializers.BooleanField(required=False)
+
 
 
 class ParticipantWriteSerializer(serializers.ModelSerializer):
@@ -68,7 +98,6 @@ SETTINGS_FIELDS = (
     "monitoring_enabled",
     "sub2api_base_url",
     "openai_account_id",
-    "quota_platform",
     "quota_query_mode",
     "request_timeout_seconds",
     "verify_tls",

@@ -36,7 +36,6 @@ class AppSettings(models.Model):
     )
     sub2api_admin_token_encrypted = models.TextField(blank=True)
     openai_account_id = models.BigIntegerField(null=True, blank=True)
-    quota_platform = models.CharField(max_length=32, default="openai")
     quota_query_mode = models.CharField(
         max_length=16,
         choices=(("passive", "仅读取 Sub2API 被动快照"), ("direct", "调用上游账号额度接口")),

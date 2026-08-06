@@ -13,6 +13,8 @@ import httpx
 from .models import AppSettings
 from .secrets import decrypt_secret
 
+OPENAI_PLATFORM = "openai"
+
 
 class Sub2APIError(RuntimeError):
     """对用户可展示、且不包含 Admin Token 的上游错误。"""
@@ -53,15 +55,24 @@ def _decimal(value: Any, field: str) -> Decimal:
 
 
 class Sub2APIClient:
-    def __init__(self, config: AppSettings):
-        token = decrypt_secret(config.sub2api_admin_token_encrypted)
+    def __init__(
+        self,
+        config: AppSettings,
+        *,
+        base_url: str | None = None,
+        admin_token: str | None = None,
+        request_timeout_seconds: int | None = None,
+        verify_tls: bool | None = None,
+    ):
+        # 设置页允许用尚未保存的地址和 Token 发起测试；空 Token 则安全地回退到已保存密文。
+        token = admin_token or decrypt_secret(config.sub2api_admin_token_encrypted)
         if not token:
             raise Sub2APIError("尚未配置 Sub2API Admin Token")
-        self.base_url = config.sub2api_base_url.rstrip("/") + "/"
+        self.base_url = (base_url or config.sub2api_base_url).rstrip("/") + "/"
         self.client = httpx.Client(
             headers={"x-api-key": token, "Accept": "application/json"},
-            timeout=config.request_timeout_seconds,
-            verify=config.verify_tls,
+            timeout=request_timeout_seconds or config.request_timeout_seconds,
+            verify=config.verify_tls if verify_tls is None else verify_tls,
             follow_redirects=False,
         )
 
@@ -93,6 +104,55 @@ class Sub2APIClient:
             message = payload.get("message", "未知错误") if isinstance(payload, dict) else "响应结构错误"
             raise Sub2APIError(f"Sub2API 请求失败：{message}")
         return payload.get("data")
+
+    def list_openai_accounts(self) -> list[dict[str, Any]]:
+        """分页读取 Sub2API 中的 OpenAI 上游账号，只返回下拉框所需的非敏感字段。"""
+        accounts: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            data = self._get(
+                "api/v1/admin/accounts",
+                params={
+                    "page": page,
+                    "page_size": 100,
+                    "platform": OPENAI_PLATFORM,
+                    "sort_by": "name",
+                    "sort_order": "asc",
+                    "lite": "true",
+                },
+            )
+            if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+                raise Sub2APIError("OpenAI 账号列表响应结构错误")
+
+            for raw in data["items"]:
+                if not isinstance(raw, dict) or raw.get("platform") != OPENAI_PLATFORM:
+                    continue
+                try:
+                    account_id = int(raw.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                if account_id <= 0:
+                    continue
+                accounts.append(
+                    {
+                        "id": account_id,
+                        "name": str(raw.get("name") or f"OpenAI 账号 {account_id}"),
+                        "type": str(raw.get("type") or ""),
+                        "status": str(raw.get("status") or ""),
+                        "schedulable": bool(raw.get("schedulable")),
+                    }
+                )
+
+            try:
+                pages = max(1, int(data.get("pages") or 1))
+            except (TypeError, ValueError):
+                raise Sub2APIError("OpenAI 账号列表分页字段无效")
+            if page >= pages:
+                break
+            page += 1
+            if page > 100:
+                raise Sub2APIError("OpenAI 账号数量异常，已停止读取")
+        return accounts
 
     def query_weekly_window(self, account_id: int, mode: str = "passive") -> WeeklyWindow:
         """读取七天窗口。
