@@ -108,9 +108,23 @@ docker compose up -d --build
 GitHub Actions 工作流采用“自动发布为主、手动触发兜底”的方式：
 
 - Pull Request：运行后端测试、前端检查和多架构 Docker 构建，但不推送镜像。
-- 推送到 `main`：验证通过后自动发布 `latest` 和 `sha-<commit>`。
+- 推送到 `main`：验证通过后自动发布 `latest`、上海时区的 `YYYYMMDD-HHmm` 时间标签和 `sha-<commit>`。
 - 推送 `v*` Git 标签：发布语义化版本标签，例如 `1.2.0`、`1.2` 和 `latest`。
 - `workflow_dispatch`：可在 GitHub Actions 页面手动重新构建和发布。
+
+例如 2026 年 8 月 6 日 19:05 发布的镜像会同时获得：
+
+```text
+latest
+20260806-1905
+sha-51984cb
+```
+
+日常回退可以直接把 Compose 中的镜像改成时间标签；若同一分钟内连续发布，则使用不会冲突的 `sha-<commit>` 精确定位：
+
+```yaml
+image: ghcr.io/lingyenbird/sub2pool:20260806-1905
+```
 
 镜像同时支持 `linux/amd64` 和 `linux/arm64`，并附带 SBOM 与构建来源证明。
 
