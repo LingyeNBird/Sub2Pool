@@ -1,0 +1,141 @@
+<script setup lang="ts">
+import PageShellHeader from "@/components/common/PageShellHeader.vue";
+
+const steps = [
+  {
+    title: "连接 Sub2API",
+    icon: "code-bracket",
+    text: "进入系统设置，填写容器可访问的 Sub2API 地址、Admin Token 和实际承载套餐的 OpenAI 上游账号 ID。保持默认“被动查询”即可避免为了查额度而额外请求 OpenAI 官方接口。",
+  },
+  {
+    title: "添加拼车参与者",
+    icon: "user-group",
+    text: "进入参与者页面，为自己和车友分别填写 Sub2API 用户 ID 与周限权益比例。所有启用参与者的比例合计不能超过 100%。",
+  },
+  {
+    title: "完成首次测算",
+    icon: "calculator",
+    text: "先让上游账号产生一次正常业务请求，使 Sub2API 保存七天额度快照，然后在首页点击“立即测算”。首次测算会根据累计用量初始化百分比账本。",
+  },
+  {
+    title: "按建议手动调整额度",
+    icon: "clipboard-document-check",
+    text: "首页会用自然语言说明每个 Sub2API 账号应设置的周限额。核对用量、剩余权益和原因后，到 Sub2API 管理台手动修改；本服务绝不会自动修改额度。",
+  },
+  {
+    title: "查看趋势和安全记录",
+    icon: "presentation-chart-line",
+    text: "额度统计页面可按天、按月查看估算的上游周限总额度，并查看每位参与者的周用量曲线。登录记录页面用于发现陌生 IP 和失败登录。",
+  },
+];
+</script>
+
+<template>
+  <PageShellHeader>
+    <div class="grow">
+      <div class="breadcrumbs text-sm">
+        <ul>
+          <li><RouterLink to="/">帮助</RouterLink></li>
+          <li><h1>使用教程</h1></li>
+        </ul>
+      </div>
+    </div>
+    <RouterLink to="/settings" class="btn btn-primary btn-sm">
+      <AppIcon name="cog-6-tooth" class="size-4" />开始配置
+    </RouterLink>
+  </PageShellHeader>
+
+  <section class="card col-span-12 bg-base-200 shadow-xs">
+    <div class="card-body gap-5">
+      <div>
+        <h2 class="card-title">
+          <AppIcon name="book-open" class="size-5" />从零开始
+        </h2>
+        <p class="mt-2 max-w-3xl text-sm leading-6 opacity-70">
+          这个服务负责读取 Sub2API
+          数据、维护百分比权益账本、计算人工额度建议并发送提醒；实际额度修改始终由管理员在
+          Sub2API 中完成。
+        </p>
+      </div>
+      <ol class="grid gap-4 lg:grid-cols-2">
+        <li
+          v-for="(step, index) in steps"
+          :key="step.title"
+          class="rounded-box border border-base-300 bg-base-100 p-5"
+        >
+          <div class="flex items-center gap-3">
+            <span class="badge badge-neutral">{{ index + 1 }}</span>
+            <AppIcon :name="step.icon" class="size-5 opacity-60" />
+            <h3 class="font-semibold">{{ step.title }}</h3>
+          </div>
+          <p class="mt-3 text-sm leading-6 opacity-70">{{ step.text }}</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+    <div class="card-body gap-3">
+      <h2 class="card-title">
+        <AppIcon name="clock" class="size-5" />采集与校准
+      </h2>
+      <p class="text-sm leading-6 opacity-70">
+        “本地探测间隔”控制读取 Sub2API
+        本地统计的频率。只有成本进度达到阈值、参与者额度接近耗尽、活跃时间过长、临近重置或手动测算时，系统才读取新的上游百分比快照。
+      </p>
+      <p class="text-sm leading-6 opacity-70">
+        图表的“每次探测／每小时／每天”只改变展示精度，不会提高实际请求频率。
+      </p>
+    </div>
+  </section>
+
+  <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+    <div class="card-body gap-3">
+      <h2 class="card-title">
+        <AppIcon name="envelope" class="size-5" />邮件提醒
+      </h2>
+      <p class="text-sm leading-6 opacity-70">
+        系统设置支持传统 SMTP 和
+        Resend。选择一种服务，填写发件人与接收邮箱并发送测试邮件。额度耗尽、估算变化和采集失败可分别控制是否通知。
+      </p>
+      <p class="text-sm leading-6 opacity-70">
+        Resend 需要已验证的发件域名；API Key 和 SMTP 密码都会加密保存。
+      </p>
+    </div>
+  </section>
+
+  <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+    <div class="card-body gap-3">
+      <h2 class="card-title">
+        <AppIcon name="finger-print" class="size-5" />登录安全
+      </h2>
+      <p class="text-sm leading-6 opacity-70">
+        每次成功和失败登录都会记录时间、用户名、服务端来源
+        IP、直连地址、浏览器信息和可用的 WebRTC IP。WebRTC
+        数据来自浏览器，可能被隐藏或伪造，不能代替服务端来源 IP。
+      </p>
+      <p class="text-sm leading-6 opacity-70">
+        如果前面有反向代理，只能通过 Docker 环境变量 TRUSTED_PROXY_COUNT
+        配置实际可信代理层数，不能直接信任任意客户端发送的代理头。
+      </p>
+    </div>
+  </section>
+
+  <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+    <div class="card-body gap-3">
+      <h2 class="card-title">
+        <AppIcon name="exclamation-triangle" class="size-5" />常见问题
+      </h2>
+      <ul class="list-disc space-y-2 pl-5 text-sm leading-6 opacity-70">
+        <li>提示没有被动快照：先通过该 OpenAI 上游账号产生一次正常请求。</li>
+        <li>统计图为空：新部署不会反推历史，需要等待本地探测和有效测算。</li>
+        <li>
+          建议金额变化：周限每 1% 对应的美元价值会浮动，这是系统持续校准的核心。
+        </li>
+        <li>
+          邮件测试失败：检查服务类型、发件人验证状态、密钥、端口和加密方式。
+        </li>
+      </ul>
+    </div>
+  </section>
+</template>

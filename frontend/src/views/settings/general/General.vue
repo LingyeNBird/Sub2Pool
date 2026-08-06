@@ -13,6 +13,7 @@ const message = ref("");
 const success = ref("");
 const adminToken = ref("");
 const smtpPassword = ref("");
+const resendApiKey = ref("");
 const passwordForm = reactive({
   old_password: "",
   new_password: "",
@@ -42,10 +43,12 @@ async function save() {
         ...settings.value,
         sub2api_admin_token: adminToken.value,
         smtp_password: smtpPassword.value,
+        resend_api_key: resendApiKey.value,
       }),
     });
     adminToken.value = "";
     smtpPassword.value = "";
+    resendApiKey.value = "";
     success.value = "设置已保存";
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "保存设置失败";
@@ -380,70 +383,116 @@ onMounted(load);
     <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
       <div class="card-body">
         <h2 class="card-title">
-          <AppIcon name="envelope" class="size-5" />SMTP 邮件
+          <AppIcon name="envelope" class="size-5" />邮件服务
         </h2>
-        <div class="grid gap-3 md:grid-cols-2">
+        <fieldset class="fieldset">
+          <label class="label">发送方式</label>
+          <select v-model="settings.email_provider" class="select w-full">
+            <option value="smtp">SMTP</option>
+            <option value="resend">Resend API</option>
+          </select>
+        </fieldset>
+        <fieldset class="fieldset">
+          <label class="label">接收通知邮箱</label>
+          <input
+            v-model="settings.notification_email"
+            type="email"
+            class="input w-full"
+          />
+        </fieldset>
+
+        <template v-if="settings.email_provider === 'smtp'">
+          <div class="grid gap-3 md:grid-cols-2">
+            <fieldset class="fieldset">
+              <label class="label">SMTP 主机</label>
+              <input v-model="settings.smtp_host" class="input w-full" />
+            </fieldset>
+            <fieldset class="fieldset">
+              <label class="label">端口</label>
+              <input
+                v-model.number="settings.smtp_port"
+                type="number"
+                min="1"
+                class="input w-full"
+              />
+            </fieldset>
+            <fieldset class="fieldset">
+              <label class="label">用户名</label>
+              <input v-model="settings.smtp_username" class="input w-full" />
+            </fieldset>
+            <fieldset class="fieldset">
+              <label class="label">密码</label>
+              <input
+                v-model="smtpPassword"
+                type="password"
+                class="input w-full"
+                :placeholder="
+                  settings.smtp_password_configured
+                    ? '已配置；留空保持不变'
+                    : '请输入 SMTP 密码'
+                "
+              />
+            </fieldset>
+            <fieldset class="fieldset md:col-span-2">
+              <label class="label">SMTP 发件人</label>
+              <input
+                v-model="settings.smtp_from_email"
+                type="email"
+                class="input w-full"
+              />
+            </fieldset>
+          </div>
+          <label class="label justify-between"
+            >STARTTLS<input
+              v-model="settings.smtp_use_tls"
+              type="checkbox"
+              class="toggle toggle-sm"
+              @change="
+                settings.smtp_use_tls && (settings.smtp_use_ssl = false)
+              "
+          /></label>
+          <label class="label justify-between"
+            >直接 SSL<input
+              v-model="settings.smtp_use_ssl"
+              type="checkbox"
+              class="toggle toggle-sm"
+              @change="
+                settings.smtp_use_ssl && (settings.smtp_use_tls = false)
+              "
+          /></label>
+        </template>
+
+        <template v-else>
           <fieldset class="fieldset">
-            <label class="label">SMTP 主机</label>
-            <input v-model="settings.smtp_host" class="input w-full" />
-          </fieldset>
-          <fieldset class="fieldset">
-            <label class="label">端口</label>
+            <label class="label">Resend API Key</label>
             <input
-              v-model.number="settings.smtp_port"
-              type="number"
-              min="1"
-              class="input w-full"
-            />
-          </fieldset>
-          <fieldset class="fieldset">
-            <label class="label">用户名</label>
-            <input v-model="settings.smtp_username" class="input w-full" />
-          </fieldset>
-          <fieldset class="fieldset">
-            <label class="label">密码</label>
-            <input
-              v-model="smtpPassword"
+              v-model="resendApiKey"
               type="password"
               class="input w-full"
               :placeholder="
-                settings.smtp_password_configured
+                settings.resend_api_key_configured
                   ? '已配置；留空保持不变'
-                  : '请输入 SMTP 密码'
+                  : '请输入 re_ 开头的 API Key'
               "
             />
           </fieldset>
           <fieldset class="fieldset">
-            <label class="label">发件人</label>
+            <label class="label">Resend 发件人</label>
             <input
-              v-model="settings.smtp_from_email"
-              type="email"
+              v-model="settings.resend_from_email"
               class="input w-full"
+              placeholder="拼车额度 &lt;notice@example.com&gt;"
             />
           </fieldset>
-          <fieldset class="fieldset">
-            <label class="label">接收通知邮箱</label>
-            <input
-              v-model="settings.notification_email"
-              type="email"
-              class="input w-full"
-            />
-          </fieldset>
-        </div>
-        <label class="label justify-between"
-          >STARTTLS<input
-            v-model="settings.smtp_use_tls"
-            type="checkbox"
-            class="toggle toggle-sm"
-            @change="settings.smtp_use_tls && (settings.smtp_use_ssl = false)"
-        /></label>
-        <label class="label justify-between"
-          >直接 SSL<input
-            v-model="settings.smtp_use_ssl"
-            type="checkbox"
-            class="toggle toggle-sm"
-            @change="settings.smtp_use_ssl && (settings.smtp_use_tls = false)"
-        /></label>
+          <div class="alert text-sm alert-info">
+            <AppIcon name="information-circle" class="size-5" />
+            <span>
+              发件人支持“名称 &lt;邮箱&gt;”格式；正式发送前需要在 Resend
+              中验证对应域名。
+            </span>
+          </div>
+        </template>
+
         <button
           class="btn btn-sm"
           :disabled="testing === 'email'"

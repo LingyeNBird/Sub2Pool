@@ -12,7 +12,14 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import AppSettings, Observation, Participant, ParticipantSnapshot, QuotaCycle
+from .models import (
+    AppSettings,
+    Observation,
+    Participant,
+    ParticipantSnapshot,
+    ParticipantUsageSample,
+    QuotaCycle,
+)
 from .notifications import notify_collection_error, send_notification
 from .sub2api import PlatformQuota, Sub2APIClient, Sub2APIError, UsageStats, WeeklyWindow
 
@@ -100,6 +107,20 @@ def _fetch_local(
     Participant.objects.bulk_update(
         [row.participant for row in rows],
         ["latest_weekly_usage_usd", "latest_weekly_limit_usd", "latest_selected_cost", "last_checked_at"],
+    )
+    ParticipantUsageSample.objects.bulk_create(
+        [
+            ParticipantUsageSample(
+                participant=row.participant,
+                cycle=cycle,
+                observed_at=now,
+                weekly_usage_usd=row.quota.weekly_usage_usd,
+                weekly_limit_usd=row.quota.weekly_limit_usd,
+                selected_cost=row.selected_cost(config.cost_basis),
+            )
+            for row in rows
+        ],
+        ignore_conflicts=True,
     )
     return LocalBundle(total=total, participants=rows, checked_at=now)
 

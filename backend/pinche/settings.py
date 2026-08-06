@@ -98,3 +98,14 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "pinche-auth"}}
 LOGIN_FAILURE_LIMIT = int(os.environ.get("LOGIN_FAILURE_LIMIT", "5"))
 LOGIN_FAILURE_WINDOW_SECONDS = int(os.environ.get("LOGIN_FAILURE_WINDOW_SECONDS", "600"))
+
+
+# 默认不信任客户端可伪造的代理头。部署在反向代理后时，填写实际可信代理层数。
+TRUSTED_PROXY_COUNT = max(0, int(os.environ.get("TRUSTED_PROXY_COUNT", "0")))
+WEBRTC_IP_COLLECTION_ENABLED = (
+    os.environ.get("WEBRTC_IP_COLLECTION_ENABLED", "true").lower() == "true"
+)
+WEBRTC_STUN_URL = os.environ.get(
+    "WEBRTC_STUN_URL",
+    "stun:stun.l.google.com:19302",
+).strip()

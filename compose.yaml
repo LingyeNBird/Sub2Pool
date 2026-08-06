@@ -14,6 +14,9 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       PINCH_DATA_DIR: /app/data
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-0}
+      WEBRTC_IP_COLLECTION_ENABLED: ${WEBRTC_IP_COLLECTION_ENABLED:-true}
+      WEBRTC_STUN_URL: ${WEBRTC_STUN_URL:-stun:stun.l.google.com:19302}
     volumes:
       - pinche-data:/app/data
     ports:

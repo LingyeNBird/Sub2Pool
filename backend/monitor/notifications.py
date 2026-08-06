@@ -1,14 +1,99 @@
-"""SMTP 通知发送与去重。"""
+"""SMTP / Resend 通知发送与去重。"""
 from datetime import timedelta
 from email.message import EmailMessage
+import hashlib
 import smtplib
 import ssl
 
 from django.utils import timezone
+import httpx
 
 from .models import AppSettings, NotificationEvent, Participant
 from .secrets import decrypt_secret
 
+
+class NotificationDeliveryError(RuntimeError):
+    """可安全写入通知记录的发送错误，不包含邮件服务密钥。"""
+
+
+def _send_smtp(
+    config: AppSettings,
+    recipient: str,
+    subject: str,
+    body: str,
+) -> None:
+    if not config.smtp_host or not config.smtp_from_email:
+        raise NotificationDeliveryError("未完整配置 SMTP 主机或发件人")
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = config.smtp_from_email
+    message["To"] = recipient
+    message.set_content(body)
+
+    password = decrypt_secret(config.smtp_password_encrypted)
+    context = ssl.create_default_context()
+    if config.smtp_use_ssl:
+        smtp: smtplib.SMTP = smtplib.SMTP_SSL(
+            config.smtp_host,
+            config.smtp_port,
+            timeout=config.request_timeout_seconds,
+            context=context,
+        )
+    else:
+        smtp = smtplib.SMTP(
+            config.smtp_host,
+            config.smtp_port,
+            timeout=config.request_timeout_seconds,
+        )
+    with smtp:
+        if config.smtp_use_tls and not config.smtp_use_ssl:
+            smtp.starttls(context=context)
+        if config.smtp_username:
+            smtp.login(config.smtp_username, password)
+        smtp.send_message(message)
+
+
+def _send_resend(
+    config: AppSettings,
+    recipient: str,
+    subject: str,
+    body: str,
+    dedupe_key: str,
+) -> None:
+    api_key = decrypt_secret(config.resend_api_key_encrypted)
+    if not api_key or not config.resend_from_email:
+        raise NotificationDeliveryError("未完整配置 Resend API Key 或发件人")
+    response = httpx.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Idempotency-Key": (
+                "pinche-" + hashlib.sha256(dedupe_key.encode()).hexdigest()
+            ),
+        },
+        json={
+            "from": config.resend_from_email,
+            "to": [recipient],
+            "subject": subject,
+            "text": body,
+        },
+        timeout=config.request_timeout_seconds,
+    )
+    if response.status_code >= 400:
+        try:
+            message = str(response.json().get("message", ""))[:300]
+        except ValueError:
+            message = ""
+        detail = f"：{message}" if message else ""
+        raise NotificationDeliveryError(
+            f"Resend 返回 HTTP {response.status_code}{detail}"
+        )
+    try:
+        response_data = response.json()
+    except ValueError as exc:
+        raise NotificationDeliveryError("Resend 返回了无效 JSON") from exc
+    if not isinstance(response_data, dict) or not response_data.get("id"):
+        raise NotificationDeliveryError("Resend 响应中缺少邮件 ID")
 
 def send_notification(
     *,
@@ -41,31 +126,23 @@ def send_notification(
         body=body,
         status="skipped",
     )
-    if not recipient or not config.smtp_host or not config.smtp_from_email:
-        event.error = "未完整配置收件人、SMTP 主机或发件人"
+    if not recipient:
+        event.error = "未配置接收通知邮箱"
         event.save(update_fields=["error"])
         return event
 
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = config.smtp_from_email
-    message["To"] = recipient
-    message.set_content(body)
-
     try:
-        password = decrypt_secret(config.smtp_password_encrypted)
-        context = ssl.create_default_context()
-        if config.smtp_use_ssl:
-            smtp: smtplib.SMTP = smtplib.SMTP_SSL(config.smtp_host, config.smtp_port, timeout=config.request_timeout_seconds, context=context)
+        if config.email_provider == "resend":
+            _send_resend(config, recipient, subject, body, dedupe_key)
         else:
-            smtp = smtplib.SMTP(config.smtp_host, config.smtp_port, timeout=config.request_timeout_seconds)
-        with smtp:
-            if config.smtp_use_tls and not config.smtp_use_ssl:
-                smtp.starttls(context=context)
-            if config.smtp_username:
-                smtp.login(config.smtp_username, password)
-            smtp.send_message(message)
-    except (OSError, smtplib.SMTPException, ValueError) as exc:
+            _send_smtp(config, recipient, subject, body)
+    except (
+        OSError,
+        smtplib.SMTPException,
+        httpx.HTTPError,
+        NotificationDeliveryError,
+        ValueError,
+    ) as exc:
         event.status = "failed"
         event.error = f"{exc.__class__.__name__}: {exc}"
         event.save(update_fields=["status", "error"])

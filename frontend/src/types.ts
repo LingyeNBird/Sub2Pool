@@ -88,6 +88,57 @@ export interface NotificationRecord {
   sent_at: string | null;
 }
 
+export interface LoginEventRecord {
+  id: number;
+  username: string;
+  success: boolean;
+  request_ip: string | null;
+  remote_ip: string | null;
+  webrtc_supported: boolean | null;
+  webrtc_ips: string[];
+  user_agent: string;
+  failure_reason: string;
+  created_at: string;
+}
+
+export interface LoginEventData {
+  success_count: number;
+  failure_count: number;
+  unique_request_ips: number;
+  items: LoginEventRecord[];
+}
+
+export interface CapacityPoint {
+  period: string;
+  weekly_total_usd: number;
+  minimum_usd: number;
+  maximum_usd: number;
+  sample_count: number;
+}
+
+export interface UsagePoint {
+  observed_at: string;
+  label: string;
+  weekly_usage_usd: number;
+  weekly_limit_usd: number | null;
+}
+
+export interface ParticipantUsageSeries {
+  participant_id: number;
+  participant_name: string;
+  sub2api_user_id: number;
+  points: UsagePoint[];
+}
+
+export interface StatisticsData {
+  capacity_period: "day" | "month";
+  capacity_series: CapacityPoint[];
+  usage_days: number;
+  usage_precision: "raw" | "hour" | "day";
+  sample_interval_minutes: number;
+  participant_series: ParticipantUsageSeries[];
+}
+
 export interface AppSettingsData {
   [key: string]: string | number | boolean | null;
   monitoring_enabled: boolean;
@@ -113,6 +164,7 @@ export interface AppSettingsData {
   rate_change_alert_percent: number;
   notify_on_limit_exhausted: boolean;
   notify_on_recommendation_change: boolean;
+  email_provider: "smtp" | "resend";
   notify_on_rate_change: boolean;
   notify_on_collection_error: boolean;
   notification_cooldown_minutes: number;
@@ -123,6 +175,8 @@ export interface AppSettingsData {
   smtp_use_ssl: boolean;
   smtp_from_email: string;
   notification_email: string;
+  resend_from_email: string;
+  resend_api_key_configured: boolean;
   sub2api_token_configured: boolean;
   smtp_password_configured: boolean;
   last_local_check_at: string | null;

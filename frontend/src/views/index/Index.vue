@@ -158,74 +158,63 @@ onMounted(load);
   <section v-if="data" class="card col-span-12 bg-base-200 shadow-xs">
     <div class="card-body gap-4">
       <h2 class="card-title">
-        <AppIcon name="scale" class="size-5" />
-        参与者额度建议
+        <AppIcon name="sparkles" class="size-5" />
+        当前额度建议
       </h2>
-      <div class="overflow-x-auto">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>参与者</th>
-              <th>权益比例</th>
-              <th>已归属周限</th>
-              <th>剩余权益</th>
-              <th>当前用量 / 限额</th>
-              <th>建议周限额</th>
-              <th>状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="participant in data.participants" :key="participant.id">
-              <td>
-                <div class="font-bold">{{ participant.name }}</div>
-                <div class="text-sm opacity-60">
-                  Sub2API 用户 {{ participant.sub2api_user_id }}
-                </div>
-              </td>
-              <td>{{ percent(participant.share_percent) }}</td>
-              <td>
-                {{ percent(participant.snapshot?.charged_cycle_percent) }}
-              </td>
-              <td>
-                {{ percent(participant.snapshot?.remaining_share_percent) }}
-              </td>
-              <td>
-                {{ currency(participant.latest_weekly_usage_usd) }}
-                /
-                {{ currency(participant.latest_weekly_limit_usd) }}
-              </td>
-              <td class="font-semibold">
-                {{
-                  currency(participant.snapshot?.recommended_weekly_limit_usd)
-                }}
-              </td>
-              <td>
-                <span
-                  class="badge badge-sm"
-                  :class="
-                    participant.snapshot?.needs_manual_update
-                      ? 'badge-warning'
-                      : 'badge-success'
-                  "
-                >
-                  {{
-                    participant.snapshot?.needs_manual_update
-                      ? "建议调整"
-                      : "无需调整"
-                  }}
-                </span>
-                <div class="mt-1 text-xs opacity-60">
-                  {{ participant.snapshot?.reason || "等待首次测算" }}
-                </div>
-              </td>
-            </tr>
-            <tr v-if="data.participants.length === 0">
-              <td colspan="7" class="py-8 text-center opacity-60">
-                尚未添加参与者
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-if="data.participants.length" class="grid gap-3">
+        <article
+          v-for="participant in data.participants"
+          :key="participant.id"
+          class="rounded-box border border-base-300 bg-base-100 p-4"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <p class="leading-7">
+              对于参与者
+              <strong>{{ participant.name }}</strong>
+              （Sub2API 账号
+              <span class="font-mono">{{ participant.sub2api_user_id }}</span
+              >），
+              <template v-if="participant.snapshot">
+                建议把 OpenAI 周限额设置为
+                <strong class="text-lg">{{
+                  currency(participant.snapshot.recommended_weekly_limit_usd)
+                }}</strong
+                >。
+              </template>
+              <template v-else> 尚无额度建议，请先完成一次有效测算。 </template>
+            </p>
+            <span
+              class="badge badge-sm"
+              :class="
+                participant.snapshot?.needs_manual_update
+                  ? 'badge-warning'
+                  : 'badge-success'
+              "
+            >
+              {{
+                !participant.snapshot
+                  ? "等待测算"
+                  : participant.snapshot.needs_manual_update
+                    ? "建议手动调整"
+                    : "当前无需调整"
+              }}
+            </span>
+          </div>
+          <p class="mt-2 text-sm opacity-60">
+            当前 Sub2API 周用量为
+            {{ currency(participant.latest_weekly_usage_usd) }}，现有限额为
+            {{ currency(participant.latest_weekly_limit_usd) }}；
+            {{ participant.snapshot?.reason || "等待首次测算后生成依据" }}。
+          </p>
+          <p v-if="participant.snapshot" class="mt-1 text-sm opacity-60">
+            已归属上游周限
+            {{ percent(participant.snapshot.charged_cycle_percent) }}，剩余权益
+            {{ percent(participant.snapshot.remaining_share_percent) }}。
+          </p>
+        </article>
+      </div>
+      <div v-else class="py-6 text-center opacity-60">
+        尚未添加参与者，无法生成额度建议。
       </div>
     </div>
   </section>

@@ -76,6 +76,11 @@ class AppSettings(models.Model):
     notify_on_rate_change = models.BooleanField(default=True)
     notify_on_collection_error = models.BooleanField(default=True)
     notification_cooldown_minutes = models.PositiveIntegerField(default=120, validators=[MinValueValidator(1), MaxValueValidator(10080)])
+    email_provider = models.CharField(
+        max_length=16,
+        choices=(("smtp", "SMTP"), ("resend", "Resend")),
+        default="smtp",
+    )
 
     smtp_host = models.CharField(max_length=255, blank=True)
     smtp_port = models.PositiveIntegerField(default=587)
@@ -85,6 +90,8 @@ class AppSettings(models.Model):
     smtp_use_ssl = models.BooleanField(default=False)
     smtp_from_email = models.EmailField(blank=True)
     notification_email = models.EmailField(blank=True)
+    resend_api_key_encrypted = models.TextField(blank=True)
+    resend_from_email = models.CharField(max_length=320, blank=True)
 
     last_local_check_at = models.DateTimeField(null=True, blank=True)
     last_upstream_check_at = models.DateTimeField(null=True, blank=True)
@@ -198,6 +205,45 @@ class ParticipantSnapshot(models.Model):
         constraints = [models.UniqueConstraint(fields=["observation", "participant"], name="unique_observation_participant")]
 
 
+class ParticipantUsageSample(models.Model):
+    """每次本地探测保存的参与者 Sub2API 周用量，用于历史趋势图。"""
+
+    participant = models.ForeignKey(
+        Participant,
+        on_delete=models.CASCADE,
+        related_name="usage_samples",
+    )
+    cycle = models.ForeignKey(
+        QuotaCycle,
+        on_delete=models.CASCADE,
+        related_name="usage_samples",
+    )
+    observed_at = models.DateTimeField()
+    weekly_usage_usd = models.DecimalField(max_digits=18, decimal_places=6)
+    weekly_limit_usd = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    selected_cost = models.DecimalField(max_digits=18, decimal_places=6)
+
+    class Meta:
+        ordering = ["observed_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["participant", "cycle", "observed_at"],
+                name="unique_participant_cycle_sample",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["participant", "observed_at"],
+                name="participant_usage_time",
+            )
+        ]
+
+
 class NotificationEvent(models.Model):
     """邮件发送审计与去重依据。未配置 SMTP 时也保留 skipped 记录。"""
 
@@ -218,3 +264,27 @@ class NotificationEvent(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["dedupe_key", "-created_at"])]
+
+
+class LoginEvent(models.Model):
+    """本系统登录尝试审计；WebRTC 地址来自浏览器，只能作为辅助线索。"""
+
+    username = models.CharField(max_length=150, blank=True)
+    success = models.BooleanField(default=False)
+    request_ip = models.GenericIPAddressField(null=True, blank=True)
+    remote_ip = models.GenericIPAddressField(null=True, blank=True)
+    webrtc_supported = models.BooleanField(null=True, blank=True)
+    webrtc_ips = models.JSONField(default=list, blank=True)
+    user_agent = models.TextField(blank=True)
+    failure_reason = models.CharField(max_length=120, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at"], name="login_event_time"),
+            models.Index(
+                fields=["success", "-created_at"],
+                name="login_success_time",
+            ),
+        ]

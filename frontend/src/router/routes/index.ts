@@ -20,10 +20,28 @@ export const appRoutes: RouteRecordRaw[] = [
     meta: { title: "观测记录" },
   },
   {
+    path: "statistics",
+    name: "statistics",
+    component: () => import("@/views/StatisticsView.vue"),
+    meta: { title: "额度统计" },
+  },
+  {
     path: "notifications",
     name: "notifications",
     component: () => import("@/views/transactions/logs/Logs.vue"),
     meta: { title: "通知记录" },
+  },
+  {
+    path: "login-records",
+    name: "login-records",
+    component: () => import("@/views/LoginRecordsView.vue"),
+    meta: { title: "登录记录" },
+  },
+  {
+    path: "tutorial",
+    name: "tutorial",
+    component: () => import("@/views/TutorialView.vue"),
+    meta: { title: "使用教程" },
   },
   {
     path: "settings",

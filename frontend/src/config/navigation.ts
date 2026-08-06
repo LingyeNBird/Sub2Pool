@@ -27,9 +27,24 @@ export const navigation: NavigationGroup[] = [
     to: "/observations",
   },
   {
+    label: "额度统计",
+    icon: "presentation-chart-line",
+    to: "/statistics",
+  },
+  {
     label: "通知记录",
     icon: "bell",
     to: "/notifications",
+  },
+  {
+    label: "登录记录",
+    icon: "finger-print",
+    to: "/login-records",
+  },
+  {
+    label: "使用教程",
+    icon: "book-open",
+    to: "/tutorial",
   },
   {
     label: "系统设置",

@@ -1,8 +1,12 @@
 """面向 Vue 前端的 JSON API。所有修改均只作用于本服务自己的 SQLite。"""
+from collections import defaultdict
+from datetime import timedelta
 import json
 from decimal import Decimal, InvalidOperation
 from functools import wraps
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from django.conf import settings
 from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
 from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
@@ -14,7 +18,17 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .engine import run_monitor
-from .models import AppSettings, NotificationEvent, Observation, Participant, ParticipantSnapshot, QuotaCycle
+from .login_audit import record_login_attempt, request_addresses
+from .models import (
+    AppSettings,
+    LoginEvent,
+    NotificationEvent,
+    Observation,
+    Participant,
+    ParticipantSnapshot,
+    ParticipantUsageSample,
+    QuotaCycle,
+)
 from .notifications import send_notification
 from .secrets import encrypt_secret
 from .sub2api import Sub2APIClient, Sub2APIError
@@ -68,27 +82,68 @@ def csrf(_request):
     return ok({"csrf": "ready"})
 
 
+@require_GET
+def auth_client_config(_request):
+    """登录页可读取的非敏感网络审计配置。"""
+    return ok(
+        {
+            "webrtc_enabled": settings.WEBRTC_IP_COLLECTION_ENABLED,
+            "stun_url": settings.WEBRTC_STUN_URL,
+        }
+    )
+
+
 @require_POST
 def login_view(request):
     try:
         payload = body_json(request)
     except ValueError as exc:
+        record_login_attempt(
+            request,
+            {},
+            username="",
+            success=False,
+            failure_reason="请求格式错误",
+        )
         return error(str(exc))
     username = str(payload.get("username", "")).strip()
     password = str(payload.get("password", ""))
-    ip = request.META.get("REMOTE_ADDR", "unknown")
-    throttle_key = f"login-fail:{ip}:{username[:100]}"
+    request_ip, _ = request_addresses(request)
+    throttle_key = f"login-fail:{request_ip or 'unknown'}:{username[:100]}"
     failures = int(cache.get(throttle_key, 0))
-    from django.conf import settings
 
     if failures >= settings.LOGIN_FAILURE_LIMIT:
+        record_login_attempt(
+            request,
+            payload,
+            username=username,
+            success=False,
+            failure_reason="登录失败次数过多",
+        )
         return error("登录失败次数过多，请稍后再试", 429)
     user = authenticate(request, username=username, password=password)
     if user is None or not user.is_staff:
-        cache.set(throttle_key, failures + 1, settings.LOGIN_FAILURE_WINDOW_SECONDS)
+        cache.set(
+            throttle_key,
+            failures + 1,
+            settings.LOGIN_FAILURE_WINDOW_SECONDS,
+        )
+        record_login_attempt(
+            request,
+            payload,
+            username=username,
+            success=False,
+            failure_reason="用户名、密码或权限错误",
+        )
         return error("用户名或密码错误", 401)
     cache.delete(throttle_key)
     login(request, user)
+    record_login_attempt(
+        request,
+        payload,
+        username=user.get_username(),
+        success=True,
+    )
     return ok({"username": user.get_username()})
 
 
@@ -153,6 +208,7 @@ SETTINGS_FIELDS = {
     "notify_on_rate_change",
     "notify_on_collection_error",
     "notification_cooldown_minutes",
+    "email_provider",
     "smtp_host",
     "smtp_port",
     "smtp_username",
@@ -160,6 +216,7 @@ SETTINGS_FIELDS = {
     "smtp_use_ssl",
     "smtp_from_email",
     "notification_email",
+    "resend_from_email",
 }
 
 
@@ -172,6 +229,9 @@ def settings_data(config: AppSettings) -> dict:
         {
             "sub2api_token_configured": bool(config.sub2api_admin_token_encrypted),
             "smtp_password_configured": bool(config.smtp_password_encrypted),
+            "resend_api_key_configured": bool(
+                config.resend_api_key_encrypted
+            ),
             "last_local_check_at": iso(config.last_local_check_at),
             "last_upstream_check_at": iso(config.last_upstream_check_at),
             "last_success_at": iso(config.last_success_at),
@@ -210,6 +270,7 @@ def settings_view(request):
         return error("设置字段格式无效", details=details)
     token = str(payload.get("sub2api_admin_token", ""))
     smtp_password = str(payload.get("smtp_password", ""))
+    resend_api_key = str(payload.get("resend_api_key", ""))
     if token:
         config.sub2api_admin_token_encrypted = encrypt_secret(token)
     if payload.get("clear_sub2api_admin_token") is True:
@@ -218,7 +279,15 @@ def settings_view(request):
         config.smtp_password_encrypted = encrypt_secret(smtp_password)
     if payload.get("clear_smtp_password") is True:
         config.smtp_password_encrypted = ""
-    if config.smtp_use_ssl and config.smtp_use_tls:
+    if resend_api_key:
+        config.resend_api_key_encrypted = encrypt_secret(resend_api_key)
+    if payload.get("clear_resend_api_key") is True:
+        config.resend_api_key_encrypted = ""
+    if (
+        config.email_provider == "smtp"
+        and config.smtp_use_ssl
+        and config.smtp_use_tls
+    ):
         return error("SMTP SSL 与 STARTTLS 不能同时启用")
     try:
         config.full_clean()
@@ -249,7 +318,7 @@ def test_email(request):
         event_type="test",
         dedupe_key=f"test:{timezone.now().timestamp()}",
         subject="[拼车额度] 邮件配置测试",
-        body="这是一封测试邮件。收到它说明 SMTP 配置可以正常工作。",
+        body="这是一封测试邮件。收到它说明当前选择的邮件服务配置正常。",
         severity="info",
         ignore_cooldown=True,
     )
@@ -399,6 +468,151 @@ def dashboard(request):
     return ok(data)
 
 
+def _bounded_query_int(request, name: str, default: int, maximum: int) -> int:
+    try:
+        return min(max(int(request.GET.get(name, default)), 1), maximum)
+    except (TypeError, ValueError):
+        return default
+
+
+def _money(value: Decimal) -> float:
+    return float(value.quantize(Decimal("0.01")))
+
+
+@api_login_required
+@require_GET
+def statistics_view(request):
+    """返回周限容量历史和参与者 Sub2API 周用量趋势。"""
+    config = AppSettings.load()
+    capacity_period = request.GET.get("capacity_period", "day")
+    if capacity_period not in {"day", "month"}:
+        capacity_period = "day"
+    capacity_days = _bounded_query_int(
+        request,
+        "capacity_days",
+        90 if capacity_period == "day" else 365,
+        730,
+    )
+    usage_days = _bounded_query_int(request, "usage_days", 7, 90)
+    usage_precision = request.GET.get("usage_precision", "hour")
+    if usage_precision not in {"raw", "hour", "day"}:
+        usage_precision = "hour"
+    try:
+        location = ZoneInfo(config.timezone)
+    except ZoneInfoNotFoundError:
+        location = ZoneInfo("UTC")
+
+    now = timezone.now()
+    observations_rows = Observation.objects.filter(
+        observed_at__gte=now - timedelta(days=capacity_days)
+    ).order_by("observed_at", "id")
+    daily: dict[str, dict] = {}
+    for observation in observations_rows:
+        period = observation.observed_at.astimezone(location).date().isoformat()
+        total = observation.effective_usd_per_percent * Decimal(100)
+        row = daily.setdefault(
+            period,
+            {
+                "period": period,
+                "weekly_total_usd": total,
+                "minimum_usd": total,
+                "maximum_usd": total,
+                "sample_count": 0,
+            },
+        )
+        # 查询集按时间升序，因此覆盖值就是当天最后一次保守估算。
+        row["weekly_total_usd"] = total
+        row["minimum_usd"] = min(row["minimum_usd"], total)
+        row["maximum_usd"] = max(row["maximum_usd"], total)
+        row["sample_count"] += 1
+
+    if capacity_period == "day":
+        capacity_series = [
+            {
+                **row,
+                "weekly_total_usd": _money(row["weekly_total_usd"]),
+                "minimum_usd": _money(row["minimum_usd"]),
+                "maximum_usd": _money(row["maximum_usd"]),
+            }
+            for row in daily.values()
+        ]
+    else:
+        monthly: dict[str, list[dict]] = defaultdict(list)
+        for row in daily.values():
+            monthly[row["period"][:7]].append(row)
+        capacity_series = []
+        for period, rows in monthly.items():
+            closing_values = [row["weekly_total_usd"] for row in rows]
+            capacity_series.append(
+                {
+                    "period": period,
+                    # 月值取每天收盘估算的平均数，避免活跃日采样更多造成偏置。
+                    "weekly_total_usd": _money(
+                        sum(closing_values, Decimal("0"))
+                        / Decimal(len(closing_values))
+                    ),
+                    "minimum_usd": _money(
+                        min(row["minimum_usd"] for row in rows)
+                    ),
+                    "maximum_usd": _money(
+                        max(row["maximum_usd"] for row in rows)
+                    ),
+                    "sample_count": len(rows),
+                }
+            )
+
+    sample_rows = (
+        ParticipantUsageSample.objects.filter(
+            observed_at__gte=now - timedelta(days=usage_days)
+        )
+        .select_related("participant")
+        .order_by("participant_id", "observed_at", "id")
+    )
+    usage_buckets: dict[int, dict[str, dict]] = defaultdict(dict)
+    for sample in sample_rows:
+        local = sample.observed_at.astimezone(location)
+        if usage_precision == "raw":
+            bucket = sample.observed_at.isoformat()
+            label = local.strftime("%m-%d %H:%M")
+        elif usage_precision == "hour":
+            bucket = local.replace(minute=0, second=0, microsecond=0).isoformat()
+            label = local.strftime("%m-%d %H:00")
+        else:
+            bucket = local.date().isoformat()
+            label = local.strftime("%m-%d")
+        # 同一桶保留最后一次探测，准确表达该时点可见的 Sub2API 周用量。
+        usage_buckets[sample.participant_id][bucket] = {
+            "observed_at": sample.observed_at.isoformat(),
+            "label": label,
+            "weekly_usage_usd": float(sample.weekly_usage_usd),
+            "weekly_limit_usd": (
+                float(sample.weekly_limit_usd)
+                if sample.weekly_limit_usd is not None
+                else None
+            ),
+        }
+
+    participant_series = [
+        {
+            "participant_id": participant.id,
+            "participant_name": participant.name,
+            "sub2api_user_id": participant.sub2api_user_id,
+            "points": list(usage_buckets[participant.id].values()),
+        }
+        for participant in Participant.objects.all()
+    ]
+    return ok(
+        {
+            "capacity_period": capacity_period,
+            "capacity_series": capacity_series,
+            "usage_days": usage_days,
+            "usage_precision": usage_precision,
+            "sample_interval_minutes": config.local_poll_minutes,
+            "participant_series": participant_series,
+        }
+    )
+
+
 @api_login_required
 @require_GET
 def observations(request):
@@ -459,6 +673,42 @@ def notifications(request):
             }
             for item in rows
         ]
+    )
+
+
+@api_login_required
+@require_GET
+def login_events(request):
+    try:
+        limit = min(max(int(request.GET.get("limit", 100)), 1), 300)
+    except ValueError:
+        limit = 100
+    queryset = LoginEvent.objects.all()
+    rows = list(queryset[:limit])
+    return ok(
+        {
+            "success_count": queryset.filter(success=True).count(),
+            "failure_count": queryset.filter(success=False).count(),
+            "unique_request_ips": queryset.exclude(request_ip__isnull=True)
+            .values("request_ip")
+            .distinct()
+            .count(),
+            "items": [
+                {
+                    "id": item.id,
+                    "username": item.username,
+                    "success": item.success,
+                    "request_ip": item.request_ip,
+                    "remote_ip": item.remote_ip,
+                    "webrtc_supported": item.webrtc_supported,
+                    "webrtc_ips": item.webrtc_ips,
+                    "user_agent": item.user_agent,
+                    "failure_reason": item.failure_reason,
+                    "created_at": iso(item.created_at),
+                }
+                for item in rows
+            ],
+        }
     )
 
 

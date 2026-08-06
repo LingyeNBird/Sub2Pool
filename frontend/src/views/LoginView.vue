@@ -2,7 +2,11 @@
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 
-import { ApiError } from "@/services/api";
+import { ApiError, api } from "@/services/api";
+import {
+  collectWebRtcNetworkInfo,
+  type WebRtcNetworkInfo,
+} from "@/services/webrtc";
 import { useAuthStore } from "@/stores/auth";
 
 const auth = useAuthStore();
@@ -16,7 +20,23 @@ async function submit() {
   loading.value = true;
   message.value = "";
   try {
-    await auth.signIn(username.value, password.value);
+    let clientNetwork: WebRtcNetworkInfo = {
+      webrtc_supported: false,
+      webrtc_ips: [],
+    };
+    try {
+      const config = await api<{
+        webrtc_enabled: boolean;
+        stun_url: string;
+      }>("auth/client-config");
+      clientNetwork = await collectWebRtcNetworkInfo(
+        config.webrtc_enabled,
+        config.stun_url,
+      );
+    } catch {
+      // 网络审计增强失败不能阻止管理员登录，服务端仍会记录请求来源地址。
+    }
+    await auth.signIn(username.value, password.value, clientNetwork);
     await router.replace("/");
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "登录失败";

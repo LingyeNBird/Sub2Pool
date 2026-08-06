@@ -2,6 +2,7 @@ import { ref } from "vue";
 import { defineStore } from "pinia";
 
 import { api, jsonBody } from "@/services/api";
+import type { WebRtcNetworkInfo } from "@/services/webrtc";
 
 export const useAuthStore = defineStore("auth", () => {
   const username = ref("");
@@ -23,10 +24,15 @@ export const useAuthStore = defineStore("auth", () => {
   async function signIn(
     loginUsername: string,
     password: string,
+    clientNetwork: WebRtcNetworkInfo,
   ): Promise<void> {
     const data = await api<{ username: string }>("auth/login", {
       method: "POST",
-      body: jsonBody({ username: loginUsername, password }),
+      body: jsonBody({
+        username: loginUsername,
+        password,
+        client_network: clientNetwork,
+      }),
     });
     username.value = data.username;
     ready.value = true;
