@@ -151,7 +151,7 @@ onMounted(load);
       <div class="stat-value text-xl font-semibold tabular-nums">
         {{ data?.success_count ?? 0 }}
       </div>
-      <div class="stat-desc">包含当前管理员登录</div>
+      <div class="stat-desc">包含管理员和普通用户登录</div>
     </div>
     <div class="stat">
       <div class="stat-figure">
@@ -178,8 +178,8 @@ onMounted(load);
   <div class="col-span-12 alert alert-info">
     <AppIcon name="information-circle" class="size-5" />
     <span>
-      服务器来源 IP 和直连地址由后端在所有路由前拦截。WebRTC IP
-      由浏览器运行后自报，只能在登录预检与提交时限制，可能被隐私策略隐藏或被客户端伪造。
+      服务器来源 IP 和直连地址从首个请求起由后端拦截，不返回页面或正文。WebRTC
+      IP 必须等浏览器运行后上报，命中后登录页立即保持空白，并拒绝后续登录请求。
     </span>
   </div>
 
@@ -190,8 +190,8 @@ onMounted(load);
           <AppIcon name="no-symbol" class="size-5" />已封禁列表
         </h2>
         <p class="mt-1 text-sm opacity-60">
-          请求来源与直连地址封禁会返回空响应；WebRTC
-          封禁会让标准登录页保持空白。
+          所有可识别的封禁地址都不会获得页面或响应正文；WebRTC
+          地址在浏览器完成自报后生效，因此首次登录页面仍可能已经传输。
         </p>
       </div>
       <div v-if="blockedAddresses.length" class="overflow-x-auto">
@@ -376,8 +376,8 @@ onMounted(load);
           <template v-if="pendingAction.mode === 'block'">
             {{
               pendingAction.sourceType === "webrtc"
-                ? "命中该浏览器自报地址时，标准登录页将保持空白，登录提交也会被拒绝。"
-                : "命中该服务端可见地址时，所有路由都会直接返回空响应。"
+                ? "浏览器上报该地址后，页面将立即保持空白，后续登录请求不返回正文。首次页面请求发生在上报前，服务端无法提前识别这个地址。"
+                : "命中该服务端可见地址时，所有路由都不会返回页面或响应正文。"
             }}
           </template>
           <template v-else>解除后，该地址可再次访问对应路径。</template>

@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useRoute } from "vue-router";
 
 import { useThemeStore } from "@/stores/theme";
+import { useAuthStore } from "@/stores/auth";
 
 import HeaderNotifications from "./HeaderNotifications.vue";
 import HeaderProfileMenu from "./HeaderProfileMenu.vue";
@@ -10,6 +11,7 @@ import HeaderThemeMenu from "./HeaderThemeMenu.vue";
 
 const route = useRoute();
 const theme = useThemeStore();
+const auth = useAuthStore();
 const pageTitle = computed(() => String(route.meta.title ?? "Dashboard"));
 </script>
 
@@ -52,7 +54,7 @@ const pageTitle = computed(() => String(route.meta.title ?? "Dashboard"));
       </svg>
     </label>
     <HeaderThemeMenu />
-    <HeaderNotifications />
+    <HeaderNotifications v-if="auth.isStaff" />
     <HeaderProfileMenu />
   </header>
 </template>

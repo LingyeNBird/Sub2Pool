@@ -601,6 +601,122 @@ def test_api_requires_admin_jwt_and_accepts_admin_login():
     assert user.is_staff
 
 @pytest.mark.django_db
+def test_regular_user_only_reads_bound_participant_statistics():
+    User = get_user_model()
+    User.objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    first = Participant.objects.create(
+        name="甲",
+        sub2api_user_id=101,
+        sub2api_username="rider-a",
+        share_percent=50,
+    )
+    second = Participant.objects.create(
+        name="乙",
+        sub2api_user_id=102,
+        sub2api_username="rider-b",
+        share_percent=50,
+    )
+    client = Client()
+    admin_headers, _ = jwt_login(client)
+
+    created = client.post(
+        "/api/system-users",
+        data=json.dumps(
+            {
+                "username": "rider-viewer",
+                "email": "viewer@example.com",
+                "password": "Rider-Access-2026!secure",
+                "is_active": True,
+                "participant_ids": [first.id, second.id],
+            }
+        ),
+        content_type="application/json",
+        **admin_headers,
+    )
+    assert created.status_code == 201
+    user_id = created.json()["data"]["id"]
+    regular = User.objects.get(pk=user_id)
+    assert regular.is_staff is False
+    assert list(
+        regular.quota_participants.order_by("id").values_list("id", flat=True)
+    ) == [first.id, second.id]
+
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save()
+    now = timezone.now()
+    cycle = QuotaCycle.objects.create(
+        account_id=7,
+        starts_at=now - timedelta(days=2),
+        resets_at=now + timedelta(days=5),
+    )
+    for participant, cost in ((first, 120), (second, 240)):
+        ParticipantUsageSample.objects.create(
+            participant=participant,
+            cycle=cycle,
+            observed_at=now,
+            balance_usd=Decimal("500"),
+            selected_cost=cost,
+        )
+
+    regular_client = Client()
+    regular_headers, logged_in = jwt_login(
+        regular_client,
+        username="rider-viewer",
+        password="Rider-Access-2026!secure",
+    )
+    assert logged_in.json()["data"]["is_staff"] is False
+    assert regular_client.get("/api/auth/me", **regular_headers).json()["data"][
+        "is_staff"
+    ] is False
+
+    statistics = regular_client.get("/api/statistics", **regular_headers)
+    assert statistics.status_code == 200
+    assert [
+        item["participant_id"]
+        for item in statistics.json()["data"]["participant_series"]
+    ] == [first.id, second.id]
+    for admin_path in (
+        "/api/dashboard",
+        "/api/participants",
+        "/api/login-events",
+        "/api/settings",
+        "/api/system-users",
+    ):
+        assert regular_client.get(admin_path, **regular_headers).status_code == 403
+
+    updated = client.patch(
+        f"/api/system-users/{user_id}",
+        data=json.dumps(
+            {
+                "username": "rider-viewer",
+                "email": "viewer@example.com",
+                "is_active": True,
+                "participant_ids": [second.id],
+            }
+        ),
+        content_type="application/json",
+        **admin_headers,
+    )
+    assert updated.status_code == 200
+    filtered = regular_client.get("/api/statistics", **regular_headers)
+    assert [
+        item["participant_id"]
+        for item in filtered.json()["data"]["participant_series"]
+    ] == [second.id]
+
+    deleted = client.delete(
+        f"/api/system-users/{user_id}",
+        **admin_headers,
+    )
+    assert deleted.status_code == 200
+    assert not User.objects.filter(pk=user_id).exists()
+
+@pytest.mark.django_db
 def test_refresh_rotation_blacklists_old_cookie_and_logout_clears_current_cookie():
     get_user_model().objects.create_superuser(
         username="owner",
@@ -893,6 +1009,11 @@ def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch)
     )
     client = Client()
     headers, _ = jwt_login(client)
+    participant = Participant.objects.create(
+        name="测试车友",
+        sub2api_user_id=51,
+        share_percent=Decimal("50"),
+    )
 
     class FakeClient:
         def __init__(self, _config):
@@ -920,6 +1041,9 @@ def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch)
 
     assert response.status_code == 200
     assert response.json()["data"][0]["id"] == 51
+    participant.refresh_from_db()
+    assert participant.sub2api_username == "rider"
+
 
 
 @pytest.mark.django_db

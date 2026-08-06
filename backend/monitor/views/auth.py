@@ -1,4 +1,4 @@
-"""管理员 JWT 登录、刷新、登出和密码管理。"""
+"""系统用户 JWT 登录、刷新、登出和密码管理。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .base import AdminAPIView, PublicAPIView, error, ok
+from .base import AuthenticatedAPIView, PublicAPIView, error, ok
 from ..ip_blocking import blocked_webrtc_addresses, empty_block_response
 from ..login_audit import record_login_attempt, request_addresses
 from ..serializers import LoginSerializer, PasswordChangeSerializer
@@ -128,7 +128,7 @@ class LoginView(PublicAPIView):
             username=username,
             password=password,
         )
-        if user is None or not user.is_staff:
+        if user is None:
             cache.set(
                 throttle_key,
                 failures + 1,
@@ -151,7 +151,13 @@ class LoginView(PublicAPIView):
             username=user.get_username(),
             success=True,
         )
-        response = ok({"username": user.get_username(), "access": access})
+        response = ok(
+            {
+                "username": user.get_username(),
+                "is_staff": user.is_staff,
+                "access": access,
+            }
+        )
         _set_refresh_cookie(response, refresh)
         return response
 
@@ -178,7 +184,7 @@ class RefreshView(PublicAPIView):
         return response
 
 
-class LogoutView(AdminAPIView):
+class LogoutView(AuthenticatedAPIView):
     def post(self, request):
         _blacklist_cookie(request)
         response = ok({"logged_out": True})
@@ -186,7 +192,7 @@ class LogoutView(AdminAPIView):
         return response
 
 
-class MeView(AdminAPIView):
+class MeView(AuthenticatedAPIView):
     def get(self, request):
         return ok(
             {
@@ -196,7 +202,7 @@ class MeView(AdminAPIView):
         )
 
 
-class PasswordView(AdminAPIView):
+class PasswordView(AuthenticatedAPIView):
     def post(self, request):
         serializer = PasswordChangeSerializer(data=request.data)
         if not serializer.is_valid():

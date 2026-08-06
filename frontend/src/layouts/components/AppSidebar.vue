@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import { useRoute } from "vue-router";
 
 import { navigation, type NavigationGroup } from "@/config/navigation";
+import { useAuthStore } from "@/stores/auth";
 
 import SidebarAccountMenu from "./SidebarAccountMenu.vue";
 
 const route = useRoute();
+const auth = useAuthStore();
+const visibleNavigation = computed(() =>
+  navigation.filter((item) => auth.isStaff || !item.adminOnly),
+);
 const menu = ref<HTMLElement | null>(null);
 const sidebar = ref<HTMLElement | null>(null);
 const scrollStorageKey = "dashboard:sidebar-scroll-top";
@@ -114,7 +126,7 @@ onBeforeUnmount(() => {
         class="menu w-full overflow-y-auto"
         @scroll.passive="saveScroll"
       >
-        <li v-for="group in navigation" :key="group.label">
+        <li v-for="group in visibleNavigation" :key="group.label">
           <RouterLink v-if="group.to" :to="group.to">
             <AppIcon :name="group.icon" class="size-4" />
             {{ group.label }}

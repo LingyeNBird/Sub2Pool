@@ -15,6 +15,7 @@ const userListMessage = ref("");
 const userListError = ref("");
 const dialog = ref<HTMLDialogElement | null>(null);
 const editingId = ref<number | null>(null);
+const pressedCardId = ref<number | null>(null);
 type ParticipantViewMode = "cards" | "table";
 
 const viewModeStorageKey = "sub2pool:participant-view";
@@ -28,6 +29,7 @@ const form = reactive({
   name: "",
   email: "",
   sub2api_user_id: 0,
+  sub2api_username: "",
   share_percent: 50,
   is_owner: false,
   enabled: true,
@@ -129,11 +131,12 @@ function applySelectedUser() {
   const user = sub2apiUsers.value.find(
     (item) => item.id === form.sub2api_user_id,
   );
-  if (!user || editingId.value) return;
+  if (!user) return;
+  form.sub2api_username =
+    user.username || user.email.split("@")[0] || `用户 ${user.id}`;
+  if (editingId.value) return;
   if (!form.email) form.email = user.email;
-  if (!form.name) {
-    form.name = user.username || user.email.split("@")[0] || `用户 ${user.id}`;
-  }
+  if (!form.name) form.name = form.sub2api_username;
 }
 
 function openNew() {
@@ -144,6 +147,7 @@ function openNew() {
     name: "",
     email: "",
     sub2api_user_id: 0,
+    sub2api_username: "",
     share_percent: participants.value.length ? 50 : 100,
     is_owner: participants.value.length === 0,
     enabled: true,
@@ -161,6 +165,7 @@ function openEdit(participant: Participant) {
     name: participant.name,
     email: participant.email,
     sub2api_user_id: participant.sub2api_user_id,
+    sub2api_username: participant.sub2api_username,
     share_percent: participant.share_percent,
     is_owner: participant.is_owner,
     enabled: participant.enabled,
@@ -190,18 +195,30 @@ async function save() {
   }
 }
 
-async function remove(participant: Participant) {
+async function remove(participant: Participant): Promise<boolean> {
   if (
     !window.confirm(
       `确定删除“${participant.name}”吗？已有账本的参与者只能停用。`,
     )
-  )
-    return;
+  ) {
+    return false;
+  }
   try {
     await api(`participants/${participant.id}`, { method: "DELETE" });
     await load();
+    return true;
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "删除失败";
+    return false;
+  }
+}
+
+async function removeEditingParticipant() {
+  const participant = participants.value.find(
+    (item) => item.id === editingId.value,
+  );
+  if (participant && (await remove(participant))) {
+    dialog.value?.close();
   }
 }
 
@@ -313,173 +330,180 @@ onMounted(() => {
         :key="participant.id"
         class="relative min-w-0 p-3"
       >
-        <div class="hover-3d w-full">
-          <article class="card w-full bg-base-200 shadow-xs">
-            <div class="card-body gap-4">
-              <div class="pr-20">
-                <div class="flex flex-wrap items-center gap-2">
-                  <h3 class="card-title">{{ participant.name }}</h3>
-                  <span
-                    class="badge badge-sm"
-                    :class="
-                      participant.is_owner ? 'badge-neutral' : 'badge-ghost'
-                    "
-                  >
-                    {{ participant.is_owner ? "车主" : "车友" }}
-                  </span>
-                  <span
-                    class="badge badge-sm"
-                    :class="
-                      participant.enabled ? 'badge-success' : 'badge-ghost'
-                    "
-                  >
-                    {{ participant.enabled ? "启用" : "停用" }}
-                  </span>
-                </div>
-                <p class="mt-1 text-sm opacity-60">
-                  {{ participant.email || "未填写邮箱" }} · Sub2API 用户
-                  <span class="font-mono">{{
-                    participant.sub2api_user_id
-                  }}</span>
-                </p>
-              </div>
-
-              <div
-                class="rounded-box bg-base-100 p-3 sm:flex sm:items-center sm:gap-5"
-              >
-                <div class="mb-3 shrink-0 sm:mb-0 sm:min-w-24">
-                  <div class="text-xs opacity-60">合同权益</div>
-                  <div class="mt-1 text-xl font-semibold tabular-nums">
-                    {{ percent(participant.share_percent) }}
-                  </div>
-                </div>
-                <div
-                  class="flex h-8 min-w-0 grow overflow-hidden rounded-box bg-base-300 text-xs font-semibold tabular-nums"
-                  role="img"
-                  :aria-label="`已归属 ${percent(participant.snapshot?.charged_cycle_percent)}, 剩余 ${percent(remainingShare(participant))}`"
-                >
-                  <div
-                    v-if="
-                      (participant.snapshot?.charged_cycle_percent ?? 0) > 0
-                    "
-                    class="flex items-center justify-center overflow-hidden bg-warning px-1 text-warning-content"
-                    :style="{
-                      width: `${allocationSegmentWidth(
-                        participant,
-                        participant.snapshot?.charged_cycle_percent ?? 0,
-                      )}%`,
-                    }"
-                  >
-                    <span class="text-[10px] whitespace-nowrap sm:text-xs">
-                      已用
-                      {{
-                        compactPercent(
-                          participant.snapshot?.charged_cycle_percent,
-                        )
-                      }}
-                    </span>
-                  </div>
-                  <div
-                    v-if="remainingShare(participant) > 0"
-                    class="flex items-center justify-center overflow-hidden bg-primary px-1 text-primary-content"
-                    :style="{
-                      width: `${allocationSegmentWidth(
-                        participant,
-                        remainingShare(participant),
-                      )}%`,
-                    }"
-                  >
-                    <span class="text-[10px] whitespace-nowrap sm:text-xs">
-                      剩余 {{ compactPercent(remainingShare(participant)) }}
-                    </span>
-                  </div>
-                  <div
-                    v-if="
-                      (participant.snapshot?.charged_cycle_percent ?? 0) <= 0 &&
-                      remainingShare(participant) <= 0
-                    "
-                    class="flex grow items-center justify-center opacity-60"
-                  >
-                    暂无可分配权益
-                  </div>
-                </div>
-              </div>
-
-              <div class="grid gap-3 sm:grid-cols-2">
-                <div class="rounded-box bg-base-100 p-3">
-                  <div class="text-xs opacity-60">账号本周期用量</div>
-                  <div class="mt-1 font-semibold tabular-nums">
-                    {{ currency(participant.latest_selected_cost) }}
-                  </div>
-                </div>
-                <div class="rounded-box bg-base-100 p-3">
-                  <div class="text-xs opacity-60">余额</div>
-                  <div class="mt-1 font-semibold tabular-nums">
-                    当前 {{ currency(participant.latest_balance_usd) }} / 建议
-                    {{
-                      currency(participant.snapshot?.recommended_balance_usd)
-                    }}
-                  </div>
-                </div>
-              </div>
-
-              <div class="grid gap-3 sm:grid-cols-2">
+        <div
+          class="w-full cursor-pointer transition-transform duration-150 select-none"
+          :class="{ 'scale-95': pressedCardId === participant.id }"
+          role="button"
+          tabindex="0"
+          :aria-label="`编辑参与者 ${participant.name}`"
+          @click="openEdit(participant)"
+          @keydown.enter.prevent="openEdit(participant)"
+          @keydown.space.prevent="openEdit(participant)"
+          @pointerdown="pressedCardId = participant.id"
+          @pointerup="pressedCardId = null"
+          @pointercancel="pressedCardId = null"
+          @pointerleave="pressedCardId = null"
+        >
+          <div class="hover-3d w-full">
+            <article class="card w-full bg-base-200 shadow-xs">
+              <div class="card-body gap-4">
                 <div>
-                  <div class="text-xs opacity-60">备注</div>
-                  <p class="mt-1 text-sm whitespace-pre-wrap">
-                    {{ participant.notes || "未填写备注" }}
-                  </p>
-                </div>
-                <div>
-                  <div class="text-xs opacity-60">额度建议</div>
-                  <div class="mt-1 flex flex-wrap items-center gap-2">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="card-title">{{ participant.name }}</h3>
                     <span
                       class="badge badge-sm"
                       :class="
-                        participant.snapshot?.needs_manual_update
-                          ? 'badge-warning'
-                          : 'badge-success'
+                        participant.is_owner ? 'badge-neutral' : 'badge-ghost'
                       "
                     >
-                      {{
-                        !participant.snapshot
-                          ? "等待测算"
-                          : participant.snapshot.needs_manual_update
-                            ? "建议调整"
-                            : "无需调整"
-                      }}
+                      {{ participant.is_owner ? "车主" : "车友" }}
                     </span>
-                    <span class="text-sm opacity-60">
-                      {{ participant.snapshot?.reason || "尚无测算依据" }}
+                    <span
+                      class="badge badge-sm"
+                      :class="
+                        participant.enabled ? 'badge-success' : 'badge-ghost'
+                      "
+                    >
+                      {{ participant.enabled ? "启用" : "停用" }}
                     </span>
                   </div>
+                  <p class="mt-1 text-sm opacity-60">
+                    {{ participant.email || "未填写邮箱" }} · Sub2API 账号
+                    <span class="font-medium">{{
+                      participant.sub2api_username
+                    }}</span>
+                  </p>
+                </div>
+
+                <div
+                  class="rounded-box bg-base-100 p-3 sm:flex sm:items-center sm:gap-5"
+                >
+                  <div class="mb-3 shrink-0 sm:mb-0 sm:min-w-24">
+                    <div class="text-xs opacity-60">合同权益</div>
+                    <div class="mt-1 text-xl font-semibold tabular-nums">
+                      {{ percent(participant.share_percent) }}
+                    </div>
+                  </div>
+                  <div
+                    class="flex h-8 min-w-0 grow overflow-hidden rounded-box bg-base-300 text-xs font-semibold tabular-nums"
+                    role="img"
+                    :aria-label="`已归属 ${percent(participant.snapshot?.charged_cycle_percent)}, 剩余 ${percent(remainingShare(participant))}`"
+                  >
+                    <div
+                      v-if="
+                        (participant.snapshot?.charged_cycle_percent ?? 0) > 0
+                      "
+                      class="flex items-center justify-center overflow-hidden bg-warning px-1 text-warning-content"
+                      :style="{
+                        width: `${allocationSegmentWidth(
+                          participant,
+                          participant.snapshot?.charged_cycle_percent ?? 0,
+                        )}%`,
+                      }"
+                    >
+                      <span class="text-[10px] whitespace-nowrap sm:text-xs">
+                        已用
+                        {{
+                          compactPercent(
+                            participant.snapshot?.charged_cycle_percent,
+                          )
+                        }}
+                      </span>
+                    </div>
+                    <div
+                      v-if="remainingShare(participant) > 0"
+                      class="flex items-center justify-center overflow-hidden bg-primary px-1 text-primary-content"
+                      :style="{
+                        width: `${allocationSegmentWidth(
+                          participant,
+                          remainingShare(participant),
+                        )}%`,
+                      }"
+                    >
+                      <span class="text-[10px] whitespace-nowrap sm:text-xs">
+                        剩余 {{ compactPercent(remainingShare(participant)) }}
+                      </span>
+                    </div>
+                    <div
+                      v-if="
+                        (participant.snapshot?.charged_cycle_percent ?? 0) <=
+                          0 && remainingShare(participant) <= 0
+                      "
+                      class="flex grow items-center justify-center opacity-60"
+                    >
+                      暂无可分配权益
+                    </div>
+                  </div>
+                </div>
+
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <div class="rounded-box bg-base-100 p-3">
+                    <div class="text-xs opacity-60">账号本周期用量</div>
+                    <div class="mt-1 font-semibold tabular-nums">
+                      {{ currency(participant.latest_selected_cost) }}
+                    </div>
+                  </div>
+                  <div class="rounded-box bg-base-100 p-3">
+                    <div class="text-xs opacity-60">余额</div>
+                    <div class="mt-1 font-semibold tabular-nums">
+                      当前 {{ currency(participant.latest_balance_usd) }} / 建议
+                      {{
+                        currency(participant.snapshot?.recommended_balance_usd)
+                      }}
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  class="grid gap-3"
+                  :class="{ 'sm:grid-cols-2': participant.notes }"
+                >
+                  <div v-if="participant.notes">
+                    <div class="text-xs opacity-60">备注</div>
+                    <p class="mt-1 text-sm whitespace-pre-wrap">
+                      {{ participant.notes }}
+                    </p>
+                  </div>
+                  <div>
+                    <div class="text-xs opacity-60">额度建议</div>
+                    <div class="mt-1 flex flex-wrap items-center gap-2">
+                      <span
+                        class="badge badge-sm"
+                        :class="
+                          participant.snapshot?.needs_manual_update
+                            ? 'badge-warning'
+                            : 'badge-success'
+                        "
+                      >
+                        {{
+                          !participant.snapshot
+                            ? "等待测算"
+                            : participant.snapshot.needs_manual_update
+                              ? "建议调整"
+                              : "无需调整"
+                        }}
+                      </span>
+                      <span class="text-sm opacity-60">
+                        {{ participant.snapshot?.reason || "尚无测算依据" }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="text-xs opacity-50">
+                  最近探测：{{ dateTime(participant.last_checked_at) }}
                 </div>
               </div>
-
-              <div class="text-xs opacity-50">
-                最近探测：{{ dateTime(participant.last_checked_at) }}
-              </div>
-            </div>
-          </article>
-          <div></div>
-          <div></div>
-          <div></div>
-          <div></div>
-          <div></div>
-          <div></div>
-          <div></div>
-          <div></div>
-        </div>
-        <div class="absolute top-8 right-8 z-10 flex gap-1">
-          <button class="btn btn-ghost btn-xs" @click="openEdit(participant)">
-            编辑
-          </button>
-          <button
-            class="btn btn-ghost text-error btn-xs"
-            @click="remove(participant)"
-          >
-            删除
-          </button>
+            </article>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+          </div>
         </div>
       </div>
     </div>
@@ -592,14 +616,16 @@ onMounted(() => {
                   "
                   :value="form.sub2api_user_id"
                 >
-                  当前用户（ID {{ form.sub2api_user_id }}）
+                  当前用户（{{
+                    form.sub2api_username || `ID ${form.sub2api_user_id}`
+                  }}）
                 </option>
                 <option
                   v-for="user in sub2apiUsers"
                   :key="user.id"
                   :value="user.id"
                 >
-                  {{ user.email || user.username || `用户 ${user.id}` }}（ID
+                  {{ user.username || user.email || `用户 ${user.id}` }}（ID
                   {{ user.id }} · {{ userRoleLabel(user.role) }} ·
                   {{ user.status || "未知状态" }}）
                 </option>
@@ -667,6 +693,15 @@ onMounted(() => {
           />
         </label>
         <div class="modal-action">
+          <button
+            v-if="editingId"
+            type="button"
+            class="btn btn-error"
+            :disabled="saving"
+            @click="removeEditingParticipant"
+          >
+            删除
+          </button>
           <button type="button" class="btn" @click="dialog?.close()">
             取消
           </button>

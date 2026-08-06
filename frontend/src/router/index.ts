@@ -26,7 +26,7 @@ const router = createRouter({
           path: ":pathMatch(.*)*",
           name: "not-found",
           component: NotFoundView,
-          meta: { title: "页面不存在" },
+          meta: { title: "页面不存在", adminOnly: true },
         },
       ],
     },
@@ -41,7 +41,10 @@ router.beforeEach(async (to) => {
     return { name: "login", query: { next: to.fullPath } };
   }
   if (to.name === "login" && authenticated) {
-    return { name: "dashboard" };
+    return { name: auth.isStaff ? "dashboard" : "statistics" };
+  }
+  if (authenticated && !auth.isStaff && to.meta.adminOnly) {
+    return { name: "statistics" };
   }
   return true;
 });

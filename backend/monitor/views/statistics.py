@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.utils import timezone
 
-from .base import AdminAPIView, ok
+from .base import AuthenticatedAPIView, ok
 from .presenters import bounded_query_int, iso
 from ..models import (
     AppSettings,
@@ -210,7 +210,7 @@ def _capacity_summary(
     return {"cycle": cycle_summary, "today": today}
 
 
-class StatisticsView(AdminAPIView):
+class StatisticsView(AuthenticatedAPIView):
     def get(self, request):
         config = AppSettings.load()
         capacity_period = request.query_params.get("capacity_period", "day")
@@ -293,9 +293,14 @@ class StatisticsView(AdminAPIView):
                     }
                 )
 
+        participants = Participant.objects.all()
+        if not request.user.is_staff:
+            participants = participants.filter(authorized_users=request.user)
+
         sample_rows = (
             ParticipantUsageSample.objects.filter(
-                observed_at__gte=now - timedelta(days=usage_days)
+                observed_at__gte=now - timedelta(days=usage_days),
+                participant__in=participants,
             )
             .select_related("participant")
             .order_by("participant_id", "observed_at", "id")
@@ -335,7 +340,7 @@ class StatisticsView(AdminAPIView):
                 "sub2api_user_id": participant.sub2api_user_id,
                 "points": list(usage_buckets[participant.id].values()),
             }
-            for participant in Participant.objects.all()
+            for participant in participants
         ]
         return ok(
             {

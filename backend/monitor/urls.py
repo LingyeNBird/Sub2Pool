@@ -31,6 +31,7 @@ from .views.settings import (
     TestSub2APIView,
 )
 from .views.statistics import StatisticsView
+from .views.users import SystemUserDetailView, SystemUserListView
 
 urlpatterns = [
     path("health", HealthView.as_view()),
@@ -51,6 +52,8 @@ urlpatterns = [
     path("participants/sub2api-users", Sub2APIUserListView.as_view()),
     path("participants", ParticipantListView.as_view()),
     path("participants/<int:participant_id>", ParticipantDetailView.as_view()),
+    path("system-users", SystemUserListView.as_view()),
+    path("system-users/<int:user_id>", SystemUserDetailView.as_view()),
     path("observations", ObservationListView.as_view()),
     path("notifications", NotificationListView.as_view()),
     path("settings", SettingsView.as_view()),

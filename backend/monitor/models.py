@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 from django.core.exceptions import ValidationError
 
 from django.core.validators import MaxValueValidator, MinValueValidator
+from django.conf import settings
 from django.db import models
 
 
@@ -131,10 +132,17 @@ class Participant(models.Model):
     name = models.CharField(max_length=80)
     email = models.EmailField(blank=True)
     sub2api_user_id = models.BigIntegerField(unique=True)
+    # Sub2API 用户名随参与者关系一起缓存，避免首页为了显示名称额外访问 Admin API。
+    sub2api_username = models.CharField(max_length=150, blank=True)
     share_percent = models.DecimalField(max_digits=7, decimal_places=3, validators=PERCENT_VALIDATORS)
     is_owner = models.BooleanField(default=False)
     enabled = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
+    authorized_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name="quota_participants",
+        blank=True,
+    )
 
     # 最近一次本地探测值用于展示；它们不是账本，真正的分配账本在 ParticipantSnapshot。
     latest_balance_usd = models.DecimalField(

@@ -481,9 +481,12 @@ onMounted(load);
         <h2 class="card-title">
           <AppIcon name="calculator" class="size-5" />分配模型
         </h2>
-        <fieldset class="fieldset">
+        <fieldset class="fieldset max-w-full min-w-0 grid-cols-[minmax(0,1fr)]">
           <label class="label">成本口径</label>
-          <select v-model="settings.cost_basis" class="select w-full">
+          <select
+            v-model="settings.cost_basis"
+            class="select w-full max-w-full min-w-0"
+          >
             <option value="actual">实际扣费（推荐）</option>
             <option value="standard">标准计费</option>
           </select>
@@ -493,7 +496,7 @@ onMounted(load);
           </p>
         </fieldset>
         <div class="grid gap-3 md:grid-cols-2">
-          <fieldset class="fieldset">
+          <fieldset class="fieldset min-w-0">
             <label class="label">无样本时美元 / 1%</label>
             <input
               v-model.number="settings.initial_usd_per_percent"
@@ -503,7 +506,7 @@ onMounted(load);
               class="input w-full"
             />
           </fieldset>
-          <fieldset class="fieldset">
+          <fieldset class="fieldset min-w-0">
             <label class="label">安全系数</label>
             <input
               v-model.number="settings.safety_factor"
@@ -514,7 +517,7 @@ onMounted(load);
               class="input w-full"
             />
           </fieldset>
-          <fieldset class="fieldset">
+          <fieldset class="fieldset min-w-0">
             <label class="label">保守分位数</label>
             <input
               v-model.number="settings.conservative_percentile"
@@ -524,7 +527,7 @@ onMounted(load);
               class="input w-full"
             />
           </fieldset>
-          <fieldset class="fieldset">
+          <fieldset class="fieldset min-w-0">
             <label class="label">参与计算的历史样本数</label>
             <input
               v-model.number="settings.rate_history_samples"
@@ -534,7 +537,7 @@ onMounted(load);
               class="input w-full"
             />
           </fieldset>
-          <fieldset class="fieldset">
+          <fieldset class="fieldset min-w-0 grid-cols-[minmax(0,1fr)]">
             <label class="label">日估算最小周限跨度（%）</label>
             <input
               v-model.number="settings.daily_estimate_min_percent_span"
@@ -542,13 +545,13 @@ onMounted(load);
               min="1"
               max="100"
               step="1"
-              class="input w-full"
+              class="input w-full max-w-full min-w-0"
             />
             <p class="label">
               今日观测至少跨过该百分比后才给出日估算，避免整数周限造成过大误差。
             </p>
           </fieldset>
-          <fieldset class="fieldset">
+          <fieldset class="fieldset min-w-0">
             <label class="label">建议差额阈值（美元）</label>
             <input
               v-model.number="settings.recommendation_change_usd"
@@ -558,7 +561,7 @@ onMounted(load);
               class="input w-full"
             />
           </fieldset>
-          <fieldset class="fieldset">
+          <fieldset class="fieldset min-w-0">
             <label class="label">用户余额耗尽预警余量（美元）</label>
             <input
               v-model.number="settings.limit_warning_usd"

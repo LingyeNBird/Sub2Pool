@@ -56,7 +56,7 @@ async function submit() {
   message.value = "";
   try {
     await auth.signIn(username.value, password.value, clientNetwork.value);
-    await router.replace("/");
+    await router.replace(auth.isStaff ? "/" : "/statistics");
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "登录失败";
   } finally {
@@ -80,9 +80,9 @@ onMounted(checkLoginNetwork);
               <img src="/favicon.png" alt="" class="size-5 rounded-md" />
               Sub2API 拼车额度
             </div>
-            <h1 class="card-title text-2xl">管理员登录</h1>
+            <h1 class="card-title text-2xl">用户登录</h1>
             <p class="mt-2 text-sm opacity-60">
-              登录后查看测算结果和手动额度建议。
+              登录后查看权限范围内的额度统计与管理功能。
             </p>
           </div>
           <div v-if="message" class="alert alert-soft text-sm alert-error">

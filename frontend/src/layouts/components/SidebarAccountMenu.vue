@@ -31,7 +31,9 @@ async function logout() {
       </div>
       <span class="grid min-w-0 grow text-left">
         <span class="truncate font-semibold">{{ auth.username }}</span>
-        <span class="truncate text-xs font-normal opacity-60">管理员</span>
+        <span class="truncate text-xs font-normal opacity-60">
+          {{ auth.isStaff ? "管理员" : "普通用户" }}
+        </span>
       </span>
       <AppIcon name="chevron-up" class="size-4" />
     </button>
@@ -41,7 +43,7 @@ async function logout() {
       popover
       style="position-anchor: --sidebar-account-anchor"
     >
-      <li>
+      <li v-if="auth.isStaff">
         <RouterLink to="/settings">
           <AppIcon name="cog-6-tooth" class="size-4" />
           系统设置

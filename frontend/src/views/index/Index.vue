@@ -174,27 +174,29 @@ onMounted(load);
   </section>
 
   <section v-if="data" class="card col-span-12 bg-base-200 shadow-xs">
-    <div class="card-body gap-4">
-      <h2 class="card-title">
-        <AppIcon name="sparkles" class="size-5" />
+    <div class="card-body gap-5">
+      <h2 class="card-title text-xl">
+        <AppIcon name="sparkles" class="size-6" />
         当前额度建议
       </h2>
-      <div v-if="data.participants.length" class="grid gap-3">
+      <div v-if="data.participants.length" class="grid gap-4">
         <article
           v-for="participant in data.participants"
           :key="participant.id"
-          class="rounded-box border border-base-300 bg-base-100 p-4"
+          class="rounded-box border border-base-300 bg-base-100 p-5"
         >
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <p class="leading-7">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <p class="text-lg leading-9 font-semibold sm:text-xl">
               对于参与者
-              <strong>{{ participant.name }}</strong>
+              <strong class="text-xl sm:text-2xl">{{
+                participant.name
+              }}</strong>
               （Sub2API 账号
-              <span class="font-mono">{{ participant.sub2api_user_id }}</span
+              <span class="font-bold">{{ participant.sub2api_username }}</span
               >），
               <template v-if="participant.snapshot">
                 建议把 Sub2API 用户余额设置为
-                <strong class="text-lg">{{
+                <strong class="text-2xl font-bold text-primary sm:text-3xl">{{
                   currency(participant.snapshot.recommended_balance_usd)
                 }}</strong
                 >。
@@ -202,7 +204,7 @@ onMounted(load);
               <template v-else> 尚无额度建议，请先完成一次有效测算。 </template>
             </p>
             <span
-              class="badge badge-sm"
+              class="badge"
               :class="
                 participant.snapshot?.needs_manual_update
                   ? 'badge-warning'
@@ -218,19 +220,17 @@ onMounted(load);
               }}
             </span>
           </div>
-          <p class="mt-2 text-sm opacity-60">
-            该参与者在所选 OpenAI 上游账号内的本周期累计用量为
-            {{ currency(participant.latest_selected_cost) }}。
+          <p v-if="participant.snapshot" class="mt-3 text-sm opacity-60">
+            该参与者本周期用量为
+            {{ currency(participant.latest_selected_cost) }}，当前余额为
+            {{ currency(participant.latest_balance_usd) }}，{{
+              participant.snapshot.needs_manual_update
+                ? "和建议余额差异较大。"
+                : "与建议余额的差异未达到调整阈值。"
+            }}
           </p>
-          <p class="mt-1 text-sm opacity-60">
-            当前 Sub2API 用户余额为
-            {{ currency(participant.latest_balance_usd) }}；
-            {{ participant.snapshot?.reason || "等待首次测算后生成依据" }}。
-          </p>
-          <p v-if="participant.snapshot" class="mt-1 text-sm opacity-60">
-            已归属上游周限
-            {{ percent(participant.snapshot.charged_cycle_percent) }}，剩余权益
-            {{ percent(participant.snapshot.remaining_share_percent) }}。
+          <p v-else class="mt-3 text-sm opacity-60">
+            该参与者尚无本周期测算数据。
           </p>
         </article>
       </div>

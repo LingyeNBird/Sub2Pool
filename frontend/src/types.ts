@@ -18,6 +18,7 @@ export interface Participant {
   name: string;
   email: string;
   sub2api_user_id: number;
+  sub2api_username: string;
   share_percent: number;
   is_owner: boolean;
   enabled: boolean;
@@ -34,6 +35,17 @@ export interface Sub2APIUserOption {
   username: string;
   status: string;
   role: string;
+}
+
+export interface SystemUser {
+  id: number;
+  username: string;
+  email: string;
+  is_active: boolean;
+  participant_ids: number[];
+  participant_names: string[];
+  last_login: string | null;
+  date_joined: string;
 }
 
 export interface RateSample {

@@ -38,7 +38,7 @@ withDefaults(
             class="block size-3 rounded-full bg-primary ring-4 ring-primary/20"
           ></span>
         </div>
-        <div class="timeline-end w-full max-w-64 timeline-box text-left">
+        <div class="timeline-start w-full max-w-64 timeline-box text-left">
           <div class="text-xs opacity-60">{{ endLabel }}</div>
           <div class="mt-1 font-semibold">{{ endTime }}</div>
           <div class="mt-1 tabular-nums">{{ endValue }}</div>

@@ -8,16 +8,35 @@ from ..models import AppSettings, Participant
 from ..serializers import ParticipantWriteSerializer
 from ..sub2api import Sub2APIClient, Sub2APIError
 
+
 class Sub2APIUserListView(AdminAPIView):
     def get(self, _request):
         try:
             with Sub2APIClient(AppSettings.load()) as client:
                 users = client.list_users()
+            # 用户名是展示元数据；读取 Admin 用户列表时顺手刷新本地缓存，
+            # 首页此后不需要为了显示名称再次请求 Sub2API。
+            usernames = {
+                int(item["id"]): str(item.get("username") or "")
+                for item in users
+                if item.get("username")
+            }
+            cached = list(
+                Participant.objects.filter(
+                    sub2api_user_id__in=usernames,
+                )
+            )
+            changed = []
+            for participant in cached:
+                username = usernames[participant.sub2api_user_id]
+                if participant.sub2api_username != username:
+                    participant.sub2api_username = username
+                    changed.append(participant)
+            if changed:
+                Participant.objects.bulk_update(changed, ["sub2api_username"])
         except (Sub2APIError, ValueError) as exc:
             return error(str(exc), status.HTTP_502_BAD_GATEWAY)
         return ok(users)
-
-
 
 class ParticipantListView(AdminAPIView):
     def get(self, _request):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -26,6 +26,11 @@ class AdminAPIView(APIView):
     """显式要求已通过 JWT 认证的管理员。"""
 
     permission_classes = [IsAdminUser]
+
+class AuthenticatedAPIView(APIView):
+    """允许已通过 JWT 认证的管理员和普通用户。"""
+
+    permission_classes = [IsAuthenticated]
 
 
 class PublicAPIView(APIView):
