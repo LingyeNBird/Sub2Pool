@@ -177,6 +177,32 @@ wheels = [
 ]
 
 [[package]]
+name = "djangorestframework"
+version = "3.17.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3b/35/c96055e700fdff25da3a7b7756cfd1d4dc54f38b9bc6d6c5e19e3a0fdc20/djangorestframework-3.17.2.tar.gz", hash = "sha256:89ed713b6dc83e1539f214b7d10808ae19bb8511004beba886225da6d5c9dafa", size = 906683, upload-time = "2026-08-05T07:47:22.5Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a2/46/c14108e400b208c394325eb63fbae06c81341b6447fa1a6f9da718b17fe7/djangorestframework-3.17.2-py3-none-any.whl", hash = "sha256:cb0546a7415d5b46c04e0f4fe0a54b2109f4fdd5e83ca773c8c6183a6493d042", size = 899109, upload-time = "2026-08-05T07:47:20.853Z" },
+]
+
+[[package]]
+name = "djangorestframework-simplejwt"
+version = "5.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+    { name = "djangorestframework" },
+    { name = "pyjwt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a8/27/2874a325c11112066139769f7794afae238a07ce6adf96259f08fd37a9d7/djangorestframework_simplejwt-5.5.1.tar.gz", hash = "sha256:e72c5572f51d7803021288e2057afcbd03f17fe11d484096f40a460abc76e87f", size = 101265, upload-time = "2025-07-21T16:52:25.026Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/60/94/fdfb7b2f0b16cd3ed4d4171c55c1c07a2d1e3b106c5978c8ad0c15b4a48b/djangorestframework_simplejwt-5.5.1-py3-none-any.whl", hash = "sha256:2c30f3707053d384e9f315d11c2daccfcb548d4faa453111ca19a542b732e469", size = 107674, upload-time = "2025-07-21T16:52:07.493Z" },
+]
+
+[[package]]
 name = "gunicorn"
 version = "23.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -280,6 +306,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyjwt"
+version = "2.13.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/81/58d0ac84e1ef3a3843791d6954d94c0b33d526c75eeb1efbce9d0a4c4077/pyjwt-2.13.0.tar.gz", hash = "sha256:41571c89ca91598c79e8ef18a2d07367d4810fbbd6f637794879baf1b7703423", size = 107515, upload-time = "2026-05-21T19:54:36.618Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/5e/ecf12fdb62546d64385c158514e9b2b671f7832108ef2ecd2020ce0af2d1/pyjwt-2.13.0-py3-none-any.whl", hash = "sha256:66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728", size = 31274, upload-time = "2026-05-21T19:54:35.362Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "8.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -323,6 +358,8 @@ source = { virtual = "." }
 dependencies = [
     { name = "cryptography" },
     { name = "django" },
+    { name = "djangorestframework" },
+    { name = "djangorestframework-simplejwt" },
     { name = "gunicorn" },
     { name = "httpx" },
     { name = "whitenoise" },
@@ -338,6 +375,8 @@ dev = [
 requires-dist = [
     { name = "cryptography", specifier = ">=45.0,<46" },
     { name = "django", specifier = ">=5.2,<5.3" },
+    { name = "djangorestframework", specifier = ">=3.16,<3.18" },
+    { name = "djangorestframework-simplejwt", specifier = ">=5.5,<6" },
     { name = "gunicorn", specifier = ">=23.0,<24" },
     { name = "httpx", specifier = ">=0.28,<0.29" },
     { name = "whitenoise", specifier = ">=6.9,<7" },

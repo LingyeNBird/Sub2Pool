@@ -2,6 +2,7 @@
 
 生产环境只从环境变量读取站点级安全参数；可在页面中调整的业务参数保存在 SQLite。
 """
+from datetime import timedelta
 from pathlib import Path
 import os
 
@@ -15,7 +16,7 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
 if not SECRET_KEY:
     if DEBUG:
-        SECRET_KEY = "dev-only-change-me"
+        SECRET_KEY = "dev-only-change-me-use-at-least-32-bytes"
     else:
         raise ImproperlyConfigured("生产环境必须设置 DJANGO_SECRET_KEY")
 
@@ -32,6 +33,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "rest_framework",
+    "rest_framework_simplejwt.token_blacklist",
     "monitor.apps.MonitorConfig",
 ]
 MIDDLEWARE = [
@@ -83,12 +86,43 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Web API 统一使用 DRF + Bearer JWT。默认权限设为管理员，新增接口若忘记声明
+# permission_classes 也会保持拒绝访问；登录、刷新和健康检查在各自 View 中显式放行。
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.IsAdminUser",
+    ),
+    "EXCEPTION_HANDLER": "monitor.exceptions.api_exception_handler",
+    "COERCE_DECIMAL_TO_STRING": False,
+}
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(
+        minutes=int(os.environ.get("JWT_ACCESS_MINUTES", "15"))
+    ),
+    "REFRESH_TOKEN_LIFETIME": timedelta(
+        days=int(os.environ.get("JWT_REFRESH_DAYS", "7"))
+    ),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    # 密码修改后，所有旧 Access/Refresh Token 都会因密码哈希不匹配而失效。
+    "CHECK_REVOKE_TOKEN": True,
+}
+JWT_REFRESH_COOKIE_NAME = "pinche_refresh"
+JWT_REFRESH_COOKIE_PATH = "/api/auth/"
+JWT_REFRESH_COOKIE_SAMESITE = "Lax"
+
+
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").lower() == "true"
 CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
+JWT_REFRESH_COOKIE_SECURE = SESSION_COOKIE_SECURE
 SESSION_COOKIE_AGE = int(os.environ.get("SESSION_COOKIE_AGE", "43200"))
 SESSION_SAVE_EVERY_REQUEST = True
 X_FRAME_OPTIONS = "DENY"

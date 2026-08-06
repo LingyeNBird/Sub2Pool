@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
-import { ApiError, api, jsonBody } from "@/services/api";
+import { ApiError, api, jsonBody, setAccessToken } from "@/services/api";
 import type { AppSettingsData } from "@/types";
 
 const settings = ref<AppSettingsData | null>(null);
@@ -80,10 +80,14 @@ async function changePassword() {
     return;
   }
   try {
-    await api("auth/password", {
-      method: "POST",
-      body: jsonBody(passwordForm),
-    });
+    const result = await api<{ changed: boolean; access: string }>(
+      "auth/password",
+      {
+        method: "POST",
+        body: jsonBody(passwordForm),
+      },
+    );
+    setAccessToken(result.access);
     Object.assign(passwordForm, {
       old_password: "",
       new_password: "",

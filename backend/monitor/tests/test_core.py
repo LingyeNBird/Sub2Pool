@@ -25,6 +25,27 @@ from monitor.notifications import send_notification
 from monitor.secrets import encrypt_secret
 from monitor.sub2api import PlatformQuota, Sub2APIClient, UsageStats, WeeklyWindow
 
+def jwt_login(
+    client: Client,
+    username: str = "owner",
+    password: str = "very-strong-password",
+    **extra,
+) -> tuple[dict[str, str], object]:
+    response = client.post(
+        "/api/auth/login",
+        data=json.dumps(
+            {
+                "username": username,
+                "password": password,
+                **extra,
+            }
+        ),
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    access = response.json()["data"]["access"]
+    return {"HTTP_AUTHORIZATION": f"Bearer {access}"}, response
+
 
 @pytest.mark.django_db
 def test_default_query_mode_is_passive():
@@ -118,23 +139,93 @@ def test_initial_observation_conserves_percent_and_builds_manual_recommendations
 
 
 @pytest.mark.django_db
-def test_api_requires_admin_session_and_accepts_admin_login():
-    user = get_user_model().objects.create_superuser(username="owner", password="very-strong-password", email="owner@example.com")
-    client = Client()
+def test_api_requires_admin_jwt_and_accepts_admin_login():
+    user = get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client(enforce_csrf_checks=True)
     unauthorized = client.get("/api/dashboard")
     assert unauthorized.status_code == 401
     assert unauthorized.json()["ok"] is False
 
-    logged_in = client.post(
-        "/api/auth/login",
-        data='{"username":"owner","password":"very-strong-password"}',
-        content_type="application/json",
-    )
-    assert logged_in.status_code == 200
-    dashboard = client.get("/api/dashboard")
+    headers, logged_in = jwt_login(client)
+    assert "access" in logged_in.json()["data"]
+    assert "refresh" not in logged_in.json()["data"]
+    assert logged_in.cookies["pinche_refresh"]["httponly"]
+    assert "sessionid" not in logged_in.cookies
+
+    dashboard = client.get("/api/dashboard", **headers)
     assert dashboard.status_code == 200
     assert dashboard.json()["data"]["quota_query_mode"] == "passive"
     assert user.is_staff
+
+@pytest.mark.django_db
+def test_refresh_rotation_blacklists_old_cookie_and_logout_clears_current_cookie():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client(enforce_csrf_checks=True)
+    _, logged_in = jwt_login(client)
+    old_refresh = logged_in.cookies["pinche_refresh"].value
+
+    refreshed = client.post(
+        "/api/auth/refresh",
+        data="{}",
+        content_type="application/json",
+    )
+    assert refreshed.status_code == 200
+    new_access = refreshed.json()["data"]["access"]
+    new_refresh = refreshed.cookies["pinche_refresh"].value
+    assert new_refresh != old_refresh
+
+    replay = Client()
+    replay.cookies["pinche_refresh"] = old_refresh
+    assert replay.post("/api/auth/refresh").status_code == 401
+
+    logout = client.post(
+        "/api/auth/logout",
+        HTTP_AUTHORIZATION=f"Bearer {new_access}",
+    )
+    assert logout.status_code == 200
+    assert logout.cookies["pinche_refresh"]["max-age"] == 0
+    assert client.post("/api/auth/refresh").status_code == 401
+
+
+@pytest.mark.django_db
+def test_password_change_reissues_tokens_and_revokes_old_access():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client(enforce_csrf_checks=True)
+    old_headers, _ = jwt_login(client)
+
+    changed = client.post(
+        "/api/auth/password",
+        data=json.dumps(
+            {
+                "old_password": "very-strong-password",
+                "new_password": "another-very-strong-password",
+            }
+        ),
+        content_type="application/json",
+        **old_headers,
+    )
+    assert changed.status_code == 200
+    new_access = changed.json()["data"]["access"]
+    assert client.get("/api/auth/me", **old_headers).status_code == 401
+    assert (
+        client.get(
+            "/api/auth/me",
+            HTTP_AUTHORIZATION=f"Bearer {new_access}",
+        ).status_code
+        == 200
+    )
 
 
 @pytest.mark.django_db
@@ -144,18 +235,15 @@ def test_settings_round_trip_accepts_internal_docker_url_and_decimal_values():
         password="very-strong-password",
         email="owner@example.com",
     )
-    client = Client()
-    client.post(
-        "/api/auth/login",
-        data='{"username":"owner","password":"very-strong-password"}',
-        content_type="application/json",
-    )
-    payload = client.get("/api/settings").json()["data"]
+    client = Client(enforce_csrf_checks=True)
+    headers, _ = jwt_login(client)
+    payload = client.get("/api/settings", **headers).json()["data"]
     payload["local_poll_minutes"] = 11
     response = client.patch(
         "/api/settings",
         data=json.dumps(payload),
         content_type="application/json",
+        **headers,
     )
 
     assert response.status_code == 200
@@ -226,7 +314,11 @@ def test_login_audit_records_server_and_webrtc_addresses(settings):
         ),
         **common,
     )
-    assert success.status_code == 200
+    headers = {
+        "HTTP_AUTHORIZATION": (
+            f"Bearer {success.json()['data']['access']}"
+        )
+    }
 
     rows = list(LoginEvent.objects.order_by("created_at"))
     assert len(rows) == 2
@@ -238,7 +330,7 @@ def test_login_audit_records_server_and_webrtc_addresses(settings):
     assert rows[1].webrtc_ips == ["192.168.1.8", "203.0.113.9"]
     assert rows[1].user_agent == "Audit Browser/1.0"
 
-    audit = client.get("/api/login-events").json()["data"]
+    audit = client.get("/api/login-events", **headers).json()["data"]
     assert audit["success_count"] == 1
     assert audit["failure_count"] == 1
     assert audit["unique_request_ips"] == 1
@@ -252,11 +344,7 @@ def test_statistics_groups_capacity_and_participant_usage():
         email="owner@example.com",
     )
     client = Client()
-    client.post(
-        "/api/auth/login",
-        data='{"username":"owner","password":"very-strong-password"}',
-        content_type="application/json",
-    )
+    headers, _ = jwt_login(client)
     participant = Participant.objects.create(
         name="车友",
         sub2api_user_id=22,
@@ -312,7 +400,8 @@ def test_statistics_groups_capacity_and_participant_usage():
 
     daily = client.get(
         "/api/statistics?capacity_period=day&capacity_days=365"
-        "&usage_days=7&usage_precision=hour"
+        "&usage_days=7&usage_precision=hour",
+        **headers,
     ).json()["data"]
     assert daily["capacity_series"][-1]["weekly_total_usd"] == 1600.0
     assert len(daily["participant_series"][0]["points"]) == 1
@@ -322,7 +411,8 @@ def test_statistics_groups_capacity_and_participant_usage():
     )
 
     monthly = client.get(
-        "/api/statistics?capacity_period=month&capacity_days=365"
+        "/api/statistics?capacity_period=month&capacity_days=365",
+        **headers,
     ).json()["data"]
     base_month = base.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m")
     month = next(
