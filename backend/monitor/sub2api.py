@@ -1,12 +1,13 @@
-"""Sub2API Admin API 的只读客户端。
+"""Sub2API Admin API 客户端。
 
-本模块只暴露 GET 方法，刻意不实现 PUT/POST，保证本服务不会自动修改用户额度。
+常规采样方法全部只读；唯一写操作仅供首页“一键设置”把某个用户余额设为当前建议值。
 """
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urljoin
+from uuid import uuid4
 
 import httpx
 
@@ -82,28 +83,40 @@ class Sub2APIClient:
     def __exit__(self, *_args) -> None:
         self.client.close()
 
-    def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        # urljoin 会处理用户在设置页中是否填写末尾斜杠，但 path 必须保持相对形式。
-        url = urljoin(self.base_url, path.lstrip("/"))
-        try:
-            response = self.client.get(url, params=params)
-        except httpx.HTTPError as exc:
-            raise Sub2APIError(f"无法连接 Sub2API：{exc.__class__.__name__}") from exc
+    @staticmethod
+    def _response_data(response: httpx.Response) -> Any:
         if response.status_code >= 400:
             try:
                 message = response.json().get("message", "")
             except ValueError:
                 message = ""
             suffix = f"：{message}" if message else ""
-            raise Sub2APIError(f"Sub2API 返回 HTTP {response.status_code}{suffix}")
+            raise Sub2APIError(
+                f"Sub2API 返回 HTTP {response.status_code}{suffix}"
+            )
         try:
             payload = response.json()
         except ValueError as exc:
             raise Sub2APIError("Sub2API 返回的不是 JSON") from exc
         if not isinstance(payload, dict) or payload.get("code") != 0:
-            message = payload.get("message", "未知错误") if isinstance(payload, dict) else "响应结构错误"
+            message = (
+                payload.get("message", "未知错误")
+                if isinstance(payload, dict)
+                else "响应结构错误"
+            )
             raise Sub2APIError(f"Sub2API 请求失败：{message}")
         return payload.get("data")
+
+    def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        # urljoin 会处理用户在设置页中是否填写末尾斜杠，但 path 必须保持相对形式。
+        url = urljoin(self.base_url, path.lstrip("/"))
+        try:
+            response = self.client.get(url, params=params)
+        except httpx.HTTPError as exc:
+            raise Sub2APIError(
+                f"无法连接 Sub2API：{exc.__class__.__name__}"
+            ) from exc
+        return self._response_data(response)
 
     def list_openai_accounts(self) -> list[dict[str, Any]]:
         """分页读取 Sub2API 中的 OpenAI 上游账号，只返回下拉框所需的非敏感字段。"""
@@ -337,6 +350,48 @@ class Sub2APIClient:
             balance=_decimal(data.get("balance"), "balance"),
             frozen_balance=_decimal(data.get("frozen_balance"), "frozen_balance"),
         )
+
+    def set_user_balance_from_recommendation(
+        self,
+        user_id: int,
+        balance: Decimal,
+    ) -> Decimal:
+        """把用户余额设为建议值；不会修改并发、分组、订阅或任何其他配置。"""
+        if balance <= 0:
+            raise Sub2APIError(
+                "Sub2API 原生余额调整接口只接受大于 0 的余额，请前往管理后台手动处理"
+            )
+        url = urljoin(
+            self.base_url,
+            f"api/v1/admin/users/{user_id}/balance",
+        )
+        try:
+            response = self.client.post(
+                url,
+                json={
+                    "balance": float(balance),
+                    "operation": "set",
+                    "notes": "Sub2Pool 一键应用额度建议",
+                },
+                headers={"Idempotency-Key": uuid4().hex},
+            )
+        except httpx.HTTPError as exc:
+            raise Sub2APIError(
+                f"无法连接 Sub2API：{exc.__class__.__name__}"
+            ) from exc
+        data = self._response_data(response)
+        if not isinstance(data, dict):
+            raise Sub2APIError("Sub2API 用户余额更新响应结构错误")
+        try:
+            returned_id = int(data.get("id"))
+        except (TypeError, ValueError) as exc:
+            raise Sub2APIError("Sub2API 用户余额更新响应缺少有效 ID") from exc
+        if returned_id != user_id:
+            raise Sub2APIError("Sub2API 用户余额更新响应 ID 不匹配")
+        confirmed = _decimal(data.get("balance"), "balance")
+        if abs(confirmed - balance) > Decimal("0.0001"):
+            raise Sub2APIError("Sub2API 返回的用户余额与建议值不一致")
+        return confirmed
 
     def test_connection(self, account_id: int | None, quota_query_mode: str = "passive") -> dict[str, Any]:
         users = self._get("api/v1/admin/users", params={"page": 1, "page_size": 1})

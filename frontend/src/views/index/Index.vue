@@ -6,7 +6,7 @@ import CalculationBasisHeader from "@/components/common/CalculationBasisHeader.v
 import CalculationBasisTimeline from "@/components/common/CalculationBasisTimeline.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
-import type { DashboardData } from "@/types";
+import type { DashboardData, Participant } from "@/types";
 
 const dateTime = useDateTime();
 const data = ref<DashboardData | null>(null);
@@ -14,10 +14,71 @@ const loading = ref(true);
 const running = ref(false);
 const message = ref("");
 const rateBasisDialog = ref<HTMLDialogElement | null>(null);
+const actionDialog = ref<HTMLDialogElement | null>(null);
+const selectedParticipant = ref<Participant | null>(null);
+const applyingParticipantId = ref<number | null>(null);
+const appliedParticipantIds = ref<number[]>([]);
+const actionToast = ref("");
 
 function openRateBasis() {
   if (!data.value?.cycle?.rate_calculated) return;
   rateBasisDialog.value?.showModal();
+}
+
+function isApplied(participantId: number) {
+  return appliedParticipantIds.value.includes(participantId);
+}
+
+function canApplyRecommendation(participant: Participant | null) {
+  return (
+    participant?.snapshot?.recommended_balance_usd != null &&
+    participant.snapshot.recommended_balance_usd > 0
+  );
+}
+
+function openRecommendationActions(participant: Participant) {
+  if (isApplied(participant.id)) return;
+  selectedParticipant.value = participant;
+  actionDialog.value?.showModal();
+}
+
+function openAdminApi() {
+  actionDialog.value?.close();
+  selectedParticipant.value = null;
+  if (data.value?.sub2api_admin_url) {
+    window.open(data.value.sub2api_admin_url, "_blank", "noopener,noreferrer");
+  }
+}
+
+async function applyRecommendation() {
+  const participant = selectedParticipant.value;
+  if (
+    !participant ||
+    !canApplyRecommendation(participant) ||
+    applyingParticipantId.value != null
+  )
+    return;
+
+  applyingParticipantId.value = participant.id;
+  actionToast.value = "";
+  message.value = "";
+  try {
+    await api(`dashboard/participants/${participant.id}/apply-recommendation`, {
+      method: "POST",
+    });
+    appliedParticipantIds.value = [
+      ...appliedParticipantIds.value,
+      participant.id,
+    ];
+    actionDialog.value?.close();
+    selectedParticipant.value = null;
+  } catch (error) {
+    actionToast.value = "一键设置失败";
+    message.value =
+      error instanceof ApiError ? error.message : "一键设置额度失败";
+  } finally {
+    applyingParticipantId.value = null;
+  }
 }
 
 function currency(value: number | null | undefined) {
@@ -82,6 +143,13 @@ onMounted(load);
       </RouterLink>
     </div>
   </PageShellHeader>
+
+  <div v-if="actionToast" class="toast toast-center toast-top z-50">
+    <div class="alert alert-error shadow-lg">
+      <AppIcon name="exclamation-triangle" class="size-5" />
+      <span>{{ actionToast }}</span>
+    </div>
+  </div>
 
   <div v-if="message" class="col-span-12 alert alert-error">
     <AppIcon name="exclamation-triangle" class="size-5" />
@@ -181,62 +249,78 @@ onMounted(load);
         当前额度建议
       </h2>
       <div v-if="data.participants.length" class="grid gap-4">
-        <article
+        <button
           v-for="participant in data.participants"
           :key="participant.id"
-          class="rounded-box border border-base-300 bg-base-100 p-5"
+          type="button"
+          class="relative w-full rounded-box border border-base-300 bg-base-100 p-5 text-left"
+          :class="
+            isApplied(participant.id) ? 'cursor-default' : 'cursor-pointer'
+          "
+          :disabled="isApplied(participant.id)"
+          :aria-label="`处理参与者 ${participant.name} 的额度建议`"
+          @click="openRecommendationActions(participant)"
         >
-          <div class="flex flex-wrap items-start justify-between gap-4">
-            <p class="text-lg leading-9 font-semibold sm:text-xl">
-              对于参与者
-              <strong class="text-xl sm:text-2xl">{{
-                participant.name
-              }}</strong>
-              （Sub2API 账号
-              <span class="font-bold">{{ participant.sub2api_identity }}</span
-              >），
-              <template v-if="participant.snapshot">
-                建议把 Sub2API 用户余额设置为
-                <strong class="text-2xl font-bold text-primary sm:text-3xl">{{
-                  currency(participant.snapshot.recommended_balance_usd)
-                }}</strong
-                >。
-              </template>
-              <template v-else> 尚无额度建议，请先完成一次有效测算。 </template>
-            </p>
-            <span
-              class="badge"
-              :class="
-                participant.snapshot?.needs_manual_update
-                  ? 'badge-warning'
-                  : 'badge-success'
-              "
-            >
-              {{
-                !participant.snapshot
-                  ? "等待测算"
-                  : participant.snapshot.needs_manual_update
-                    ? "建议手动调整"
-                    : "当前无需调整"
+          <AppIcon
+            v-if="isApplied(participant.id)"
+            name="check-circle"
+            class="absolute top-1/2 left-6 z-10 size-14 -translate-y-1/2 text-success"
+          />
+          <div :class="{ 'blur-sm': isApplied(participant.id) }">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <p class="text-lg leading-9 font-semibold sm:text-xl">
+                对于参与者
+                <strong class="text-xl sm:text-2xl">{{
+                  participant.name
+                }}</strong>
+                （Sub2API 账号
+                <span class="font-bold">{{ participant.sub2api_identity }}</span
+                >），
+                <template v-if="participant.snapshot">
+                  建议把 Sub2API 用户余额设置为
+                  <strong class="text-2xl font-bold text-primary sm:text-3xl">{{
+                    currency(participant.snapshot.recommended_balance_usd)
+                  }}</strong
+                  >。
+                </template>
+                <template v-else>
+                  尚无额度建议，请先完成一次有效测算。
+                </template>
+              </p>
+              <span
+                class="badge"
+                :class="
+                  participant.snapshot?.needs_manual_update
+                    ? 'badge-warning'
+                    : 'badge-success'
+                "
+              >
+                {{
+                  !participant.snapshot
+                    ? "等待测算"
+                    : participant.snapshot.needs_manual_update
+                      ? "建议手动调整"
+                      : "当前无需调整"
+                }}
+              </span>
+            </div>
+            <p v-if="participant.snapshot" class="mt-3 text-sm opacity-60">
+              该参与者本周期用量为
+              {{ currency(participant.latest_selected_cost) }}，当前余额为
+              {{ currency(participant.latest_balance_usd) }}，{{
+                participant.snapshot.needs_manual_update
+                  ? "和建议余额差异较大。"
+                  : "与建议余额的差异未达到调整阈值。"
               }}
-            </span>
+            </p>
+            <p v-else class="mt-3 text-sm opacity-60">
+              该参与者尚无本周期测算数据。
+            </p>
           </div>
-          <p v-if="participant.snapshot" class="mt-3 text-sm opacity-60">
-            该参与者本周期用量为
-            {{ currency(participant.latest_selected_cost) }}，当前余额为
-            {{ currency(participant.latest_balance_usd) }}，{{
-              participant.snapshot.needs_manual_update
-                ? "和建议余额差异较大。"
-                : "与建议余额的差异未达到调整阈值。"
-            }}
-          </p>
-          <p v-else class="mt-3 text-sm opacity-60">
-            该参与者尚无本周期测算数据。
-          </p>
-        </article>
+        </button>
       </div>
       <div v-else class="py-6 text-center opacity-60">
-        尚未添加参与者，无法生成额度建议。
+        当前没有可展示的额度建议。
       </div>
     </div>
   </section>
@@ -307,6 +391,80 @@ onMounted(load);
       </p>
     </div>
   </section>
+  <dialog ref="actionDialog" class="modal">
+    <div class="modal-box max-w-xl">
+      <form method="dialog">
+        <button
+          class="btn absolute top-3 right-3 btn-circle btn-ghost btn-sm"
+          aria-label="关闭"
+        >
+          ✕
+        </button>
+      </form>
+      <h2 class="mb-4 card-title text-xl">处理额度建议</h2>
+      <div class="grid min-h-80 grid-rows-2 gap-3">
+        <button
+          type="button"
+          class="card h-full w-full border border-base-300 bg-base-200 text-left shadow-xs"
+          @click="openAdminApi"
+        >
+          <span class="card-body flex-row items-center gap-4">
+            <AppIcon name="link" class="size-8 shrink-0 text-primary" />
+            <span>
+              <span class="card-title">跳转至 Admin API</span>
+              <span class="mt-1 block text-sm opacity-60">
+                {{ data?.sub2api_admin_url }}
+              </span>
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="card h-full w-full border border-base-300 bg-base-200 text-left shadow-xs disabled:opacity-50"
+          :disabled="
+            applyingParticipantId != null ||
+            !canApplyRecommendation(selectedParticipant)
+          "
+          @click="applyRecommendation"
+        >
+          <span class="card-body flex-row items-center gap-4">
+            <span
+              v-if="applyingParticipantId != null"
+              class="loading loading-lg loading-spinner"
+            ></span>
+            <AppIcon v-else name="bolt" class="size-8 shrink-0 text-primary" />
+            <span>
+              <span class="card-title">
+                {{
+                  applyingParticipantId != null ? "正在设置余额" : "一键设置"
+                }}
+              </span>
+              <span class="mt-1 block text-sm opacity-60">
+                <template
+                  v-if="
+                    selectedParticipant?.snapshot?.recommended_balance_usd !=
+                    null
+                  "
+                >
+                  将 Sub2API 用户余额设置为
+                  {{
+                    currency(
+                      selectedParticipant.snapshot.recommended_balance_usd,
+                    )
+                  }}
+                </template>
+                <template v-else>当前没有可应用的额度建议</template>
+              </span>
+            </span>
+          </span>
+        </button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button>关闭</button>
+    </form>
+  </dialog>
+
   <dialog ref="rateBasisDialog" class="modal">
     <div class="modal-box max-w-3xl">
       <form method="dialog">

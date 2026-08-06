@@ -28,7 +28,13 @@ from monitor.models import (
 )
 from monitor.notifications import send_notification
 from monitor.secrets import encrypt_secret
-from monitor.sub2api import Sub2APIClient, UsageStats, UserBalance, WeeklyWindow
+from monitor.sub2api import (
+    Sub2APIClient,
+    Sub2APIError,
+    UsageStats,
+    UserBalance,
+    WeeklyWindow,
+)
 from monitor import database_transfer
 
 def jwt_login(
@@ -51,6 +57,36 @@ def jwt_login(
     assert response.status_code == 200
     access = response.json()["data"]["access"]
     return {"HTTP_AUTHORIZATION": f"Bearer {access}"}, response
+
+def create_recommendation_snapshot(
+    participant: Participant,
+    recommended: Decimal = Decimal("123.45"),
+) -> ParticipantSnapshot:
+    now = timezone.now()
+    cycle = QuotaCycle.objects.create(
+        account_id=7,
+        window_seconds=604800,
+        starts_at=now - timedelta(days=3),
+        resets_at=now + timedelta(days=4),
+    )
+    observation = Observation.objects.create(
+        cycle=cycle,
+        observed_at=now,
+        upstream_used_percent=Decimal("20"),
+        selected_total_cost=Decimal("400"),
+        total_standard_cost=Decimal("400"),
+        total_actual_cost=Decimal("400"),
+        effective_usd_per_percent=Decimal("20"),
+    )
+    return ParticipantSnapshot.objects.create(
+        observation=observation,
+        participant=participant,
+        selected_cost=Decimal("200"),
+        current_balance_usd=Decimal("80"),
+        recommended_balance_usd=recommended,
+        balance_difference_usd=recommended - Decimal("80"),
+        needs_manual_update=True,
+    )
 
 
 @pytest.mark.django_db
@@ -261,6 +297,160 @@ def test_user_balance_reads_user_detail_without_platform_quota_endpoint():
         frozen_balance=Decimal("2.5"),
     )
     assert requested_paths == ["/api/v1/admin/users/51"]
+
+
+@pytest.mark.django_db
+def test_recommendation_balance_write_uses_dedicated_sub2api_endpoint():
+    config = AppSettings.load()
+    config.sub2api_base_url = "https://sub2api.example/"
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.save()
+    requested: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested["method"] = request.method
+        requested["path"] = request.url.path
+        requested["api_key"] = request.headers["x-api-key"]
+        requested["idempotency_key"] = request.headers["idempotency-key"]
+        requested["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "message": "success",
+                "data": {"id": 51, "balance": 123.45},
+            },
+        )
+
+    with Sub2APIClient(config) as client:
+        client.client.close()
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"x-api-key": "admin-secret"},
+        )
+        confirmed = client.set_user_balance_from_recommendation(
+            51,
+            Decimal("123.45"),
+        )
+
+    assert confirmed == Decimal("123.45")
+    assert requested["method"] == "POST"
+    assert requested["path"] == "/api/v1/admin/users/51/balance"
+    assert requested["api_key"] == "admin-secret"
+    assert requested["idempotency_key"]
+    assert requested["body"] == {
+        "balance": 123.45,
+        "operation": "set",
+        "notes": "Sub2Pool 一键应用额度建议",
+    }
+
+
+@pytest.mark.django_db
+def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
+    monkeypatch,
+):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.sub2api_base_url = "https://admin.example:8443/internal/path"
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.openai_account_id = 7
+    config.save()
+    participant = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=51,
+        share_percent=50,
+        latest_balance_usd=Decimal("80"),
+    )
+    snapshot = create_recommendation_snapshot(participant)
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, received_config):
+            assert received_config.pk == config.pk
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def set_user_balance_from_recommendation(self, user_id, balance):
+            captured.update(user_id=user_id, balance=balance)
+            return balance
+
+    monkeypatch.setattr("monitor.views.dashboard.Sub2APIClient", FakeClient)
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    applied = client.post(
+        f"/api/dashboard/participants/{participant.id}/apply-recommendation",
+        **headers,
+    )
+
+    assert applied.status_code == 200
+    assert applied.json()["data"]["applied_balance_usd"] == 123.45
+    assert captured == {"user_id": 51, "balance": Decimal("123.45")}
+    snapshot.refresh_from_db()
+    participant.refresh_from_db()
+    assert snapshot.recommendation_applied is True
+    assert snapshot.needs_manual_update is False
+    assert snapshot.current_balance_usd == Decimal("123.45")
+    assert snapshot.balance_difference_usd == Decimal("0")
+    assert participant.latest_balance_usd == Decimal("123.45")
+
+    dashboard = client.get("/api/dashboard", **headers).json()["data"]
+    assert dashboard["sub2api_admin_url"] == "https://admin.example:8443"
+    assert dashboard["participants"] == []
+
+
+@pytest.mark.django_db
+def test_apply_recommendation_failure_keeps_snapshot_actionable(monkeypatch):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    participant = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=51,
+        share_percent=50,
+    )
+    snapshot = create_recommendation_snapshot(participant)
+
+    class FailingClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def set_user_balance_from_recommendation(self, _user_id, _balance):
+            raise Sub2APIError("上游拒绝更新")
+
+    monkeypatch.setattr(
+        "monitor.views.dashboard.Sub2APIClient",
+        FailingClient,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    failed = client.post(
+        f"/api/dashboard/participants/{participant.id}/apply-recommendation",
+        **headers,
+    )
+
+    assert failed.status_code == 502
+    assert failed.json()["message"] == "上游拒绝更新"
+    snapshot.refresh_from_db()
+    assert snapshot.recommendation_applied is False
+    assert snapshot.needs_manual_update is True
 
 
 @pytest.mark.django_db

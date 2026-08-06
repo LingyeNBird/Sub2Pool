@@ -231,6 +231,8 @@ class ParticipantSnapshot(models.Model):
         max_digits=18, decimal_places=4, null=True, blank=True
     )
     needs_manual_update = models.BooleanField(default=False)
+    # 一键应用成功后只隐藏当前观测的建议；下一次观测会生成新的快照并重新参与展示。
+    recommendation_applied = models.BooleanField(default=False)
     reason = models.CharField(max_length=255, blank=True)
 
     class Meta:

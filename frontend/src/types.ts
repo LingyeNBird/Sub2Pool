@@ -10,6 +10,7 @@ export interface Snapshot {
   recommended_balance_usd: number | null;
   balance_difference_usd: number | null;
   needs_manual_update: boolean;
+  recommendation_applied: boolean;
   reason: string;
 }
 
@@ -76,6 +77,7 @@ export interface DashboardData {
   snapshot_stale: boolean;
   last_success_at: string | null;
   last_error: string;
+  sub2api_admin_url: string;
   quota_query_mode: string;
   needs_manual_update_count: number;
   cycle: null | {

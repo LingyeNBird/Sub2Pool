@@ -38,6 +38,7 @@ def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
             else None
         ),
         "needs_manual_update": snapshot.needs_manual_update,
+        "recommendation_applied": snapshot.recommendation_applied,
         "reason": snapshot.reason,
     }
 

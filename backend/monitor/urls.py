@@ -8,7 +8,10 @@ from .views.auth import (
     PasswordView,
     RefreshView,
 )
-from .views.dashboard import DashboardView
+from .views.dashboard import (
+    ApplyParticipantRecommendationView,
+    DashboardView,
+)
 from .views.database import DatabaseExportView, DatabaseImportView
 from .views.monitoring import RunMonitorView
 from .views.participants import (
@@ -46,6 +49,10 @@ urlpatterns = [
     path("ip-blocks", BlockedIPAddressListView.as_view()),
     path("ip-blocks/<int:block_id>", BlockedIPAddressDetailView.as_view()),
     path("dashboard", DashboardView.as_view()),
+    path(
+        "dashboard/participants/<int:participant_id>/apply-recommendation",
+        ApplyParticipantRecommendationView.as_view(),
+    ),
     path("statistics", StatisticsView.as_view()),
     path("database/export", DatabaseExportView.as_view()),
     path("database/import", DatabaseImportView.as_view()),
