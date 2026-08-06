@@ -26,6 +26,7 @@ from .sub2api import OPENAI_PLATFORM, PlatformQuota, Sub2APIClient, Sub2APIError
 ZERO = Decimal("0")
 CENT = Decimal("0.01")
 PCT_PRECISION = Decimal("0.00001")
+RESET_ROLLBACK_TOLERANCE = Decimal("0.1")
 
 
 @dataclass
@@ -125,24 +126,39 @@ def _fetch_local(
     return LocalBundle(total=total, participants=rows, checked_at=now)
 
 
-def _ensure_cycle(config: AppSettings, window: WeeklyWindow, current: QuotaCycle | None) -> tuple[QuotaCycle, bool]:
+def _ensure_cycle(
+    config: AppSettings,
+    window: WeeklyWindow,
+    current: QuotaCycle | None,
+    *,
+    force_new: bool = False,
+    starts_at_override: datetime | None = None,
+) -> tuple[QuotaCycle, bool]:
     reset_at = _epoch_datetime(window.reset_at)
-    starts_at = reset_at - timedelta(seconds=window.window_seconds)
-    same = current is not None and current.account_id == config.openai_account_id and abs((current.resets_at - reset_at).total_seconds()) <= 60
+    starts_at = starts_at_override or (
+        reset_at - timedelta(seconds=window.window_seconds)
+    )
+    same = (
+        not force_new
+        and current is not None
+        and current.account_id == config.openai_account_id
+        and abs((current.resets_at - reset_at).total_seconds()) <= 60
+    )
     if same:
         return current, False
 
     QuotaCycle.objects.filter(active=True).update(active=False)
+    cycle_seconds = max(1, int((reset_at - starts_at).total_seconds()))
     cycle, _ = QuotaCycle.objects.get_or_create(
         account_id=config.openai_account_id,
         resets_at=reset_at,
-        defaults={"starts_at": starts_at, "window_seconds": window.window_seconds, "active": True},
+        starts_at=starts_at,
+        defaults={"window_seconds": cycle_seconds, "active": True},
     )
     if not cycle.active:
         cycle.active = True
-        cycle.starts_at = starts_at
-        cycle.window_seconds = window.window_seconds
-        cycle.save(update_fields=["active", "starts_at", "window_seconds"])
+        cycle.window_seconds = cycle_seconds
+        cycle.save(update_fields=["active", "window_seconds"])
     return cycle, True
 
 
@@ -365,13 +381,49 @@ def _run_monitor_locked(config: AppSettings, *, force_upstream: bool, requested_
         previous = Observation.objects.filter(cycle=current).order_by("-observed_at").first()
         previous_snapshots = {item.participant_id: item for item in previous.participant_snapshots.all()} if previous else {}
         selected_total = local.total.selected(config.cost_basis)
-        cost_progress = max(ZERO, selected_total - previous.selected_total_cost) if previous else selected_total
-        effective_rate = previous.effective_usd_per_percent if previous else config.initial_usd_per_percent
+        cost_rolled_back = bool(
+            previous
+            and selected_total + CENT < previous.selected_total_cost
+        )
+        cost_progress = (
+            max(ZERO, selected_total - previous.selected_total_cost)
+            if previous
+            else selected_total
+        )
+        effective_rate = (
+            previous.effective_usd_per_percent
+            if previous
+            else config.initial_usd_per_percent
+        )
         threshold_cost = effective_rate * config.progress_threshold_percent
-        exhausted = any(_is_limit_exhausted(config, row, previous_snapshots.get(row.participant.id)) for row in local.participants)
-        active_too_long = bool(previous and cost_progress > 0 and now - previous.observed_at >= timedelta(hours=config.active_max_calibration_hours))
-        reset_near = now >= current.resets_at - timedelta(minutes=config.reset_proximity_minutes)
-        due = force_upstream or previous is None or cost_progress >= threshold_cost or exhausted or active_too_long or reset_near
+        exhausted = any(
+            _is_limit_exhausted(
+                config,
+                row,
+                previous_snapshots.get(row.participant.id),
+            )
+            for row in local.participants
+        )
+        active_too_long = bool(
+            previous
+            and cost_progress > 0
+            and now - previous.observed_at
+            >= timedelta(hours=config.active_max_calibration_hours)
+        )
+        reset_near = (
+            now
+            >= current.resets_at
+            - timedelta(minutes=config.reset_proximity_minutes)
+        )
+        due = (
+            force_upstream
+            or previous is None
+            or cost_progress >= threshold_cost
+            or cost_rolled_back
+            or exhausted
+            or active_too_long
+            or reset_near
+        )
 
         if not due:
             AppSettings.objects.filter(pk=1).update(last_local_check_at=now, last_success_at=now, last_error="")
@@ -382,20 +434,54 @@ def _run_monitor_locked(config: AppSettings, *, force_upstream: bool, requested_
                 "threshold_cost": float(threshold_cost),
             }
 
-        window = client.query_weekly_window(config.openai_account_id, config.quota_query_mode)
-        cycle, changed = _ensure_cycle(config, window, current)
+        window = client.query_weekly_window(
+            config.openai_account_id,
+            config.quota_query_mode,
+        )
+        same_reset = abs(
+            (
+                _epoch_datetime(window.reset_at) - current.resets_at
+            ).total_seconds()
+        ) <= 60
+        manual_refresh = bool(
+            same_reset
+            and previous
+            and window.used_percent + RESET_ROLLBACK_TOLERANCE
+            < previous.upstream_used_percent
+        )
+        cycle, changed = _ensure_cycle(
+            config,
+            window,
+            current,
+            force_new=manual_refresh,
+            starts_at_override=now if manual_refresh else None,
+        )
         if changed:
             local = _fetch_local(client, config, cycle, participants, now)
         source = requested_source
-        if exhausted and not force_upstream:
+        if manual_refresh:
+            source = "reset"
+        elif exhausted and not force_upstream:
             source = "exhausted"
         elif reset_near and not force_upstream:
             source = "reset"
-        observation = _collect_observation(config=config, cycle=cycle, window=window, local=local, source=source)
+        observation = _collect_observation(
+            config=config,
+            cycle=cycle,
+            window=window,
+            local=local,
+            source=source,
+        )
         return {
             "status": "calibrated",
             "observation_id": observation.id,
-            "reason": "上游周期已变化" if changed else "达到进度触发条件",
+            "reason": (
+                "检测到官方手动刷新"
+                if manual_refresh
+                else "上游周期已变化"
+                if changed
+                else "达到进度触发条件"
+            ),
         }
 
 

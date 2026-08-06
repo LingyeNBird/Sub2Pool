@@ -154,7 +154,12 @@ class QuotaCycle(models.Model):
 
     class Meta:
         ordering = ["-resets_at"]
-        constraints = [models.UniqueConstraint(fields=["account_id", "resets_at"], name="unique_account_reset_cycle")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account_id", "resets_at", "starts_at"],
+                name="unique_account_reset_cycle",
+            )
+        ]
 
 
 class Observation(models.Model):

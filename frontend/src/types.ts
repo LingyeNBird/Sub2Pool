@@ -30,6 +30,13 @@ export interface Participant {
   snapshot: Snapshot | null;
 }
 
+export interface Sub2APIUserOption {
+  id: number;
+  email: string;
+  username: string;
+  status: string;
+}
+
 export interface DashboardData {
   configured: boolean;
   monitoring_enabled: boolean;

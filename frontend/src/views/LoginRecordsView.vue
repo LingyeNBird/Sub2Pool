@@ -145,8 +145,13 @@ onMounted(load);
               </td>
               <td class="font-mono text-xs">{{ item.remote_ip || "—" }}</td>
               <td>
-                <div class="max-w-72 truncate text-xs" :title="item.user_agent">
-                  {{ item.user_agent || "—" }}
+                <div
+                  class="tooltip tooltip-left"
+                  :data-tip="item.user_agent || '—'"
+                >
+                  <div class="max-w-72 truncate text-xs">
+                    {{ item.user_agent || "—" }}
+                  </div>
                 </div>
               </td>
             </tr>

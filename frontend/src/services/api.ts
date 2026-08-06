@@ -71,13 +71,15 @@ function mayRefresh(path: string): boolean {
   return path !== "auth/login" && path !== "auth/refresh";
 }
 
-async function request<T>(
+async function requestResponse(
   path: string,
   options: RequestInit,
   retried: boolean,
-): Promise<T> {
+): Promise<Response> {
   const headers = new Headers(options.headers);
-  if (options.body && !headers.has("Content-Type")) {
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
+  if (options.body && !headers.has("Content-Type") && !isFormData) {
     headers.set("Content-Type", "application/json");
   }
   headers.set("Accept", "application/json");
@@ -99,9 +101,17 @@ async function request<T>(
       }
       throw error;
     }
-    return request<T>(path, options, true);
+    return requestResponse(path, options, true);
   }
+  return response;
+}
 
+async function request<T>(
+  path: string,
+  options: RequestInit,
+  retried: boolean,
+): Promise<T> {
+  const response = await requestResponse(path, options, retried);
   const payload = await parsePayload(response);
   if (!response.ok || !payload.ok) {
     throw new ApiError(
@@ -118,6 +128,23 @@ export async function api<T>(
   options: RequestInit = {},
 ): Promise<T> {
   return request<T>(apiPath(path), options, false);
+}
+
+export async function apiBlob(
+  path: string,
+  options: RequestInit = {},
+): Promise<Blob> {
+  const normalizedPath = apiPath(path);
+  const response = await requestResponse(normalizedPath, options, false);
+  if (!response.ok) {
+    const payload = await parsePayload(response);
+    throw new ApiError(
+      payload.message ?? `请求失败 (${response.status})`,
+      response.status,
+      payload.details,
+    );
+  }
+  return response.blob();
 }
 
 export function jsonBody(value: unknown): string {

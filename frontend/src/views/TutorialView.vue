@@ -5,17 +5,17 @@ const steps = [
   {
     title: "连接 Sub2API",
     icon: "code-bracket",
-    text: "进入系统设置，填写容器可访问的 Sub2API 地址、Admin Token 和实际承载套餐的 OpenAI 上游账号 ID。保持默认“被动查询”即可避免为了查额度而额外请求 OpenAI 官方接口。",
+    text: "进入系统设置，填写容器可访问的 Sub2API 地址和 Admin Token，再从系统自动读取的列表中选择实际承载套餐的 OpenAI 上游账号。保持默认“被动查询”即可避免为了查额度而额外请求 OpenAI 官方接口。",
   },
   {
     title: "添加拼车参与者",
     icon: "user-group",
-    text: "进入参与者页面，为自己和车友分别填写 Sub2API 用户 ID 与周限权益比例。所有启用参与者的比例合计不能超过 100%。",
+    text: "进入参与者页面，从 Sub2API 用户列表中分别选择自己和车友，再填写约定的周限权益比例。所有启用参与者的比例合计不能超过 100%。",
   },
   {
     title: "完成首次测算",
     icon: "calculator",
-    text: "先让上游账号产生一次正常业务请求，使 Sub2API 保存七天额度快照，然后在首页点击“立即测算”。首次测算会根据累计用量初始化百分比账本。",
+    text: "先让上游账号产生一次正常业务请求，使 Sub2API 保存七天额度快照，然后在首页点击“立即测算”。首次测算会读取本周期总用量和每个 Sub2API 用户的用量，自动把此前已经消耗的百分比归属给实际使用者。",
   },
   {
     title: "按建议手动调整额度",
@@ -107,6 +107,38 @@ const steps = [
   <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
     <div class="card-body gap-3">
       <h2 class="card-title">
+        <AppIcon name="scale" class="size-5" />中途开始拼车
+      </h2>
+      <p class="text-sm leading-6 opacity-70">
+        权益比例始终填写双方约定的总周限份额，而不是当前剩余份额。例如上游已经由车主用掉
+        10%，现在双方约定各占 50%，仍然给车主和车友各填
+        50%。只要此前用量记录在车主所选的 Sub2API 用户下面，首次测算会把已用的
+        10% 全部归属给车主，结果就是车主剩余 40%、车友剩余 50%。
+      </p>
+      <p class="text-sm leading-6 opacity-70">
+        如果历史请求无法对应到已添加的 Sub2API
+        用户，无法可靠猜测使用者；首页会把这部分显示为“未归属的已用周限”，需要先检查用户映射。
+      </p>
+    </div>
+  </section>
+
+  <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+    <div class="card-body gap-3">
+      <h2 class="card-title">
+        <AppIcon name="arrow-path" class="size-5" />周限刷新
+      </h2>
+      <p class="text-sm leading-6 opacity-70">
+        正常七天重置会根据新的 reset_at
+        自动建立新账本；官方手动福利刷新即使保留原
+        reset_at，也会通过已用百分比明显回退识别为新周期。新周期以当时用量作为基线，
+        不会把金额或百分比回退记成负消费，也不会倒扣旧账本。
+      </p>
+    </div>
+  </section>
+
+  <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+    <div class="card-body gap-3">
+      <h2 class="card-title">
         <AppIcon name="finger-print" class="size-5" />登录安全
       </h2>
       <p class="text-sm leading-6 opacity-70">
@@ -131,6 +163,10 @@ const steps = [
         <li>统计图为空：新部署不会反推历史，需要等待本地探测和有效测算。</li>
         <li>
           建议金额变化：周限每 1% 对应的美元价值会浮动，这是系统持续校准的核心。
+        </li>
+        <li>
+          数据库迁移：在系统设置中导出 SQLite 备份；新服务器导入后还要沿用原来的
+          DJANGO_SECRET_KEY，才能解密敏感设置。
         </li>
         <li>
           邮件测试失败：检查服务类型、发件人验证状态、密钥、端口和加密方式。

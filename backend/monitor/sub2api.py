@@ -154,6 +154,54 @@ class Sub2APIClient:
                 raise Sub2APIError("OpenAI 账号数量异常，已停止读取")
         return accounts
 
+    def list_users(self) -> list[dict[str, Any]]:
+        """分页读取可作为拼车参与者的普通用户，不向前端暴露余额等无关字段。"""
+        users: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            data = self._get(
+                "api/v1/admin/users",
+                params={
+                    "page": page,
+                    "page_size": 100,
+                    "role": "user",
+                    "sort_by": "email",
+                    "sort_order": "asc",
+                    "include_subscriptions": "false",
+                },
+            )
+            if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+                raise Sub2APIError("Sub2API 用户列表响应结构错误")
+
+            for raw in data["items"]:
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    user_id = int(raw.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                if user_id <= 0:
+                    continue
+                users.append(
+                    {
+                        "id": user_id,
+                        "email": str(raw.get("email") or ""),
+                        "username": str(raw.get("username") or ""),
+                        "status": str(raw.get("status") or ""),
+                    }
+                )
+
+            try:
+                pages = max(1, int(data.get("pages") or 1))
+            except (TypeError, ValueError):
+                raise Sub2APIError("Sub2API 用户列表分页字段无效")
+            if page >= pages:
+                break
+            page += 1
+            if page > 100:
+                raise Sub2APIError("Sub2API 用户数量异常，已停止读取")
+        return users
+
     def query_weekly_window(self, account_id: int, mode: str = "passive") -> WeeklyWindow:
         """读取七天窗口。
 

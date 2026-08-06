@@ -2,12 +2,19 @@
 import { onMounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
-import { ApiError, api, jsonBody, setAccessToken } from "@/services/api";
+import {
+  ApiError,
+  api,
+  apiBlob,
+  clearAccessToken,
+  jsonBody,
+  setAccessToken,
+} from "@/services/api";
 import type { AppSettingsData, OpenAIAccountOption } from "@/types";
 
 const settings = ref<AppSettingsData | null>(null);
 const loading = ref(true);
-const saving = ref(false);
+const saving = ref("");
 const testing = ref("");
 const message = ref("");
 const success = ref("");
@@ -16,6 +23,9 @@ const smtpPassword = ref("");
 const resendApiKey = ref("");
 const openAIAccounts = ref<OpenAIAccountOption[]>([]);
 const loadingAccounts = ref(false);
+const exportingDatabase = ref(false);
+const importingDatabase = ref(false);
+const databaseFile = ref<HTMLInputElement | null>(null);
 const passwordForm = reactive({
   old_password: "",
   new_password: "",
@@ -78,29 +88,169 @@ async function load() {
   }
 }
 
-async function save() {
+function settingsPayload(fields: string[]) {
+  if (!settings.value) return {};
+  return Object.fromEntries(
+    fields.map((field) => [field, settings.value?.[field]]),
+  );
+}
+
+async function saveSection(
+  section: string,
+  label: string,
+  fields: string[],
+  secrets: Record<string, string> = {},
+) {
   if (!settings.value) return;
-  saving.value = true;
+  saving.value = section;
   message.value = "";
   success.value = "";
   try {
-    settings.value = await api<AppSettingsData>("settings", {
+    const updated = await api<AppSettingsData>("settings", {
       method: "PATCH",
       body: jsonBody({
-        ...settings.value,
-        sub2api_admin_token: adminToken.value,
-        smtp_password: smtpPassword.value,
-        resend_api_key: resendApiKey.value,
+        ...settingsPayload(fields),
+        ...secrets,
       }),
     });
-    adminToken.value = "";
-    smtpPassword.value = "";
-    resendApiKey.value = "";
-    success.value = "设置已保存";
+    settings.value.sub2api_token_configured = updated.sub2api_token_configured;
+    settings.value.smtp_password_configured = updated.smtp_password_configured;
+    settings.value.resend_api_key_configured =
+      updated.resend_api_key_configured;
+    if (section === "connection") adminToken.value = "";
+    if (section === "email") {
+      smtpPassword.value = "";
+      resendApiKey.value = "";
+    }
+    success.value = `${label}已保存`;
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "保存设置失败";
   } finally {
-    saving.value = false;
+    saving.value = "";
+  }
+}
+
+function saveConnection() {
+  return saveSection(
+    "connection",
+    "Sub2API 连接设置",
+    [
+      "sub2api_base_url",
+      "openai_account_id",
+      "quota_query_mode",
+      "request_timeout_seconds",
+      "verify_tls",
+      "timezone",
+    ],
+    { sub2api_admin_token: adminToken.value },
+  );
+}
+
+function saveAllocation() {
+  return saveSection("allocation", "分配模型设置", [
+    "cost_basis",
+    "initial_usd_per_percent",
+    "safety_factor",
+    "conservative_percentile",
+    "rate_history_samples",
+    "recommendation_change_usd",
+    "limit_warning_usd",
+  ]);
+}
+
+function saveSampling() {
+  return saveSection("sampling", "采样策略设置", [
+    "local_poll_minutes",
+    "progress_threshold_percent",
+    "active_max_calibration_hours",
+    "reset_proximity_minutes",
+    "stale_warning_hours",
+    "monitoring_enabled",
+  ]);
+}
+
+function saveEmail() {
+  return saveSection(
+    "email",
+    "邮件服务设置",
+    [
+      "email_provider",
+      "notification_email",
+      "smtp_host",
+      "smtp_port",
+      "smtp_username",
+      "smtp_use_tls",
+      "smtp_use_ssl",
+      "smtp_from_email",
+      "resend_from_email",
+    ],
+    {
+      smtp_password: smtpPassword.value,
+      resend_api_key: resendApiKey.value,
+    },
+  );
+}
+
+function saveNotifications() {
+  return saveSection("notifications", "通知规则设置", [
+    "notify_on_limit_exhausted",
+    "notify_on_recommendation_change",
+    "notify_on_rate_change",
+    "notify_on_collection_error",
+    "rate_change_alert_percent",
+    "notification_cooldown_minutes",
+  ]);
+}
+
+async function exportDatabase() {
+  exportingDatabase.value = true;
+  message.value = "";
+  success.value = "";
+  try {
+    const blob = await apiBlob("database/export");
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `pinche-backup-${new Date()
+      .toISOString()
+      .replaceAll(":", "-")}.sqlite3`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    success.value = "数据库备份已导出";
+  } catch (error) {
+    message.value =
+      error instanceof ApiError ? error.message : "导出数据库失败";
+  } finally {
+    exportingDatabase.value = false;
+  }
+}
+
+async function importDatabase(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  if (
+    !window.confirm("导入会完整覆盖当前数据库，并要求重新登录。确认继续吗？")
+  ) {
+    input.value = "";
+    return;
+  }
+
+  importingDatabase.value = true;
+  message.value = "";
+  success.value = "";
+  try {
+    const form = new FormData();
+    form.append("database", file);
+    await api("database/import", { method: "POST", body: form });
+    clearAccessToken();
+    window.location.assign("/login");
+  } catch (error) {
+    message.value =
+      error instanceof ApiError ? error.message : "导入数据库失败";
+  } finally {
+    importingDatabase.value = false;
+    input.value = "";
   }
 }
 
@@ -162,15 +312,6 @@ onMounted(load);
         </ul>
       </div>
     </div>
-    <button
-      class="btn btn-primary btn-sm"
-      :disabled="saving || !settings"
-      @click="save"
-    >
-      <span v-if="saving" class="loading loading-xs loading-spinner"></span>
-      <AppIcon v-else name="check" class="size-4" />
-      保存设置
-    </button>
   </PageShellHeader>
 
   <div v-if="message" class="col-span-12 alert alert-error">
@@ -187,8 +328,10 @@ onMounted(load);
     </div>
   </section>
 
-  <template v-if="settings">
-    <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+  <div v-if="settings" class="col-span-12 columns-1 gap-6 xl:columns-2">
+    <section
+      class="card mb-6 inline-block w-full break-inside-avoid bg-base-200 shadow-xs"
+    >
       <div class="card-body">
         <h2 class="card-title">
           <AppIcon name="code-bracket" class="size-5" />Sub2API 连接
@@ -303,21 +446,36 @@ onMounted(load);
             type="checkbox"
             class="toggle toggle-sm"
         /></label>
-        <button
-          class="btn btn-sm"
-          :disabled="testing === 'sub2api'"
-          @click="test('sub2api')"
-        >
-          <span
-            v-if="testing === 'sub2api'"
-            class="loading loading-xs loading-spinner"
-          ></span>
-          <AppIcon v-else name="signal" class="size-4" />测试连接
-        </button>
+        <div class="flex flex-wrap gap-2">
+          <button
+            class="btn btn-sm"
+            :disabled="testing === 'sub2api'"
+            @click="test('sub2api')"
+          >
+            <span
+              v-if="testing === 'sub2api'"
+              class="loading loading-xs loading-spinner"
+            ></span>
+            <AppIcon v-else name="signal" class="size-4" />测试连接
+          </button>
+          <button
+            class="btn btn-primary btn-sm"
+            :disabled="saving === 'connection'"
+            @click="saveConnection"
+          >
+            <span
+              v-if="saving === 'connection'"
+              class="loading loading-xs loading-spinner"
+            ></span>
+            <AppIcon v-else name="check" class="size-4" />保存连接设置
+          </button>
+        </div>
       </div>
     </section>
 
-    <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+    <section
+      class="card mb-6 inline-block w-full break-inside-avoid bg-base-200 shadow-xs"
+    >
       <div class="card-body">
         <h2 class="card-title">
           <AppIcon name="calculator" class="size-5" />分配模型
@@ -392,10 +550,23 @@ onMounted(load);
             />
           </fieldset>
         </div>
+        <button
+          class="btn btn-primary btn-sm"
+          :disabled="saving === 'allocation'"
+          @click="saveAllocation"
+        >
+          <span
+            v-if="saving === 'allocation'"
+            class="loading loading-xs loading-spinner"
+          ></span>
+          <AppIcon v-else name="check" class="size-4" />保存分配模型
+        </button>
       </div>
     </section>
 
-    <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+    <section
+      class="card mb-6 inline-block w-full break-inside-avoid bg-base-200 shadow-xs"
+    >
       <div class="card-body">
         <h2 class="card-title">
           <AppIcon name="clock" class="size-5" />采样策略
@@ -458,10 +629,23 @@ onMounted(load);
         <p class="text-sm opacity-60">
           空闲时只做低频本地探测；达到成本进度、额度耗尽或重置条件后才形成新观测。
         </p>
+        <button
+          class="btn btn-primary btn-sm"
+          :disabled="saving === 'sampling'"
+          @click="saveSampling"
+        >
+          <span
+            v-if="saving === 'sampling'"
+            class="loading loading-xs loading-spinner"
+          ></span>
+          <AppIcon v-else name="check" class="size-4" />保存采样策略
+        </button>
       </div>
     </section>
 
-    <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+    <section
+      class="card mb-6 inline-block w-full break-inside-avoid bg-base-200 shadow-xs"
+    >
       <div class="card-body">
         <h2 class="card-title">
           <AppIcon name="envelope" class="size-5" />邮件服务
@@ -574,21 +758,36 @@ onMounted(load);
           </div>
         </template>
 
-        <button
-          class="btn btn-sm"
-          :disabled="testing === 'email'"
-          @click="test('email')"
-        >
-          <span
-            v-if="testing === 'email'"
-            class="loading loading-xs loading-spinner"
-          ></span>
-          <AppIcon v-else name="paper-airplane" class="size-4" />发送测试邮件
-        </button>
+        <div class="flex flex-wrap gap-2">
+          <button
+            class="btn btn-sm"
+            :disabled="testing === 'email'"
+            @click="test('email')"
+          >
+            <span
+              v-if="testing === 'email'"
+              class="loading loading-xs loading-spinner"
+            ></span>
+            <AppIcon v-else name="paper-airplane" class="size-4" />发送测试邮件
+          </button>
+          <button
+            class="btn btn-primary btn-sm"
+            :disabled="saving === 'email'"
+            @click="saveEmail"
+          >
+            <span
+              v-if="saving === 'email'"
+              class="loading loading-xs loading-spinner"
+            ></span>
+            <AppIcon v-else name="check" class="size-4" />保存邮件设置
+          </button>
+        </div>
       </div>
     </section>
 
-    <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+    <section
+      class="card mb-6 inline-block w-full break-inside-avoid bg-base-200 shadow-xs"
+    >
       <div class="card-body">
         <h2 class="card-title">
           <AppIcon name="bell-alert" class="size-5" />通知规则
@@ -638,10 +837,79 @@ onMounted(load);
             />
           </fieldset>
         </div>
+        <button
+          class="btn btn-primary btn-sm"
+          :disabled="saving === 'notifications'"
+          @click="saveNotifications"
+        >
+          <span
+            v-if="saving === 'notifications'"
+            class="loading loading-xs loading-spinner"
+          ></span>
+          <AppIcon v-else name="check" class="size-4" />保存通知规则
+        </button>
       </div>
     </section>
 
-    <section class="card col-span-12 bg-base-200 shadow-xs xl:col-span-6">
+    <section
+      class="card mb-6 inline-block w-full break-inside-avoid bg-base-200 shadow-xs"
+    >
+      <div class="card-body">
+        <h2 class="card-title">
+          <AppIcon name="circle-stack" class="size-5" />数据库迁移
+        </h2>
+        <p class="text-sm leading-6 opacity-70">
+          导出文件包含参与者、账本、统计、通知、登录记录、管理员账号以及全部系统设置。
+          导入会完整覆盖当前数据库，并在服务器数据目录保留
+          pinche.before-import.sqlite3 作为覆盖前副本。
+        </p>
+        <div class="alert text-sm alert-warning">
+          <AppIcon name="exclamation-triangle" class="size-5" />
+          <span>
+            加密后的 Admin Token、SMTP 密码和 Resend Key 依赖部署环境中的
+            DJANGO_SECRET_KEY。迁移服务器时还必须安全复制
+            .env，数据库备份不会包含环境变量。
+          </span>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            class="btn btn-sm"
+            :disabled="exportingDatabase || importingDatabase"
+            @click="exportDatabase"
+          >
+            <span
+              v-if="exportingDatabase"
+              class="loading loading-xs loading-spinner"
+            ></span>
+            <AppIcon v-else name="arrow-down-tray" class="size-4" />
+            导出完整数据库
+          </button>
+          <button
+            class="btn btn-outline btn-error btn-sm"
+            :disabled="importingDatabase || exportingDatabase"
+            @click="databaseFile?.click()"
+          >
+            <span
+              v-if="importingDatabase"
+              class="loading loading-xs loading-spinner"
+            ></span>
+            <AppIcon v-else name="arrow-up-tray" class="size-4" />
+            导入并覆盖
+          </button>
+          <input
+            ref="databaseFile"
+            type="file"
+            accept=".sqlite3,.sqlite,.db,application/vnd.sqlite3"
+            class="hidden"
+            @change="importDatabase"
+          />
+        </div>
+      </div>
+    </section>
+
+    <section
+      class="card mb-6 inline-block w-full break-inside-avoid bg-base-200 shadow-xs"
+    >
       <div class="card-body">
         <h2 class="card-title">
           <AppIcon name="lock-closed" class="size-5" />登录安全
@@ -682,5 +950,5 @@ onMounted(load);
         </p>
       </div>
     </section>
-  </template>
+  </div>
 </template>

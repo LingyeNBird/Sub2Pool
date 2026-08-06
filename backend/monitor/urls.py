@@ -2,8 +2,13 @@ from django.urls import path
 
 from .views.auth import LoginView, LogoutView, MeView, PasswordView, RefreshView
 from .views.dashboard import DashboardView
+from .views.database import DatabaseExportView, DatabaseImportView
 from .views.monitoring import RunMonitorView
-from .views.participants import ParticipantDetailView, ParticipantListView
+from .views.participants import (
+    ParticipantDetailView,
+    ParticipantListView,
+    Sub2APIUserListView,
+)
 from .views.public import AuthClientConfigView, HealthView
 from .views.records import (
     LoginEventListView,
@@ -29,6 +34,9 @@ urlpatterns = [
     path("login-events", LoginEventListView.as_view()),
     path("dashboard", DashboardView.as_view()),
     path("statistics", StatisticsView.as_view()),
+    path("database/export", DatabaseExportView.as_view()),
+    path("database/import", DatabaseImportView.as_view()),
+    path("participants/sub2api-users", Sub2APIUserListView.as_view()),
     path("participants", ParticipantListView.as_view()),
     path("participants/<int:participant_id>", ParticipantDetailView.as_view()),
     path("observations", ObservationListView.as_view()),

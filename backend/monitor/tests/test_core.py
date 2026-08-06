@@ -1,4 +1,6 @@
 import json
+import sqlite3
+from io import BytesIO
 
 from datetime import timedelta
 from decimal import Decimal
@@ -7,6 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
 from django.utils import timezone
 
@@ -24,6 +27,7 @@ from monitor.models import (
 from monitor.notifications import send_notification
 from monitor.secrets import encrypt_secret
 from monitor.sub2api import PlatformQuota, Sub2APIClient, UsageStats, WeeklyWindow
+from monitor import database_transfer
 
 def jwt_login(
     client: Client,
@@ -166,6 +170,57 @@ def test_openai_account_discovery_uses_filtered_paginated_admin_api():
 
 
 @pytest.mark.django_db
+def test_sub2api_user_discovery_reads_regular_users_only():
+    config = AppSettings.load()
+    config.sub2api_base_url = "https://sub2api.example/"
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.save()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/admin/users"
+        assert request.url.params["role"] == "user"
+        assert request.url.params["include_subscriptions"] == "false"
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "message": "success",
+                "data": {
+                    "items": [
+                        {
+                            "id": 51,
+                            "email": "rider@example.com",
+                            "username": "rider",
+                            "status": "active",
+                        }
+                    ],
+                    "total": 1,
+                    "page": 1,
+                    "page_size": 100,
+                    "pages": 1,
+                },
+            },
+        )
+
+    with Sub2APIClient(config) as client:
+        client.client.close()
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"x-api-key": "admin-secret"},
+        )
+        users = client.list_users()
+
+    assert users == [
+        {
+            "id": 51,
+            "email": "rider@example.com",
+            "username": "rider",
+            "status": "active",
+        }
+    ]
+
+
+@pytest.mark.django_db
 def test_initial_observation_conserves_percent_and_builds_manual_recommendations(monkeypatch):
     config = AppSettings.load()
     config.openai_account_id = 7
@@ -212,6 +267,154 @@ def test_initial_observation_conserves_percent_and_builds_manual_recommendations
     assert snapshots[owner.id].recommended_weekly_limit_usd == Decimal("604.00")
     assert snapshots[rider.id].recommended_weekly_limit_usd == Decimal("708.00")
     assert ParticipantUsageSample.objects.count() == 2
+
+
+@pytest.mark.django_db
+def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
+    monkeypatch,
+):
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.initial_usd_per_percent = Decimal("16")
+    config.save()
+    owner = Participant.objects.create(
+        name="车主",
+        sub2api_user_id=1,
+        share_percent=50,
+        is_owner=True,
+    )
+    rider = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=2,
+        share_percent=50,
+    )
+    reset_at = timezone.now() + timedelta(days=4)
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def query_weekly_window(self, _account_id, _mode):
+            return WeeklyWindow(
+                Decimal("10"),
+                604800,
+                345600,
+                int(reset_at.timestamp()),
+                "passive_snapshot",
+            )
+
+        def usage_stats(self, *, user_id=None, **_kwargs):
+            costs = {None: Decimal("100"), 1: Decimal("100"), 2: Decimal("0")}
+            return UsageStats(costs[user_id], costs[user_id])
+
+        def platform_quota(self, user_id, _platform):
+            usage = Decimal("100") if user_id == 1 else Decimal("0")
+            return PlatformQuota(usage, Decimal("800"), None, None)
+
+    monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+    run_monitor(force_upstream=True, source="manual")
+
+    snapshots = {
+        item.participant_id: item for item in ParticipantSnapshot.objects.all()
+    }
+    assert snapshots[owner.id].charged_cycle_percent == Decimal("10")
+    assert snapshots[owner.id].remaining_share_percent == Decimal("40")
+    assert snapshots[rider.id].charged_cycle_percent == Decimal("0")
+    assert snapshots[rider.id].remaining_share_percent == Decimal("50")
+
+
+@pytest.mark.django_db
+def test_manual_upstream_refresh_starts_new_cycle_without_negative_ledger(
+    monkeypatch,
+):
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save()
+    owner = Participant.objects.create(
+        name="车主",
+        sub2api_user_id=1,
+        share_percent=50,
+        is_owner=True,
+    )
+    now = timezone.now()
+    reset_at = now + timedelta(days=4)
+    old_cycle = QuotaCycle.objects.create(
+        account_id=7,
+        starts_at=reset_at - timedelta(days=7),
+        resets_at=reset_at,
+        active=True,
+    )
+    previous = Observation.objects.create(
+        cycle=old_cycle,
+        source="manual",
+        observed_at=now - timedelta(hours=1),
+        upstream_used_percent=Decimal("10"),
+        selected_total_cost=Decimal("100"),
+        total_standard_cost=Decimal("100"),
+        total_actual_cost=Decimal("100"),
+        effective_usd_per_percent=Decimal("10"),
+    )
+    ParticipantSnapshot.objects.create(
+        observation=previous,
+        participant=owner,
+        selected_cost=Decimal("100"),
+        charged_delta_percent=Decimal("10"),
+        charged_cycle_percent=Decimal("10"),
+        remaining_share_percent=Decimal("40"),
+        platform_weekly_usage_usd=Decimal("100"),
+        platform_weekly_limit_usd=Decimal("500"),
+        recommended_weekly_limit_usd=Decimal("500"),
+    )
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def query_weekly_window(self, _account_id, _mode):
+            return WeeklyWindow(
+                Decimal("0"),
+                604800,
+                345600,
+                int(reset_at.timestamp()),
+                "passive_snapshot",
+            )
+
+        def usage_stats(self, **_kwargs):
+            return UsageStats(Decimal("0"), Decimal("0"))
+
+        def platform_quota(self, _user_id, _platform):
+            return PlatformQuota(
+                Decimal("0"),
+                Decimal("500"),
+                None,
+                None,
+            )
+
+    monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+    result = run_monitor(force_upstream=True, source="manual")
+
+    assert result["reason"] == "检测到官方手动刷新"
+    old_cycle.refresh_from_db()
+    assert old_cycle.active is False
+    current = QuotaCycle.objects.get(active=True)
+    assert current.id != old_cycle.id
+    snapshot = ParticipantSnapshot.objects.get(observation__cycle=current)
+    assert snapshot.charged_delta_percent == Decimal("0")
+    assert snapshot.charged_cycle_percent == Decimal("0")
+    assert snapshot.remaining_share_percent == Decimal("50")
+    assert snapshot.delta_cost is None
 
 
 @pytest.mark.django_db
@@ -327,6 +530,34 @@ def test_settings_round_trip_accepts_internal_docker_url_and_decimal_values():
     assert config.sub2api_base_url == "http://host.docker.internal:8080"
     assert config.safety_factor == Decimal("0.95")
     assert config.local_poll_minutes == 11
+
+
+@pytest.mark.django_db
+def test_partial_settings_patch_does_not_touch_other_cards():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.sub2api_base_url = "https://sub2api.example"
+    config.smtp_host = "smtp.original.example"
+    config.save()
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    response = client.patch(
+        "/api/settings",
+        data=json.dumps({"local_poll_minutes": 17}),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 200
+    config.refresh_from_db()
+    assert config.local_poll_minutes == 17
+    assert config.sub2api_base_url == "https://sub2api.example"
+    assert config.smtp_host == "smtp.original.example"
 
 
 @pytest.mark.django_db
@@ -446,6 +677,136 @@ def test_connection_test_uses_unsaved_form_without_persisting(monkeypatch):
     config = AppSettings.load()
     assert config.openai_account_id is None
     assert config.quota_query_mode == "passive"
+
+
+@pytest.mark.django_db
+def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def list_users(self):
+            return [
+                {
+                    "id": 51,
+                    "email": "rider@example.com",
+                    "username": "rider",
+                    "status": "active",
+                }
+            ]
+
+    monkeypatch.setattr("monitor.views.participants.Sub2APIClient", FakeClient)
+    response = client.get("/api/participants/sub2api-users", **headers)
+
+    assert response.status_code == 200
+    assert response.json()["data"][0]["id"] == 51
+
+
+@pytest.mark.django_db
+def test_database_transfer_endpoints_require_admin_and_clear_refresh_on_import(
+    monkeypatch,
+):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    monkeypatch.setattr(
+        "monitor.views.database.export_database_bytes",
+        lambda: b"SQLite format 3\x00backup",
+    )
+    captured = {}
+
+    def fake_import(uploaded, size):
+        captured["name"] = uploaded.name
+        captured["size"] = size
+        return "pinche.before-import.sqlite3"
+
+    monkeypatch.setattr("monitor.views.database.import_database", fake_import)
+
+    unauthorized = Client().get("/api/database/export")
+    assert unauthorized.status_code == 401
+    exported = client.get("/api/database/export", **headers)
+    assert exported.status_code == 200
+    assert exported.content.startswith(b"SQLite format 3\x00")
+
+    imported = client.post(
+        "/api/database/import",
+        data={
+            "database": SimpleUploadedFile(
+                "backup.sqlite3",
+                b"SQLite format 3\x00backup",
+                content_type="application/vnd.sqlite3",
+            )
+        },
+        **headers,
+    )
+    assert imported.status_code == 200
+    assert captured["name"] == "backup.sqlite3"
+    assert captured["size"] == len(b"SQLite format 3\x00backup")
+    assert imported.cookies["pinche_refresh"]["max-age"] == 0
+
+
+def test_sqlite_import_replaces_database_and_keeps_recovery_copy(
+    monkeypatch,
+    tmp_path,
+):
+    current_path = tmp_path / "pinche.sqlite3"
+    source_path = tmp_path / "uploaded.sqlite3"
+
+    def create_database(path, marker):
+        with sqlite3.connect(path) as database:
+            database.executescript(
+                """
+                CREATE TABLE django_migrations (app TEXT, name TEXT);
+                CREATE TABLE auth_user (id INTEGER PRIMARY KEY);
+                CREATE TABLE monitor_appsettings (id INTEGER PRIMARY KEY);
+                CREATE TABLE monitor_participant (id INTEGER PRIMARY KEY);
+                CREATE TABLE monitor_quotacycle (id INTEGER PRIMARY KEY);
+                CREATE TABLE marker (value TEXT);
+                """
+            )
+            database.execute("INSERT INTO marker(value) VALUES (?)", (marker,))
+
+    create_database(current_path, "before")
+    create_database(source_path, "after")
+    payload = source_path.read_bytes()
+    monkeypatch.setattr(
+        database_transfer,
+        "_database_path",
+        lambda: current_path,
+    )
+    monkeypatch.setattr(
+        database_transfer,
+        "_expected_leaf_migrations",
+        lambda: set(),
+    )
+
+    recovery_name = database_transfer.import_database(
+        BytesIO(payload),
+        len(payload),
+    )
+
+    with sqlite3.connect(current_path) as database:
+        assert database.execute("SELECT value FROM marker").fetchone()[0] == "after"
+    with sqlite3.connect(tmp_path / recovery_name) as recovery:
+        assert recovery.execute("SELECT value FROM marker").fetchone()[0] == "before"
 
 
 def test_django_serves_vue_entry_for_root_and_history_routes():

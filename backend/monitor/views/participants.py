@@ -4,8 +4,19 @@ from rest_framework import status
 
 from .base import AdminAPIView, error, ok
 from .presenters import participant_data
-from ..models import Participant
+from ..models import AppSettings, Participant
 from ..serializers import ParticipantWriteSerializer
+from ..sub2api import Sub2APIClient, Sub2APIError
+
+class Sub2APIUserListView(AdminAPIView):
+    def get(self, _request):
+        try:
+            with Sub2APIClient(AppSettings.load()) as client:
+                users = client.list_users()
+        except (Sub2APIError, ValueError) as exc:
+            return error(str(exc), status.HTTP_502_BAD_GATEWAY)
+        return ok(users)
+
 
 
 class ParticipantListView(AdminAPIView):

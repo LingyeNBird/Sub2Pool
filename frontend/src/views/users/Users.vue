@@ -3,11 +3,13 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
-import type { Participant } from "@/types";
+import type { Participant, Sub2APIUserOption } from "@/types";
 
 const participants = ref<Participant[]>([]);
+const sub2apiUsers = ref<Sub2APIUserOption[]>([]);
 const loading = ref(true);
 const saving = ref(false);
+const loadingUsers = ref(false);
 const message = ref("");
 const dialog = ref<HTMLDialogElement | null>(null);
 const editingId = ref<number | null>(null);
@@ -55,6 +57,37 @@ async function load() {
   }
 }
 
+async function loadSub2APIUsers(showError = true) {
+  loadingUsers.value = true;
+  try {
+    sub2apiUsers.value = await api<Sub2APIUserOption[]>(
+      "participants/sub2api-users",
+    );
+  } catch (error) {
+    if (showError) {
+      message.value =
+        error instanceof ApiError ? error.message : "读取 Sub2API 用户列表失败";
+    }
+  } finally {
+    loadingUsers.value = false;
+  }
+}
+
+function hasUserOption(userId: number) {
+  return sub2apiUsers.value.some((user) => user.id === userId);
+}
+
+function applySelectedUser() {
+  const user = sub2apiUsers.value.find(
+    (item) => item.id === form.sub2api_user_id,
+  );
+  if (!user || editingId.value) return;
+  if (!form.email) form.email = user.email;
+  if (!form.name) {
+    form.name = user.username || user.email.split("@")[0] || `用户 ${user.id}`;
+  }
+}
+
 function openNew() {
   editingId.value = null;
   Object.assign(form, {
@@ -66,6 +99,7 @@ function openNew() {
     enabled: true,
     notes: "",
   });
+  if (!sub2apiUsers.value.length) void loadSub2APIUsers();
   dialog.value?.showModal();
 }
 
@@ -80,6 +114,7 @@ function openEdit(participant: Participant) {
     enabled: participant.enabled,
     notes: participant.notes,
   });
+  if (!sub2apiUsers.value.length) void loadSub2APIUsers();
   dialog.value?.showModal();
 }
 
@@ -118,7 +153,10 @@ async function remove(participant: Participant) {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  void loadSub2APIUsers(false);
+});
 </script>
 
 <template>
@@ -283,14 +321,45 @@ onMounted(load);
         </fieldset>
         <div class="grid gap-3 md:grid-cols-2">
           <fieldset class="fieldset">
-            <label class="label">Sub2API 用户 ID</label>
-            <input
-              v-model.number="form.sub2api_user_id"
-              type="number"
-              min="1"
-              class="input w-full"
-              required
-            />
+            <label class="label">Sub2API 用户</label>
+            <div class="join w-full">
+              <select
+                v-model.number="form.sub2api_user_id"
+                class="select join-item grow"
+                required
+                @change="applySelectedUser"
+              >
+                <option :value="0" disabled>请选择 Sub2API 用户</option>
+                <option
+                  v-if="
+                    form.sub2api_user_id && !hasUserOption(form.sub2api_user_id)
+                  "
+                  :value="form.sub2api_user_id"
+                >
+                  当前用户（ID {{ form.sub2api_user_id }}）
+                </option>
+                <option
+                  v-for="user in sub2apiUsers"
+                  :key="user.id"
+                  :value="user.id"
+                >
+                  {{ user.email || user.username || `用户 ${user.id}` }}（ID
+                  {{ user.id }} · {{ user.status || "未知状态" }}）
+                </option>
+              </select>
+              <button
+                type="button"
+                class="btn join-item"
+                :disabled="loadingUsers"
+                @click="loadSub2APIUsers()"
+              >
+                <span
+                  v-if="loadingUsers"
+                  class="loading loading-xs loading-spinner"
+                ></span>
+                <AppIcon v-else name="arrow-path" class="size-4" />
+              </button>
+            </div>
           </fieldset>
           <fieldset class="fieldset">
             <label class="label">周限权益比例（%）</label>
@@ -304,6 +373,14 @@ onMounted(load);
               required
             />
           </fieldset>
+        </div>
+        <div class="alert text-sm alert-info">
+          <AppIcon name="information-circle" class="size-5" />
+          <span>
+            权益填写合同份额，不是当前剩余额度。例如上游已用 10%，双方仍各填
+            50%；首次测算会按 Sub2API
+            用户的历史用量，把已用部分归属给实际使用者。
+          </span>
         </div>
         <fieldset class="fieldset">
           <label class="label">备注</label>
