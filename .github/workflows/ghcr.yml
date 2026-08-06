@@ -1,0 +1,122 @@
+name: CI 与 GHCR 镜像
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  verify:
+    name: 测试与前端构建
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 配置 Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: 配置 uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+          working-directory: backend
+
+      - name: 运行后端测试
+        working-directory: backend
+        env:
+          DJANGO_DEBUG: "true"
+        run: uv run --frozen pytest
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: 启用 pnpm
+        run: corepack enable
+
+      - name: 安装前端依赖
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: 检查前端
+        working-directory: frontend
+        run: pnpm check
+
+      - name: 构建前端
+        working-directory: frontend
+        run: pnpm build
+
+  container:
+    name: 构建并发布多架构镜像
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 配置 QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: 配置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 登录 GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 生成镜像标签
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+          labels: |
+            org.opencontainers.image.title=Sub2Pool
+            org.opencontainers.image.description=Sub2API 拼车周限测算与人工额度建议服务
+            org.opencontainers.image.licenses=AGPL-3.0-only
+
+      - name: 构建并发布镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true

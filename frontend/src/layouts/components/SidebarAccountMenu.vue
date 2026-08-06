@@ -48,6 +48,16 @@ async function logout() {
         </RouterLink>
       </li>
       <li>
+        <a
+          href="https://github.com/LingyeNBird/Sub2Pool"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <AppIcon name="code-bracket" class="size-4" />
+          开源代码
+        </a>
+      </li>
+      <li>
         <button type="button" @click="logout">
           <AppIcon name="arrow-right-on-rectangle" class="size-4" />
           退出登录

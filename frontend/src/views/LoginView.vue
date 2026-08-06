@@ -53,7 +53,7 @@ async function submit() {
         <div class="card-body gap-5">
           <div>
             <div class="mb-3 flex items-center gap-2 font-semibold">
-              <AppIcon name="scale" class="size-5" />
+              <img src="/favicon.png" alt="" class="size-5 rounded-md" />
               Sub2API 拼车额度
             </div>
             <h1 class="card-title text-2xl">管理员登录</h1>
