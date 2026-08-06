@@ -7,4 +7,6 @@ frontend/dist/
 __pycache__/
 *.py[cod]
 
+backend/staticfiles/*
+!backend/staticfiles/.gitkeep
 reference/

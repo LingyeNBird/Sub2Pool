@@ -1,8 +1,8 @@
 services:
-  backend:
+  app:
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?请在 .env 中设置 DJANGO_SECRET_KEY}
@@ -16,8 +16,8 @@ services:
       PINCH_DATA_DIR: /app/data
     volumes:
       - pinche-data:/app/data
-    expose:
-      - "8000"
+    ports:
+      - "${WEB_PORT:-8088}:8000"
     # 让容器能访问宿主机上已暴露端口的 Sub2API；Windows/macOS 原生支持，
     # Linux 通过 host-gateway 获得同名地址。也可在设置页改为远程 HTTPS 地址。
     extra_hosts:
@@ -28,22 +28,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-
-  frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    restart: unless-stopped
-    depends_on:
-      backend:
-        condition: service_healthy
-    ports:
-      - "${WEB_PORT:-8088}:80"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
 
 volumes:
   pinche-data:

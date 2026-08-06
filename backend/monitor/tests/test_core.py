@@ -151,3 +151,15 @@ def test_settings_round_trip_accepts_internal_docker_url_and_decimal_values():
     assert config.sub2api_base_url == "http://host.docker.internal:8080"
     assert config.safety_factor == Decimal("0.95")
     assert config.local_poll_minutes == 11
+
+
+def test_django_serves_vue_entry_for_root_and_history_routes():
+    client = Client()
+
+    for route in ("/", "/participants", "/settings"):
+        response = client.get(route)
+        assert response.status_code == 200
+        assert b'id="app"' in response.content
+        assert b"/static/frontend/assets/index-" in response.content
+
+    assert client.get("/api/unknown").status_code == 404

@@ -3,7 +3,9 @@ import vue from "@vitejs/plugin-vue";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // 生产资源由 Django 的 /static/frontend/ 提供；开发服务器仍保持根路径。
+  base: command === "build" ? "/static/frontend/" : "/",
   plugins: [
     tailwindcss(),
     vue({
@@ -28,4 +30,4 @@ export default defineConfig({
       "/admin": process.env.VITE_API_TARGET ?? "http://127.0.0.1:8000",
     },
   },
-});
+}));
