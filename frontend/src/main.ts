@@ -1,0 +1,22 @@
+import "@weblogin/trendchart-elements/dist/tc-column.js";
+import "@weblogin/trendchart-elements/dist/tc-line.js";
+import "@weblogin/trendchart-elements/dist/tc-pie.js";
+import "@/assets/styles/tailwind.css";
+
+import { createPinia } from "pinia";
+import { createApp } from "vue";
+
+import App from "@/App.vue";
+import AppIcon from "@/components/common/AppIcon.vue";
+import router from "@/router";
+import { useThemeStore } from "@/stores/theme";
+
+const app = createApp(App);
+const pinia = createPinia();
+
+app.component("AppIcon", AppIcon);
+app.use(pinia);
+app.use(router);
+
+useThemeStore(pinia).initialize();
+app.mount("#app");

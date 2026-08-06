@@ -1,0 +1,8 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 80,
+  "ignorePatterns": ["dist", "public/media/demo"],
+  "sortTailwindcss": {
+    "stylesheet": "./src/assets/styles/tailwind.css"
+  }
+}
