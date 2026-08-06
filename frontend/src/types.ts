@@ -35,6 +35,7 @@ export interface Sub2APIUserOption {
   email: string;
   username: string;
   status: string;
+  role: string;
 }
 
 export interface DashboardData {

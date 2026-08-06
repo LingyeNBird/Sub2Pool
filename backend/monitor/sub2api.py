@@ -155,7 +155,7 @@ class Sub2APIClient:
         return accounts
 
     def list_users(self) -> list[dict[str, Any]]:
-        """分页读取可作为拼车参与者的普通用户，不向前端暴露余额等无关字段。"""
+        """分页读取可作为拼车参与者的 Sub2API 用户，不向前端暴露余额等无关字段。"""
         users: list[dict[str, Any]] = []
         page = 1
         while True:
@@ -164,7 +164,6 @@ class Sub2APIClient:
                 params={
                     "page": page,
                     "page_size": 100,
-                    "role": "user",
                     "sort_by": "email",
                     "sort_order": "asc",
                     "include_subscriptions": "false",
@@ -188,6 +187,7 @@ class Sub2APIClient:
                         "email": str(raw.get("email") or ""),
                         "username": str(raw.get("username") or ""),
                         "status": str(raw.get("status") or ""),
+                        "role": str(raw.get("role") or ""),
                     }
                 )
 

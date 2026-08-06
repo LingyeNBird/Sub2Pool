@@ -170,7 +170,7 @@ def test_openai_account_discovery_uses_filtered_paginated_admin_api():
 
 
 @pytest.mark.django_db
-def test_sub2api_user_discovery_reads_regular_users_only():
+def test_sub2api_user_discovery_includes_admin_accounts():
     config = AppSettings.load()
     config.sub2api_base_url = "https://sub2api.example/"
     config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
@@ -178,8 +178,8 @@ def test_sub2api_user_discovery_reads_regular_users_only():
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v1/admin/users"
-        assert request.url.params["role"] == "user"
         assert request.url.params["include_subscriptions"] == "false"
+        assert "role" not in request.url.params
         return httpx.Response(
             200,
             json={
@@ -192,6 +192,7 @@ def test_sub2api_user_discovery_reads_regular_users_only():
                             "email": "rider@example.com",
                             "username": "rider",
                             "status": "active",
+                            "role": "admin",
                         }
                     ],
                     "total": 1,
@@ -216,6 +217,7 @@ def test_sub2api_user_discovery_reads_regular_users_only():
             "email": "rider@example.com",
             "username": "rider",
             "status": "active",
+            "role": "admin",
         }
     ]
 
@@ -706,6 +708,7 @@ def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch)
                     "email": "rider@example.com",
                     "username": "rider",
                     "status": "active",
+                    "role": "user",
                 }
             ]
 

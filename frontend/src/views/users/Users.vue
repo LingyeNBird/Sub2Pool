@@ -11,6 +11,8 @@ const loading = ref(true);
 const saving = ref(false);
 const loadingUsers = ref(false);
 const message = ref("");
+const userListMessage = ref("");
+const userListError = ref("");
 const dialog = ref<HTMLDialogElement | null>(null);
 const editingId = ref<number | null>(null);
 const form = reactive({
@@ -45,6 +47,12 @@ function percent(value: number | null | undefined) {
   return value == null ? "—" : `${value.toFixed(2)}%`;
 }
 
+function userRoleLabel(role: string) {
+  if (role === "admin") return "管理员";
+  if (role === "user") return "普通用户";
+  return role || "未知角色";
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -57,15 +65,23 @@ async function load() {
   }
 }
 
-async function loadSub2APIUsers(showError = true) {
+async function loadSub2APIUsers(showFeedback = true) {
   loadingUsers.value = true;
+  if (showFeedback) {
+    userListMessage.value = "";
+    userListError.value = "";
+  }
   try {
-    sub2apiUsers.value = await api<Sub2APIUserOption[]>(
-      "participants/sub2api-users",
-    );
+    const users = await api<Sub2APIUserOption[]>("participants/sub2api-users");
+    sub2apiUsers.value = users;
+    if (showFeedback) {
+      userListMessage.value = users.length
+        ? `已读取 ${users.length} 个 Sub2API 用户`
+        : "Sub2API 当前没有可选择的用户";
+    }
   } catch (error) {
-    if (showError) {
-      message.value =
+    if (showFeedback) {
+      userListError.value =
         error instanceof ApiError ? error.message : "读取 Sub2API 用户列表失败";
     }
   } finally {
@@ -89,6 +105,8 @@ function applySelectedUser() {
 }
 
 function openNew() {
+  userListMessage.value = "";
+  userListError.value = "";
   editingId.value = null;
   Object.assign(form, {
     name: "",
@@ -104,6 +122,8 @@ function openNew() {
 }
 
 function openEdit(participant: Participant) {
+  userListMessage.value = "";
+  userListError.value = "";
   editingId.value = participant.id;
   Object.assign(form, {
     name: participant.name,
@@ -344,7 +364,8 @@ onMounted(() => {
                   :value="user.id"
                 >
                   {{ user.email || user.username || `用户 ${user.id}` }}（ID
-                  {{ user.id }} · {{ user.status || "未知状态" }}）
+                  {{ user.id }} · {{ userRoleLabel(user.role) }} ·
+                  {{ user.status || "未知状态" }}）
                 </option>
               </select>
               <button
@@ -358,8 +379,15 @@ onMounted(() => {
                   class="loading loading-xs loading-spinner"
                 ></span>
                 <AppIcon v-else name="arrow-path" class="size-4" />
+                {{ loadingUsers ? "读取中" : "刷新用户" }}
               </button>
             </div>
+            <p v-if="userListMessage" class="label text-success">
+              {{ userListMessage }}
+            </p>
+            <p v-if="userListError" class="label text-error">
+              {{ userListError }}
+            </p>
           </fieldset>
           <fieldset class="fieldset">
             <label class="label">周限权益比例（%）</label>
