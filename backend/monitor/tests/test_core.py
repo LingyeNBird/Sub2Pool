@@ -717,6 +717,42 @@ def test_regular_user_only_reads_bound_participant_statistics():
     assert not User.objects.filter(pk=user_id).exists()
 
 @pytest.mark.django_db
+def test_system_user_validation_returns_field_errors():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    participant = Participant.objects.create(
+        name="甲",
+        sub2api_user_id=101,
+        share_percent=100,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    response = client.post(
+        "/api/system-users",
+        data=json.dumps(
+            {
+                "username": "viewer",
+                "email": "viewer@example.com",
+                "password": "123",
+                "is_active": True,
+                "participant_ids": [participant.id],
+            }
+        ),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["message"] == "系统用户校验失败"
+    assert payload["details"]["password"]
+    assert not get_user_model().objects.filter(username="viewer").exists()
+
+@pytest.mark.django_db
 def test_refresh_rotation_blacklists_old_cookie_and_logout_clears_current_cookie():
     get_user_model().objects.create_superuser(
         username="owner",
@@ -848,6 +884,41 @@ def test_global_monitor_schedule_records_next_wake_time():
     config.refresh_from_db()
     assert sleep_seconds == 13 * 60
     assert config.next_local_check_at == now + timedelta(minutes=13)
+
+@pytest.mark.django_db
+def test_global_monitor_schedule_does_not_add_run_duration_to_interval():
+    config = AppSettings.load()
+    config.local_poll_minutes = 10
+    config.save()
+    cycle_started_at = timezone.now()
+
+    sleep_seconds = schedule_next_run(
+        config,
+        now=cycle_started_at + timedelta(minutes=3),
+        cycle_started_at=cycle_started_at,
+    )
+
+    config.refresh_from_db()
+    assert sleep_seconds == 7 * 60
+    assert config.next_local_check_at == cycle_started_at + timedelta(minutes=10)
+
+
+@pytest.mark.django_db
+def test_global_monitor_schedule_skips_elapsed_slots_after_slow_run():
+    config = AppSettings.load()
+    config.local_poll_minutes = 10
+    config.save()
+    cycle_started_at = timezone.now()
+
+    sleep_seconds = schedule_next_run(
+        config,
+        now=cycle_started_at + timedelta(minutes=25),
+        cycle_started_at=cycle_started_at,
+    )
+
+    config.refresh_from_db()
+    assert sleep_seconds == 5 * 60
+    assert config.next_local_check_at == cycle_started_at + timedelta(minutes=30)
 
 
 @pytest.mark.django_db

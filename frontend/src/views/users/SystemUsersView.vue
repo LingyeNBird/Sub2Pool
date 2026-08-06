@@ -5,11 +5,26 @@ import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
 import type { Participant, SystemUser } from "@/types";
 
+type FieldErrorKey =
+  | "username"
+  | "email"
+  | "password"
+  | "participant_ids"
+  | "non_field_errors";
+
 const users = ref<SystemUser[]>([]);
 const participants = ref<Participant[]>([]);
 const loading = ref(true);
 const saving = ref(false);
 const message = ref("");
+const formMessage = ref("");
+const fieldErrors = reactive<Record<FieldErrorKey, string[]>>({
+  username: [],
+  email: [],
+  password: [],
+  participant_ids: [],
+  non_field_errors: [],
+});
 const dialog = ref<HTMLDialogElement | null>(null);
 const editingId = ref<number | null>(null);
 const form = reactive({
@@ -29,6 +44,58 @@ const bindingCount = computed(() =>
 
 function dateTime(value: string | null) {
   return value ? new Date(value).toLocaleString("zh-CN") : "从未登录";
+}
+
+function clearFormErrors() {
+  formMessage.value = "";
+  for (const key of Object.keys(fieldErrors) as FieldErrorKey[]) {
+    fieldErrors[key] = [];
+  }
+}
+
+function detailMessages(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(detailMessages);
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap(detailMessages);
+  }
+  return [];
+}
+
+function applyValidationDetails(details: unknown): boolean {
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    return false;
+  }
+
+  let found = false;
+  const unassigned: string[] = [];
+  for (const [key, value] of Object.entries(details)) {
+    const errors = detailMessages(value);
+    if (!errors.length) continue;
+    found = true;
+    if (
+      key !== "non_field_errors" &&
+      Object.prototype.hasOwnProperty.call(fieldErrors, key)
+    ) {
+      fieldErrors[key as FieldErrorKey] = errors;
+    } else {
+      unassigned.push(...errors);
+    }
+  }
+  if (unassigned.length) formMessage.value = unassigned.join("；");
+  return found;
+}
+
+function validateForm(): boolean {
+  if (form.password && form.password.length < 10) {
+    fieldErrors.password = ["密码至少需要 10 个字符"];
+  }
+  if (!form.participant_ids.length) {
+    fieldErrors.participant_ids = ["请至少选择一个参与者"];
+  }
+  const valid = !Object.values(fieldErrors).some((errors) => errors.length);
+  if (!valid) formMessage.value = "请检查标红的表单项";
+  return valid;
 }
 
 async function load() {
@@ -58,6 +125,7 @@ function openNew() {
     is_active: true,
     participant_ids: [],
   });
+  clearFormErrors();
   dialog.value?.showModal();
 }
 
@@ -70,12 +138,16 @@ function openEdit(user: SystemUser) {
     is_active: user.is_active,
     participant_ids: [...user.participant_ids],
   });
+  clearFormErrors();
   dialog.value?.showModal();
 }
 
 async function save() {
-  saving.value = true;
   message.value = "";
+  clearFormErrors();
+  if (!validateForm()) return;
+
+  saving.value = true;
   const payload = {
     username: form.username,
     email: form.email,
@@ -94,7 +166,16 @@ async function save() {
     dialog.value?.close();
     await load();
   } catch (error) {
-    message.value = error instanceof ApiError ? error.message : "保存用户失败";
+    if (error instanceof ApiError) {
+      const hasFieldErrors = applyValidationDetails(error.details);
+      if (!formMessage.value) {
+        formMessage.value = hasFieldErrors
+          ? "请检查标红的表单项"
+          : error.message;
+      }
+    } else {
+      formMessage.value = "保存用户失败";
+    }
   } finally {
     saving.value = false;
   }
@@ -251,6 +332,10 @@ onMounted(load);
       <h2 class="text-lg font-bold">
         {{ editingId ? "编辑系统用户" : "添加系统用户" }}
       </h2>
+      <div v-if="formMessage" class="mt-3 alert py-2 text-sm alert-error">
+        <AppIcon name="exclamation-triangle" class="size-4 shrink-0" />
+        <span>{{ formMessage }}</span>
+      </div>
       <form class="mt-4 grid gap-3" @submit.prevent="save">
         <fieldset class="fieldset">
           <label class="label" for="system-username">用户名</label>
@@ -261,7 +346,15 @@ onMounted(load);
             maxlength="150"
             autocomplete="off"
             required
+            :class="{ 'input-error': fieldErrors.username.length }"
           />
+          <p
+            v-for="error in fieldErrors.username"
+            :key="error"
+            class="mt-1 text-xs text-error"
+          >
+            {{ error }}
+          </p>
         </fieldset>
         <fieldset class="fieldset">
           <label class="label" for="system-email">邮箱</label>
@@ -271,7 +364,15 @@ onMounted(load);
             type="email"
             class="input w-full"
             autocomplete="off"
+            :class="{ 'input-error': fieldErrors.email.length }"
           />
+          <p
+            v-for="error in fieldErrors.email"
+            :key="error"
+            class="mt-1 text-xs text-error"
+          >
+            {{ error }}
+          </p>
         </fieldset>
         <fieldset class="fieldset">
           <label class="label" for="system-password">
@@ -283,8 +384,21 @@ onMounted(load);
             type="password"
             class="input w-full"
             autocomplete="new-password"
+            minlength="10"
+            :class="{ 'input-error': fieldErrors.password.length }"
             :required="!editingId"
           />
+          <p class="mt-1 text-xs opacity-60">
+            至少 10
+            个字符；不能是常见密码、纯数字，也不能与用户名或邮箱过于相似。
+          </p>
+          <p
+            v-for="error in fieldErrors.password"
+            :key="error"
+            class="mt-1 text-xs text-error"
+          >
+            {{ error }}
+          </p>
         </fieldset>
         <fieldset class="fieldset">
           <legend class="label">可查看的参与者（至少选择一个）</legend>
@@ -308,6 +422,13 @@ onMounted(load);
               </span>
             </label>
           </div>
+          <p
+            v-for="error in fieldErrors.participant_ids"
+            :key="error"
+            class="mt-1 text-xs text-error"
+          >
+            {{ error }}
+          </p>
         </fieldset>
         <label class="label justify-between">
           允许登录
@@ -321,10 +442,7 @@ onMounted(load);
           <button type="button" class="btn" @click="dialog?.close()">
             取消
           </button>
-          <button
-            class="btn btn-primary"
-            :disabled="saving || !form.participant_ids.length"
-          >
+          <button class="btn btn-primary" :disabled="saving">
             <span
               v-if="saving"
               class="loading loading-xs loading-spinner"
