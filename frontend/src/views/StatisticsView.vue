@@ -119,14 +119,20 @@ onMounted(load);
       </div>
 
       <div class="stats stats-vertical bg-base-100 xl:stats-horizontal">
-        <button
-          class="stat text-left"
-          :disabled="!data?.capacity_summary.cycle?.rate_calculated"
-          @click="openBasis('cycle')"
-        >
+        <div class="stat">
           <div class="stat-title">本周期累计折算</div>
-          <div class="stat-value text-xl font-semibold">
-            {{ currency(data?.capacity_summary.cycle?.estimate_usd) }}
+          <div class="flex items-baseline gap-2">
+            <div class="stat-value text-xl font-semibold">
+              {{ currency(data?.capacity_summary.cycle?.estimate_usd) }}
+            </div>
+            <button
+              v-if="data?.capacity_summary.cycle?.rate_calculated"
+              type="button"
+              class="text-xs underline underline-offset-2 opacity-50"
+              @click="openBasis('cycle')"
+            >
+              查看依据
+            </button>
           </div>
           <div class="stat-desc">
             累计
@@ -134,37 +140,31 @@ onMounted(load);
             {{ percent(data?.capacity_summary.cycle?.used_percent) }} · 置信度
             {{ data?.capacity_summary.cycle?.confidence ?? "—" }}
           </div>
-          <div
-            v-if="data?.capacity_summary.cycle?.rate_calculated"
-            class="mt-1 text-xs opacity-50"
-          >
-            点击查看计算依据
-          </div>
-        </button>
-        <button
-          class="stat text-left"
-          :disabled="!data?.capacity_summary.today.sufficient"
-          @click="openBasis('today')"
-        >
+        </div>
+        <div class="stat">
           <div class="stat-title">今日用量折算</div>
-          <div class="stat-value text-xl font-semibold">
-            {{
-              data?.capacity_summary.today.sufficient
-                ? currency(data.capacity_summary.today.estimate_usd)
-                : "样本不足"
-            }}
+          <div class="flex items-baseline gap-2">
+            <div class="stat-value text-xl font-semibold">
+              {{
+                data?.capacity_summary.today.sufficient
+                  ? currency(data.capacity_summary.today.estimate_usd)
+                  : "样本不足"
+              }}
+            </div>
+            <button
+              v-if="data?.capacity_summary.today.sufficient"
+              type="button"
+              class="text-xs underline underline-offset-2 opacity-50"
+              @click="openBasis('today')"
+            >
+              查看依据
+            </button>
           </div>
           <div class="stat-desc">
             需要至少跨过
             {{ percent(data?.capacity_summary.today.min_percent_span) }}
           </div>
-          <div
-            v-if="data?.capacity_summary.today.sufficient"
-            class="mt-1 text-xs opacity-50"
-          >
-            点击查看计算依据
-          </div>
-        </button>
+        </div>
         <div class="stat">
           <div class="stat-title">今日已覆盖观测区间</div>
           <div class="stat-value text-xl font-semibold">

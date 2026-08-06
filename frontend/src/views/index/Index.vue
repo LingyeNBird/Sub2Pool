@@ -119,25 +119,28 @@ onMounted(load);
       </div>
       <div class="stat-desc">按 OpenAI 七天窗口</div>
     </div>
-    <button
-      class="stat text-left"
-      :disabled="!data.cycle?.rate_calculated"
-      @click="openRateBasis"
-    >
+    <div class="stat">
       <div class="stat-figure">
         <AppIcon name="banknotes" class="size-7 opacity-40" />
       </div>
       <div class="stat-title">保守美元 / 1%</div>
-      <div class="stat-value text-xl font-semibold tabular-nums">
-        {{ currency(data.cycle?.effective_usd_per_percent) }}
+      <div class="flex items-baseline gap-2">
+        <div class="stat-value text-xl font-semibold tabular-nums">
+          {{ currency(data.cycle?.effective_usd_per_percent) }}
+        </div>
+        <button
+          v-if="data.cycle?.rate_calculated"
+          type="button"
+          class="text-xs underline underline-offset-2 opacity-50"
+          @click="openRateBasis"
+        >
+          查看依据
+        </button>
       </div>
       <div class="stat-desc">
         {{ data.cycle?.sample_note || "等待有效样本" }}
       </div>
-      <div v-if="data.cycle?.rate_calculated" class="mt-1 text-xs opacity-50">
-        点击查看计算依据
-      </div>
-    </button>
+    </div>
     <div class="stat">
       <div class="stat-figure">
         <AppIcon name="clipboard-document-check" class="size-7 opacity-40" />

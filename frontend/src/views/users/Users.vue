@@ -15,6 +15,15 @@ const userListMessage = ref("");
 const userListError = ref("");
 const dialog = ref<HTMLDialogElement | null>(null);
 const editingId = ref<number | null>(null);
+type ParticipantViewMode = "cards" | "table";
+
+const viewModeStorageKey = "sub2pool:participant-view";
+const viewMode = ref<ParticipantViewMode>("cards");
+
+function setViewMode(mode: ParticipantViewMode) {
+  viewMode.value = mode;
+  localStorage.setItem(viewModeStorageKey, mode);
+}
 const form = reactive({
   name: "",
   email: "",
@@ -45,6 +54,10 @@ function currency(value: number | null | undefined) {
 
 function percent(value: number | null | undefined) {
   return value == null ? "—" : `${value.toFixed(2)}%`;
+}
+
+function dateTime(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleString("zh-CN") : "—";
 }
 
 function userRoleLabel(role: string) {
@@ -174,6 +187,10 @@ async function remove(participant: Participant) {
 }
 
 onMounted(() => {
+  const storedMode = localStorage.getItem(viewModeStorageKey);
+  if (storedMode === "cards" || storedMode === "table") {
+    viewMode.value = storedMode;
+  }
   void load();
   void loadSub2APIUsers(false);
 });
@@ -235,90 +252,242 @@ onMounted(() => {
     </div>
   </section>
 
-  <section class="card col-span-12 bg-base-200 shadow-xs">
-    <div class="card-body gap-4">
-      <h2 class="card-title">
+  <section class="col-span-12">
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <h2 class="flex items-center gap-2 text-lg font-semibold">
         <AppIcon name="user-group" class="size-5" />权益与用量
       </h2>
-      <div v-if="loading" class="flex justify-center py-10">
+      <div class="join">
+        <button
+          type="button"
+          class="btn join-item btn-sm"
+          :class="{ 'btn-active': viewMode === 'cards' }"
+          @click="setViewMode('cards')"
+        >
+          <AppIcon name="squares-2x2" class="size-4" />
+          卡片
+        </button>
+        <button
+          type="button"
+          class="btn join-item btn-sm"
+          :class="{ 'btn-active': viewMode === 'table' }"
+          @click="setViewMode('table')"
+        >
+          <AppIcon name="table-cells" class="size-4" />
+          表格
+        </button>
+      </div>
+    </div>
+
+    <div v-if="loading" class="card bg-base-200 shadow-xs">
+      <div class="card-body items-center py-10">
         <span class="loading loading-lg loading-spinner"></span>
       </div>
-      <div v-else class="overflow-x-auto">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>参与者</th>
-              <th>角色</th>
-              <th>权益</th>
-              <th>已归属 / 剩余</th>
-              <th>账号本周期用量</th>
-              <th>当前用户余额</th>
-              <th>建议用户余额</th>
-              <th>状态</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="participant in participants" :key="participant.id">
-              <td>
-                <div class="font-bold">{{ participant.name }}</div>
-                <div class="text-sm opacity-60">
-                  {{
-                    participant.email ||
-                    `用户 ID ${participant.sub2api_user_id}`
-                  }}
-                </div>
-              </td>
-              <td>
+    </div>
+
+    <div
+      v-else-if="participants.length && viewMode === 'cards'"
+      class="grid gap-4 xl:grid-cols-2"
+    >
+      <article
+        v-for="participant in participants"
+        :key="participant.id"
+        class="card bg-base-200 shadow-xs"
+      >
+        <div class="card-body gap-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h3 class="card-title">{{ participant.name }}</h3>
                 <span
                   class="badge badge-sm"
                   :class="
                     participant.is_owner ? 'badge-neutral' : 'badge-ghost'
                   "
-                  >{{ participant.is_owner ? "车主" : "车友" }}</span
                 >
-              </td>
-              <td>{{ percent(participant.share_percent) }}</td>
-              <td>
-                {{ percent(participant.snapshot?.charged_cycle_percent) }} /
-                {{ percent(participant.snapshot?.remaining_share_percent) }}
-              </td>
-              <td>{{ currency(participant.latest_selected_cost) }}</td>
-              <td>{{ currency(participant.latest_balance_usd) }}</td>
-              <td class="font-semibold">
-                {{ currency(participant.snapshot?.recommended_balance_usd) }}
-              </td>
-              <td>
+                  {{ participant.is_owner ? "车主" : "车友" }}
+                </span>
                 <span
                   class="badge badge-sm"
                   :class="participant.enabled ? 'badge-success' : 'badge-ghost'"
                 >
                   {{ participant.enabled ? "启用" : "停用" }}
                 </span>
-              </td>
-              <td class="text-right">
-                <button
-                  class="btn btn-ghost btn-xs"
-                  @click="openEdit(participant)"
+              </div>
+              <p class="mt-1 text-sm opacity-60">
+                {{ participant.email || "未填写邮箱" }} · Sub2API 用户
+                <span class="font-mono">{{ participant.sub2api_user_id }}</span>
+              </p>
+            </div>
+            <div class="flex gap-1">
+              <button
+                class="btn btn-ghost btn-xs"
+                @click="openEdit(participant)"
+              >
+                编辑
+              </button>
+              <button
+                class="btn btn-ghost text-error btn-xs"
+                @click="remove(participant)"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div class="rounded-box bg-base-100 p-3">
+              <div class="text-xs opacity-60">合同权益</div>
+              <div class="mt-1 font-semibold tabular-nums">
+                {{ percent(participant.share_percent) }}
+              </div>
+            </div>
+            <div class="rounded-box bg-base-100 p-3">
+              <div class="text-xs opacity-60">已归属周限</div>
+              <div class="mt-1 font-semibold tabular-nums">
+                {{ percent(participant.snapshot?.charged_cycle_percent) }}
+              </div>
+            </div>
+            <div class="rounded-box bg-base-100 p-3">
+              <div class="text-xs opacity-60">剩余权益</div>
+              <div class="mt-1 font-semibold tabular-nums">
+                {{ percent(participant.snapshot?.remaining_share_percent) }}
+              </div>
+            </div>
+            <div class="rounded-box bg-base-100 p-3">
+              <div class="text-xs opacity-60">账号本周期用量</div>
+              <div class="mt-1 font-semibold tabular-nums">
+                {{ currency(participant.latest_selected_cost) }}
+              </div>
+            </div>
+            <div class="rounded-box bg-base-100 p-3">
+              <div class="text-xs opacity-60">当前用户余额</div>
+              <div class="mt-1 font-semibold tabular-nums">
+                {{ currency(participant.latest_balance_usd) }}
+              </div>
+            </div>
+            <div class="rounded-box bg-base-100 p-3">
+              <div class="text-xs opacity-60">建议用户余额</div>
+              <div class="mt-1 font-semibold tabular-nums">
+                {{ currency(participant.snapshot?.recommended_balance_usd) }}
+              </div>
+            </div>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div class="text-xs opacity-60">备注</div>
+              <p class="mt-1 text-sm whitespace-pre-wrap">
+                {{ participant.notes || "未填写备注" }}
+              </p>
+            </div>
+            <div>
+              <div class="text-xs opacity-60">额度建议</div>
+              <div class="mt-1 flex flex-wrap items-center gap-2">
+                <span
+                  class="badge badge-sm"
+                  :class="
+                    participant.snapshot?.needs_manual_update
+                      ? 'badge-warning'
+                      : 'badge-success'
+                  "
                 >
-                  编辑
-                </button>
-                <button
-                  class="btn btn-ghost text-error btn-xs"
-                  @click="remove(participant)"
-                >
-                  删除
-                </button>
-              </td>
-            </tr>
-            <tr v-if="participants.length === 0">
-              <td colspan="9" class="py-8 text-center opacity-60">
-                尚未添加参与者
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                  {{
+                    !participant.snapshot
+                      ? "等待测算"
+                      : participant.snapshot.needs_manual_update
+                        ? "建议调整"
+                        : "无需调整"
+                  }}
+                </span>
+                <span class="text-sm opacity-60">
+                  {{ participant.snapshot?.reason || "尚无测算依据" }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="text-xs opacity-50">
+            最近探测：{{ dateTime(participant.last_checked_at) }}
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <div
+      v-else-if="participants.length"
+      class="overflow-x-auto rounded-box bg-base-200 shadow-xs"
+    >
+      <table class="table">
+        <thead>
+          <tr>
+            <th>参与者</th>
+            <th>角色</th>
+            <th>权益</th>
+            <th>已归属 / 剩余</th>
+            <th>账号本周期用量</th>
+            <th>当前用户余额</th>
+            <th>建议用户余额</th>
+            <th>状态</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="participant in participants" :key="participant.id">
+            <td>
+              <div class="font-bold">{{ participant.name }}</div>
+              <div class="text-sm opacity-60">
+                {{
+                  participant.email || `用户 ID ${participant.sub2api_user_id}`
+                }}
+              </div>
+            </td>
+            <td>
+              <span
+                class="badge badge-sm"
+                :class="participant.is_owner ? 'badge-neutral' : 'badge-ghost'"
+                >{{ participant.is_owner ? "车主" : "车友" }}</span
+              >
+            </td>
+            <td>{{ percent(participant.share_percent) }}</td>
+            <td>
+              {{ percent(participant.snapshot?.charged_cycle_percent) }} /
+              {{ percent(participant.snapshot?.remaining_share_percent) }}
+            </td>
+            <td>{{ currency(participant.latest_selected_cost) }}</td>
+            <td>{{ currency(participant.latest_balance_usd) }}</td>
+            <td class="font-semibold">
+              {{ currency(participant.snapshot?.recommended_balance_usd) }}
+            </td>
+            <td>
+              <span
+                class="badge badge-sm"
+                :class="participant.enabled ? 'badge-success' : 'badge-ghost'"
+              >
+                {{ participant.enabled ? "启用" : "停用" }}
+              </span>
+            </td>
+            <td class="text-right">
+              <button
+                class="btn btn-ghost btn-xs"
+                @click="openEdit(participant)"
+              >
+                编辑
+              </button>
+              <button
+                class="btn btn-ghost text-error btn-xs"
+                @click="remove(participant)"
+              >
+                删除
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div v-else class="card bg-base-200 shadow-xs">
+      <div class="card-body py-10 text-center opacity-60">尚未添加参与者</div>
     </div>
   </section>
 
