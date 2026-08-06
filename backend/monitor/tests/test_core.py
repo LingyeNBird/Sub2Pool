@@ -14,6 +14,7 @@ from django.test import Client
 from django.utils import timezone
 
 from monitor.engine import run_monitor
+from monitor.management.commands.runmonitor import schedule_next_run
 from monitor.models import (
     AppSettings,
     LoginEvent,
@@ -26,7 +27,7 @@ from monitor.models import (
 )
 from monitor.notifications import send_notification
 from monitor.secrets import encrypt_secret
-from monitor.sub2api import PlatformQuota, Sub2APIClient, UsageStats, WeeklyWindow
+from monitor.sub2api import Sub2APIClient, UsageStats, UserBalance, WeeklyWindow
 from monitor import database_transfer
 
 def jwt_login(
@@ -223,6 +224,45 @@ def test_sub2api_user_discovery_includes_admin_accounts():
 
 
 @pytest.mark.django_db
+def test_user_balance_reads_user_detail_without_platform_quota_endpoint():
+    config = AppSettings.load()
+    config.sub2api_base_url = "https://sub2api.example/"
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.save()
+    requested_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        requested_paths.append(request.url.path)
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "message": "success",
+                "data": {
+                    "id": 51,
+                    "balance": "1597.096606",
+                    "frozen_balance": "2.5",
+                },
+            },
+        )
+
+    with Sub2APIClient(config) as client:
+        client.client.close()
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"x-api-key": "admin-secret"},
+        )
+        balance = client.user_balance(51)
+
+    assert balance == UserBalance(
+        balance=Decimal("1597.096606"),
+        frozen_balance=Decimal("2.5"),
+    )
+    assert requested_paths == ["/api/v1/admin/users/51"]
+
+
+@pytest.mark.django_db
 def test_initial_observation_conserves_percent_and_builds_manual_recommendations(monkeypatch):
     config = AppSettings.load()
     config.openai_account_id = 7
@@ -253,10 +293,9 @@ def test_initial_observation_conserves_percent_and_builds_manual_recommendations
             costs = {None: Decimal("400"), 1: Decimal("300"), 2: Decimal("100")}
             return UsageStats(costs[user_id], costs[user_id])
 
-        def platform_quota(self, user_id, platform):
-            assert platform == "openai"
-            usage = Decimal("300") if user_id == 1 else Decimal("100")
-            return PlatformQuota(usage, Decimal("500"), None, None)
+        def user_balance(self, user_id):
+            balance = Decimal("300") if user_id == 1 else Decimal("100")
+            return UserBalance(balance, Decimal("0"))
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
     result = run_monitor(force_upstream=True, source="manual")
@@ -266,8 +305,8 @@ def test_initial_observation_conserves_percent_and_builds_manual_recommendations
     assert snapshots[owner.id].charged_cycle_percent == Decimal("30")
     assert snapshots[rider.id].charged_cycle_percent == Decimal("10")
     assert sum((item.charged_cycle_percent for item in snapshots.values()), Decimal("0")) == Decimal("40")
-    assert snapshots[owner.id].recommended_weekly_limit_usd == Decimal("604.00")
-    assert snapshots[rider.id].recommended_weekly_limit_usd == Decimal("708.00")
+    assert snapshots[owner.id].recommended_balance_usd == Decimal("304.00")
+    assert snapshots[rider.id].recommended_balance_usd == Decimal("608.00")
     assert ParticipantUsageSample.objects.count() == 2
 
 
@@ -315,9 +354,9 @@ def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
             costs = {None: Decimal("100"), 1: Decimal("100"), 2: Decimal("0")}
             return UsageStats(costs[user_id], costs[user_id])
 
-        def platform_quota(self, user_id, _platform):
-            usage = Decimal("100") if user_id == 1 else Decimal("0")
-            return PlatformQuota(usage, Decimal("800"), None, None)
+        def user_balance(self, user_id):
+            balance = Decimal("700") if user_id == 1 else Decimal("800")
+            return UserBalance(balance, Decimal("0"))
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
     run_monitor(force_upstream=True, source="manual")
@@ -369,9 +408,8 @@ def test_manual_upstream_refresh_starts_new_cycle_without_negative_ledger(
         charged_delta_percent=Decimal("10"),
         charged_cycle_percent=Decimal("10"),
         remaining_share_percent=Decimal("40"),
-        platform_weekly_usage_usd=Decimal("100"),
-        platform_weekly_limit_usd=Decimal("500"),
-        recommended_weekly_limit_usd=Decimal("500"),
+        current_balance_usd=Decimal("500"),
+        recommended_balance_usd=Decimal("500"),
     )
 
     class FakeClient:
@@ -396,13 +434,8 @@ def test_manual_upstream_refresh_starts_new_cycle_without_negative_ledger(
         def usage_stats(self, **_kwargs):
             return UsageStats(Decimal("0"), Decimal("0"))
 
-        def platform_quota(self, _user_id, _platform):
-            return PlatformQuota(
-                Decimal("0"),
-                Decimal("500"),
-                None,
-                None,
-            )
+        def user_balance(self, _user_id):
+            return UserBalance(Decimal("500"), Decimal("0"))
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
     result = run_monitor(force_upstream=True, source="manual")
@@ -560,6 +593,51 @@ def test_partial_settings_patch_does_not_touch_other_cards():
     assert config.local_poll_minutes == 17
     assert config.sub2api_base_url == "https://sub2api.example"
     assert config.smtp_host == "smtp.original.example"
+
+
+@pytest.mark.django_db
+def test_global_monitor_schedule_records_next_wake_time():
+    config = AppSettings.load()
+    config.local_poll_minutes = 13
+    config.save()
+    now = timezone.now()
+
+    sleep_seconds = schedule_next_run(config, now=now)
+
+    config.refresh_from_db()
+    assert sleep_seconds == 13 * 60
+    assert config.next_local_check_at == now + timedelta(minutes=13)
+
+
+@pytest.mark.django_db
+def test_monitor_status_exposes_global_countdown_and_hides_it_when_disabled():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    config = AppSettings.load()
+    config.monitoring_enabled = True
+    config.local_poll_minutes = 10
+    config.next_local_check_at = timezone.now() + timedelta(minutes=7)
+    config.save()
+
+    enabled = client.get("/api/monitor/run", **headers)
+
+    assert enabled.status_code == 200
+    data = enabled.json()["data"]
+    assert data["monitoring_enabled"] is True
+    assert data["interval_seconds"] == 600
+    assert data["next_local_check_at"] == config.next_local_check_at.isoformat()
+    assert data["server_time"]
+
+    config.monitoring_enabled = False
+    config.save(update_fields=["monitoring_enabled"])
+    disabled = client.get("/api/monitor/run", **headers).json()["data"]
+    assert disabled["monitoring_enabled"] is False
+    assert disabled["next_local_check_at"] is None
 
 
 @pytest.mark.django_db
@@ -944,16 +1022,14 @@ def test_statistics_groups_capacity_and_participant_usage():
         participant=participant,
         cycle=cycle,
         observed_at=hour,
-        weekly_usage_usd=10,
-        weekly_limit_usd=100,
+        balance_usd=Decimal("800"),
         selected_cost=10,
     )
     ParticipantUsageSample.objects.create(
         participant=participant,
         cycle=cycle,
         observed_at=hour + timedelta(minutes=30),
-        weekly_usage_usd=12,
-        weekly_limit_usd=100,
+        balance_usd=Decimal("760"),
         selected_cost=12,
     )
 
@@ -964,10 +1040,9 @@ def test_statistics_groups_capacity_and_participant_usage():
     ).json()["data"]
     assert daily["capacity_series"][-1]["weekly_total_usd"] == 1600.0
     assert len(daily["participant_series"][0]["points"]) == 1
-    assert (
-        daily["participant_series"][0]["points"][0]["weekly_usage_usd"]
-        == 12.0
-    )
+    point = daily["participant_series"][0]["points"][0]
+    assert point["account_cycle_usage_usd"] == 12.0
+    assert point["balance_usd"] == 760.0
 
     monthly = client.get(
         "/api/statistics?capacity_period=month&capacity_days=365",

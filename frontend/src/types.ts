@@ -6,10 +6,9 @@ export interface Snapshot {
   charged_delta_percent: number;
   charged_cycle_percent: number;
   remaining_share_percent: number;
-  platform_weekly_usage_usd: number | null;
-  platform_weekly_limit_usd: number | null;
-  recommended_weekly_limit_usd: number;
-  recommendation_difference_usd: number | null;
+  current_balance_usd: number | null;
+  recommended_balance_usd: number | null;
+  balance_difference_usd: number | null;
   needs_manual_update: boolean;
   reason: string;
 }
@@ -23,8 +22,7 @@ export interface Participant {
   is_owner: boolean;
   enabled: boolean;
   notes: string;
-  latest_weekly_usage_usd: number | null;
-  latest_weekly_limit_usd: number | null;
+  latest_balance_usd: number | null;
   latest_selected_cost: number | null;
   last_checked_at: string | null;
   snapshot: Snapshot | null;
@@ -80,6 +78,13 @@ export interface Observation {
   participants: Snapshot[];
 }
 
+export interface MonitorSchedule {
+  monitoring_enabled: boolean;
+  interval_seconds: number;
+  next_local_check_at: string | null;
+  server_time: string;
+}
+
 export interface NotificationRecord {
   id: number;
   event_type: string;
@@ -127,8 +132,8 @@ export interface CapacityPoint {
 export interface UsagePoint {
   observed_at: string;
   label: string;
-  weekly_usage_usd: number;
-  weekly_limit_usd: number | null;
+  account_cycle_usage_usd: number;
+  balance_usd: number | null;
 }
 
 export interface ParticipantUsageSeries {

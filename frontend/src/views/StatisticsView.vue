@@ -146,10 +146,11 @@ onMounted(load);
       <div class="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 class="card-title">
-            <AppIcon name="chart-bar" class="size-5" />参与者周用量
+            <AppIcon name="chart-bar" class="size-5" />参与者账号用量
           </h2>
           <p class="mt-1 text-sm opacity-60">
-            展示 Sub2API 返回的每位参与者 OpenAI 周用量。后台当前每
+            展示 Sub2API 用量日志中按所选 OpenAI
+            上游账号和参与者聚合的本周期累计用量。后台当前每
             {{ data?.sample_interval_minutes ?? "—" }} 分钟探测一次。
           </p>
         </div>
@@ -194,17 +195,19 @@ onMounted(load);
             </div>
             <div class="text-right text-sm">
               <div>
-                当前用量：{{ currency(series.points.at(-1)?.weekly_usage_usd) }}
+                账号本周期用量：{{
+                  currency(series.points.at(-1)?.account_cycle_usage_usd)
+                }}
               </div>
               <div class="opacity-60">
-                当前限额：{{ currency(series.points.at(-1)?.weekly_limit_usd) }}
+                当前用户余额：{{ currency(series.points.at(-1)?.balance_usd) }}
               </div>
             </div>
           </div>
           <tc-line
             v-if="series.points.length"
             class="mt-4 block h-48 w-full"
-            :values="series.points.map((item) => item.weekly_usage_usd)"
+            :values="series.points.map((item) => item.account_cycle_usage_usd)"
             :labels="series.points.map((item) => item.label)"
             :min="0"
             tooltip="@L · $@V"

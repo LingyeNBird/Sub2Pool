@@ -251,8 +251,9 @@ onMounted(() => {
               <th>角色</th>
               <th>权益</th>
               <th>已归属 / 剩余</th>
-              <th>Sub2API 周用量 / 限额</th>
-              <th>建议限额</th>
+              <th>账号本周期用量</th>
+              <th>当前用户余额</th>
+              <th>建议用户余额</th>
               <th>状态</th>
               <th></th>
             </tr>
@@ -282,14 +283,10 @@ onMounted(() => {
                 {{ percent(participant.snapshot?.charged_cycle_percent) }} /
                 {{ percent(participant.snapshot?.remaining_share_percent) }}
               </td>
-              <td>
-                {{ currency(participant.latest_weekly_usage_usd) }} /
-                {{ currency(participant.latest_weekly_limit_usd) }}
-              </td>
+              <td>{{ currency(participant.latest_selected_cost) }}</td>
+              <td>{{ currency(participant.latest_balance_usd) }}</td>
               <td class="font-semibold">
-                {{
-                  currency(participant.snapshot?.recommended_weekly_limit_usd)
-                }}
+                {{ currency(participant.snapshot?.recommended_balance_usd) }}
               </td>
               <td>
                 <span
@@ -315,7 +312,7 @@ onMounted(() => {
               </td>
             </tr>
             <tr v-if="participants.length === 0">
-              <td colspan="8" class="py-8 text-center opacity-60">
+              <td colspan="9" class="py-8 text-center opacity-60">
                 尚未添加参与者
               </td>
             </tr>

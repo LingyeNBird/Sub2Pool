@@ -175,9 +175,9 @@ onMounted(load);
               <span class="font-mono">{{ participant.sub2api_user_id }}</span
               >），
               <template v-if="participant.snapshot">
-                建议把 OpenAI 周限额设置为
+                建议把 Sub2API 用户余额设置为
                 <strong class="text-lg">{{
-                  currency(participant.snapshot.recommended_weekly_limit_usd)
+                  currency(participant.snapshot.recommended_balance_usd)
                 }}</strong
                 >。
               </template>
@@ -201,9 +201,12 @@ onMounted(load);
             </span>
           </div>
           <p class="mt-2 text-sm opacity-60">
-            当前 Sub2API 周用量为
-            {{ currency(participant.latest_weekly_usage_usd) }}，现有限额为
-            {{ currency(participant.latest_weekly_limit_usd) }}；
+            该参与者在所选 OpenAI 上游账号内的本周期累计用量为
+            {{ currency(participant.latest_selected_cost) }}。
+          </p>
+          <p class="mt-1 text-sm opacity-60">
+            当前 Sub2API 用户余额为
+            {{ currency(participant.latest_balance_usd) }}；
             {{ participant.snapshot?.reason || "等待首次测算后生成依据" }}。
           </p>
           <p v-if="participant.snapshot" class="mt-1 text-sm opacity-60">

@@ -21,7 +21,7 @@ from .models import (
     QuotaCycle,
 )
 from .notifications import notify_collection_error, send_notification
-from .sub2api import OPENAI_PLATFORM, PlatformQuota, Sub2APIClient, Sub2APIError, UsageStats, WeeklyWindow
+from .sub2api import Sub2APIClient, Sub2APIError, UsageStats, UserBalance, WeeklyWindow
 
 ZERO = Decimal("0")
 CENT = Decimal("0.01")
@@ -33,7 +33,7 @@ RESET_ROLLBACK_TOLERANCE = Decimal("0.1")
 class LocalParticipantData:
     participant: Participant
     stats: UsageStats
-    quota: PlatformQuota
+    balance: UserBalance
 
     def selected_cost(self, basis: str) -> Decimal:
         return self.stats.selected(basis)
@@ -96,18 +96,23 @@ def _fetch_local(
             end_date=end_date,
             timezone_name=config.timezone,
         )
-        quota = client.platform_quota(participant.sub2api_user_id, OPENAI_PLATFORM)
-        rows.append(LocalParticipantData(participant=participant, stats=stats, quota=quota))
+        balance = client.user_balance(participant.sub2api_user_id)
+        rows.append(
+            LocalParticipantData(
+                participant=participant,
+                stats=stats,
+                balance=balance,
+            )
+        )
 
-    # 展示字段更新不参与账本计算；即使本次没有访问上游，首页也能看到较新的本地限额状态。
+    # 展示字段更新不参与账本计算；即使本次没有访问上游，首页也能看到较新的余额状态。
     for row in rows:
-        row.participant.latest_weekly_usage_usd = row.quota.weekly_usage_usd
-        row.participant.latest_weekly_limit_usd = row.quota.weekly_limit_usd
+        row.participant.latest_balance_usd = row.balance.balance
         row.participant.latest_selected_cost = row.selected_cost(config.cost_basis)
         row.participant.last_checked_at = now
     Participant.objects.bulk_update(
         [row.participant for row in rows],
-        ["latest_weekly_usage_usd", "latest_weekly_limit_usd", "latest_selected_cost", "last_checked_at"],
+        ["latest_balance_usd", "latest_selected_cost", "last_checked_at"],
     )
     ParticipantUsageSample.objects.bulk_create(
         [
@@ -115,8 +120,7 @@ def _fetch_local(
                 participant=row.participant,
                 cycle=cycle,
                 observed_at=now,
-                weekly_usage_usd=row.quota.weekly_usage_usd,
-                weekly_limit_usd=row.quota.weekly_limit_usd,
+                balance_usd=row.balance.balance,
                 selected_cost=row.selected_cost(config.cost_basis),
             )
             for row in rows
@@ -182,9 +186,9 @@ def _effective_rate(
 
 
 def _is_limit_exhausted(config: AppSettings, row: LocalParticipantData, previous: ParticipantSnapshot | None) -> bool:
-    if row.quota.weekly_limit_usd is None or previous is None or previous.remaining_share_percent <= 0:
+    if previous is None or previous.remaining_share_percent <= 0:
         return False
-    return row.quota.weekly_usage_usd >= max(ZERO, row.quota.weekly_limit_usd - config.limit_warning_usd)
+    return row.balance.balance <= config.limit_warning_usd
 
 
 def _collect_observation(
@@ -274,20 +278,25 @@ def _collect_observation(
                     charged_delta = delta_percent * positive_delta / attribution_denominator
             charged = max(ZERO, (old.charged_cycle_percent if old else ZERO) + charged_delta)
             remaining = max(ZERO, participant.share_percent - charged)
-            recommended = (row.quota.weekly_usage_usd + remaining * effective_rate * config.safety_factor).quantize(CENT, rounding=ROUND_HALF_UP)
-            difference = None if row.quota.weekly_limit_usd is None else (recommended - row.quota.weekly_limit_usd).quantize(CENT, rounding=ROUND_HALF_UP)
-            exhausted = row.quota.weekly_limit_usd is not None and row.quota.weekly_usage_usd >= max(ZERO, row.quota.weekly_limit_usd - config.limit_warning_usd)
-            needs_update = row.quota.weekly_limit_usd is None or (difference is not None and abs(difference) >= config.recommendation_change_usd) or (exhausted and remaining > 0)
-            if row.quota.weekly_limit_usd is None:
-                reason = "Sub2API 尚未设置 OpenAI 周限"
-            elif exhausted and remaining > 0:
-                reason = "当前美元额度接近耗尽，但仍有百分比权益"
-            elif remaining <= 0:
+            recommended = (
+                remaining * effective_rate * config.safety_factor
+            ).quantize(CENT, rounding=ROUND_HALF_UP)
+            difference = (
+                recommended - row.balance.balance
+            ).quantize(CENT, rounding=ROUND_HALF_UP)
+            exhausted = row.balance.balance <= config.limit_warning_usd
+            needs_update = (
+                abs(difference) >= config.recommendation_change_usd
+                or (exhausted and remaining > 0)
+            )
+            if remaining <= 0:
                 reason = "本上游周期的百分比权益已用尽"
+            elif exhausted:
+                reason = "当前 Sub2API 用户余额接近耗尽，但仍有百分比权益"
             elif needs_update:
-                reason = "当前限额与最新测算建议差异较大"
+                reason = "当前用户余额与最新测算建议差异较大"
             else:
-                reason = "当前限额无需调整"
+                reason = "当前用户余额无需调整"
             snapshots.append(
                 ParticipantSnapshot(
                     observation=observation,
@@ -297,10 +306,9 @@ def _collect_observation(
                     charged_delta_percent=charged_delta.quantize(PCT_PRECISION, rounding=ROUND_HALF_UP),
                     charged_cycle_percent=charged.quantize(PCT_PRECISION, rounding=ROUND_HALF_UP),
                     remaining_share_percent=remaining.quantize(PCT_PRECISION, rounding=ROUND_HALF_UP),
-                    platform_weekly_usage_usd=row.quota.weekly_usage_usd,
-                    platform_weekly_limit_usd=row.quota.weekly_limit_usd,
-                    recommended_weekly_limit_usd=recommended,
-                    recommendation_difference_usd=difference,
+                    current_balance_usd=row.balance.balance,
+                    recommended_balance_usd=recommended,
+                    balance_difference_usd=difference,
                     needs_manual_update=needs_update,
                     reason=reason,
                 )
@@ -315,20 +323,22 @@ def _collect_observation(
 
     # 通知在数据库事务提交后发送；邮件失败不能回滚已经完成的测算。
     for snapshot in observation.participant_snapshots.select_related("participant"):
-        exhausted = snapshot.platform_weekly_limit_usd is not None and snapshot.platform_weekly_usage_usd is not None and snapshot.platform_weekly_usage_usd >= max(ZERO, snapshot.platform_weekly_limit_usd - config.limit_warning_usd)
+        exhausted = (
+            snapshot.current_balance_usd is not None
+            and snapshot.current_balance_usd <= config.limit_warning_usd
+        )
         if exhausted and snapshot.remaining_share_percent > 0 and config.notify_on_limit_exhausted:
             send_notification(
                 config=config,
                 event_type="limit_exhausted",
-                dedupe_key=f"limit-exhausted:{cycle.id}:{snapshot.participant_id}:{snapshot.recommended_weekly_limit_usd}",
+                dedupe_key=f"balance-exhausted:{cycle.id}:{snapshot.participant_id}:{snapshot.recommended_balance_usd}",
                 participant=snapshot.participant,
-                subject=f"[拼车额度] {snapshot.participant.name} 需要手动补充额度",
+                subject=f"[拼车额度] {snapshot.participant.name} 需要手动补充余额",
                 body=(
-                    f"{snapshot.participant.name} 的 Sub2API OpenAI 周额度已接近耗尽。\n\n"
-                    f"当前周用量：${snapshot.platform_weekly_usage_usd}\n"
-                    f"当前周限额：${snapshot.platform_weekly_limit_usd}\n"
+                    f"{snapshot.participant.name} 的 Sub2API 用户余额已接近耗尽。\n\n"
+                    f"当前用户余额：${snapshot.current_balance_usd}\n"
                     f"剩余百分比权益：{snapshot.remaining_share_percent}%\n"
-                    f"建议手动把周限额改为：${snapshot.recommended_weekly_limit_usd}\n\n"
+                    f"建议手动把用户余额设置为：${snapshot.recommended_balance_usd}\n\n"
                     "本服务不会自动修改 Sub2API。请核对后在 Sub2API 管理台手动操作。"
                 ),
                 severity="error",
@@ -337,10 +347,10 @@ def _collect_observation(
             send_notification(
                 config=config,
                 event_type="recommendation_changed",
-                dedupe_key=f"recommendation:{cycle.id}:{snapshot.participant_id}:{snapshot.recommended_weekly_limit_usd}",
+                dedupe_key=f"balance-recommendation:{cycle.id}:{snapshot.participant_id}:{snapshot.recommended_balance_usd}",
                 participant=snapshot.participant,
-                subject=f"[拼车额度] {snapshot.participant.name} 的额度建议已变化",
-                body=f"建议周限额：${snapshot.recommended_weekly_limit_usd}\n原因：{snapshot.reason}\n请登录服务查看测算依据。",
+                subject=f"[拼车额度] {snapshot.participant.name} 的余额建议已变化",
+                body=f"建议用户余额：${snapshot.recommended_balance_usd}\n原因：{snapshot.reason}\n请登录服务查看测算依据。",
             )
 
     if previous_rate and previous_rate > 0 and config.notify_on_rate_change:

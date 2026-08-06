@@ -22,22 +22,19 @@ def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
         "charged_delta_percent": float(snapshot.charged_delta_percent),
         "charged_cycle_percent": float(snapshot.charged_cycle_percent),
         "remaining_share_percent": float(snapshot.remaining_share_percent),
-        "platform_weekly_usage_usd": (
-            float(snapshot.platform_weekly_usage_usd)
-            if snapshot.platform_weekly_usage_usd is not None
+        "current_balance_usd": (
+            float(snapshot.current_balance_usd)
+            if snapshot.current_balance_usd is not None
             else None
         ),
-        "platform_weekly_limit_usd": (
-            float(snapshot.platform_weekly_limit_usd)
-            if snapshot.platform_weekly_limit_usd is not None
+        "recommended_balance_usd": (
+            float(snapshot.recommended_balance_usd)
+            if snapshot.recommended_balance_usd is not None
             else None
         ),
-        "recommended_weekly_limit_usd": float(
-            snapshot.recommended_weekly_limit_usd
-        ),
-        "recommendation_difference_usd": (
-            float(snapshot.recommendation_difference_usd)
-            if snapshot.recommendation_difference_usd is not None
+        "balance_difference_usd": (
+            float(snapshot.balance_difference_usd)
+            if snapshot.balance_difference_usd is not None
             else None
         ),
         "needs_manual_update": snapshot.needs_manual_update,
@@ -64,14 +61,9 @@ def participant_data(participant: Participant) -> dict:
         "is_owner": participant.is_owner,
         "enabled": participant.enabled,
         "notes": participant.notes,
-        "latest_weekly_usage_usd": (
-            float(participant.latest_weekly_usage_usd)
-            if participant.latest_weekly_usage_usd is not None
-            else None
-        ),
-        "latest_weekly_limit_usd": (
-            float(participant.latest_weekly_limit_usd)
-            if participant.latest_weekly_limit_usd is not None
+        "latest_balance_usd": (
+            float(participant.latest_balance_usd)
+            if participant.latest_balance_usd is not None
             else None
         ),
         "latest_selected_cost": (

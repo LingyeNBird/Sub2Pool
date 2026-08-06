@@ -1,11 +1,31 @@
 """手动触发监测的动作式 API。"""
 
+from django.utils import timezone
+
 from .base import AdminAPIView, error, ok
+from .presenters import iso
 from ..engine import run_monitor
+from ..models import AppSettings
 from ..sub2api import Sub2APIError
 
 
 class RunMonitorView(AdminAPIView):
+    def get(self, _request):
+        """返回全局后台轮询器状态；一次轮询会探测所有启用参与者。"""
+        config = AppSettings.load()
+        return ok(
+            {
+                "monitoring_enabled": config.monitoring_enabled,
+                "interval_seconds": max(2, config.local_poll_minutes) * 60,
+                "next_local_check_at": (
+                    iso(config.next_local_check_at)
+                    if config.monitoring_enabled
+                    else None
+                ),
+                "server_time": iso(timezone.now()),
+            }
+        )
+
     def post(self, _request):
         try:
             result = run_monitor(force_upstream=True, source="manual")

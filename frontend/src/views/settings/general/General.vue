@@ -483,9 +483,13 @@ onMounted(load);
         <fieldset class="fieldset">
           <label class="label">成本口径</label>
           <select v-model="settings.cost_basis" class="select w-full">
-            <option value="actual">实际扣费（与 Sub2API 平台限额一致）</option>
+            <option value="actual">实际扣费（推荐）</option>
             <option value="standard">标准计费</option>
           </select>
+          <p class="label">
+            实际扣费会应用 Sub2API
+            的计费倍率，并与用户余额真实扣减一致；标准计费只按模型标准单价计算。余额分配建议通常应选择实际扣费。
+          </p>
         </fieldset>
         <div class="grid gap-3 md:grid-cols-2">
           <fieldset class="fieldset">
@@ -540,7 +544,7 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset">
-            <label class="label">额度耗尽预警余量（美元）</label>
+            <label class="label">用户余额耗尽预警余量（美元）</label>
             <input
               v-model.number="settings.limit_warning_usd"
               type="number"
@@ -627,7 +631,7 @@ onMounted(load);
             class="toggle toggle-sm"
         /></label>
         <p class="text-sm opacity-60">
-          空闲时只做低频本地探测；达到成本进度、额度耗尽或重置条件后才形成新观测。
+          空闲时只做低频本地探测；达到成本进度、用户余额耗尽或重置条件后才形成新观测。
         </p>
         <button
           class="btn btn-primary btn-sm"
@@ -793,7 +797,7 @@ onMounted(load);
           <AppIcon name="bell-alert" class="size-5" />通知规则
         </h2>
         <label class="label justify-between"
-          >参与者额度耗尽时通知<input
+          >参与者用户余额耗尽时通知<input
             v-model="settings.notify_on_limit_exhausted"
             type="checkbox"
             class="toggle toggle-sm"

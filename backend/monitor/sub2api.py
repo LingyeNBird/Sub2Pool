@@ -40,11 +40,11 @@ class UsageStats:
 
 
 @dataclass(frozen=True)
-class PlatformQuota:
-    weekly_usage_usd: Decimal
-    weekly_limit_usd: Decimal | None
-    weekly_window_start: str | None
-    weekly_window_resets_at: str | None
+class UserBalance:
+    """Sub2API 用户的全局余额；该余额会被该用户的所有用量共同消耗。"""
+
+    balance: Decimal
+    frozen_balance: Decimal
 
 
 def _decimal(value: Any, field: str) -> Decimal:
@@ -155,7 +155,7 @@ class Sub2APIClient:
         return accounts
 
     def list_users(self) -> list[dict[str, Any]]:
-        """分页读取可作为拼车参与者的 Sub2API 用户，不向前端暴露余额等无关字段。"""
+        """分页读取可作为拼车参与者的 Sub2API 用户，只返回下拉框所需字段。"""
         users: list[dict[str, Any]] = []
         page = 1
         while True:
@@ -322,21 +322,20 @@ class Sub2APIClient:
             total_actual_cost=_decimal(data.get("total_actual_cost"), "total_actual_cost"),
         )
 
-    def platform_quota(self, user_id: int, platform: str) -> PlatformQuota:
-        data = self._get(f"api/v1/admin/users/{user_id}/platform-quotas")
-        items = (data or {}).get("platform_quotas") if isinstance(data, dict) else None
-        if not isinstance(items, list):
-            raise Sub2APIError(f"用户 {user_id} 的平台额度响应结构错误")
-        item = next((row for row in items if isinstance(row, dict) and row.get("platform") == platform), None)
-        if item is None:
-            # 没有记录代表该平台无限额。用量也没有可读取的独立计数，按 0 展示并提示配置。
-            return PlatformQuota(Decimal("0"), None, None, None)
-        limit = item.get("weekly_limit_usd")
-        return PlatformQuota(
-            weekly_usage_usd=_decimal(item.get("weekly_usage_usd"), "weekly_usage_usd"),
-            weekly_limit_usd=None if limit is None else _decimal(limit, "weekly_limit_usd"),
-            weekly_window_start=item.get("weekly_window_start"),
-            weekly_window_resets_at=item.get("weekly_window_resets_at"),
+    def user_balance(self, user_id: int) -> UserBalance:
+        """读取用户全局余额；只调用详情 GET 接口，不会修改余额。"""
+        data = self._get(f"api/v1/admin/users/{user_id}")
+        if not isinstance(data, dict):
+            raise Sub2APIError(f"用户 {user_id} 的详情响应结构错误")
+        try:
+            returned_id = int(data.get("id"))
+        except (TypeError, ValueError) as exc:
+            raise Sub2APIError(f"用户 {user_id} 的详情缺少有效 ID") from exc
+        if returned_id != user_id:
+            raise Sub2APIError(f"用户 {user_id} 的详情 ID 不匹配")
+        return UserBalance(
+            balance=_decimal(data.get("balance"), "balance"),
+            frozen_balance=_decimal(data.get("frozen_balance"), "frozen_balance"),
         )
 
     def test_connection(self, account_id: int | None, quota_query_mode: str = "passive") -> dict[str, Any]:

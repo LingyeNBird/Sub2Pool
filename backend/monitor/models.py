@@ -93,6 +93,8 @@ class AppSettings(models.Model):
     resend_from_email = models.CharField(max_length=320, blank=True)
 
     last_local_check_at = models.DateTimeField(null=True, blank=True)
+    # 由全局后台轮询进程记录；手动测算不会改变自动轮询的计划时间。
+    next_local_check_at = models.DateTimeField(null=True, blank=True)
     last_upstream_check_at = models.DateTimeField(null=True, blank=True)
     last_success_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True)
@@ -126,9 +128,12 @@ class Participant(models.Model):
     notes = models.TextField(blank=True)
 
     # 最近一次本地探测值用于展示；它们不是账本，真正的分配账本在 ParticipantSnapshot。
-    latest_weekly_usage_usd = models.DecimalField(max_digits=16, decimal_places=6, null=True, blank=True)
-    latest_weekly_limit_usd = models.DecimalField(max_digits=16, decimal_places=6, null=True, blank=True)
-    latest_selected_cost = models.DecimalField(max_digits=16, decimal_places=6, null=True, blank=True)
+    latest_balance_usd = models.DecimalField(
+        max_digits=16, decimal_places=6, null=True, blank=True
+    )
+    latest_selected_cost = models.DecimalField(
+        max_digits=16, decimal_places=6, null=True, blank=True
+    )
     last_checked_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -197,10 +202,15 @@ class ParticipantSnapshot(models.Model):
     charged_delta_percent = models.DecimalField(max_digits=10, decimal_places=5, default=0)
     charged_cycle_percent = models.DecimalField(max_digits=10, decimal_places=5, default=0)
     remaining_share_percent = models.DecimalField(max_digits=10, decimal_places=5, default=0)
-    platform_weekly_usage_usd = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
-    platform_weekly_limit_usd = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
-    recommended_weekly_limit_usd = models.DecimalField(max_digits=18, decimal_places=4)
-    recommendation_difference_usd = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
+    current_balance_usd = models.DecimalField(
+        max_digits=18, decimal_places=6, null=True, blank=True
+    )
+    recommended_balance_usd = models.DecimalField(
+        max_digits=18, decimal_places=4, null=True, blank=True
+    )
+    balance_difference_usd = models.DecimalField(
+        max_digits=18, decimal_places=4, null=True, blank=True
+    )
     needs_manual_update = models.BooleanField(default=False)
     reason = models.CharField(max_length=255, blank=True)
 
@@ -210,7 +220,7 @@ class ParticipantSnapshot(models.Model):
 
 
 class ParticipantUsageSample(models.Model):
-    """每次本地探测保存的参与者 Sub2API 周用量，用于历史趋势图。"""
+    """每次本地探测保存的参与者账号用量与用户余额，用于历史趋势图。"""
 
     participant = models.ForeignKey(
         Participant,
@@ -223,8 +233,7 @@ class ParticipantUsageSample(models.Model):
         related_name="usage_samples",
     )
     observed_at = models.DateTimeField()
-    weekly_usage_usd = models.DecimalField(max_digits=18, decimal_places=6)
-    weekly_limit_usd = models.DecimalField(
+    balance_usd = models.DecimalField(
         max_digits=18,
         decimal_places=6,
         null=True,

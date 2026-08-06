@@ -119,14 +119,14 @@ class StatisticsView(AdminAPIView):
             else:
                 bucket = local.date().isoformat()
                 label = local.strftime("%m-%d")
-            # 同一显示桶保留最后一次探测，表达该时点可见的 Sub2API 周用量。
+            # 账号周期用量用于归属权益；用户余额是 Sub2API 的全局可用余额。
             usage_buckets[sample.participant_id][bucket] = {
                 "observed_at": sample.observed_at.isoformat(),
                 "label": label,
-                "weekly_usage_usd": float(sample.weekly_usage_usd),
-                "weekly_limit_usd": (
-                    float(sample.weekly_limit_usd)
-                    if sample.weekly_limit_usd is not None
+                "account_cycle_usage_usd": float(sample.selected_cost),
+                "balance_usd": (
+                    float(sample.balance_usd)
+                    if sample.balance_usd is not None
                     else None
                 ),
             }
