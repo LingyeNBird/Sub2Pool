@@ -5,7 +5,7 @@ from django.utils import timezone
 from .base import AdminAPIView, error, ok
 from .presenters import iso
 from ..engine import run_monitor
-from ..models import AppSettings, Observation
+from ..models import AppSettings
 from ..sub2api import Sub2APIError
 
 
@@ -14,11 +14,6 @@ class RunMonitorView(AdminAPIView):
         """返回全局后台轮询器状态；一次轮询会探测所有启用参与者。"""
         config = AppSettings.load()
         now = timezone.now()
-        latest_observation_at = (
-            Observation.objects.order_by("-observed_at")
-            .values_list("observed_at", flat=True)
-            .first()
-        )
         return ok(
             {
                 "monitoring_enabled": config.monitoring_enabled,
@@ -28,9 +23,6 @@ class RunMonitorView(AdminAPIView):
                     if config.monitoring_enabled
                     else None
                 ),
-                "last_local_check_at": iso(config.last_local_check_at),
-                "latest_observation_at": iso(latest_observation_at),
-                "last_error": config.last_error,
                 "run_in_progress": bool(
                     config.run_lease_until and config.run_lease_until > now
                 ),

@@ -598,10 +598,17 @@ def test_api_requires_admin_jwt_and_accepts_admin_login():
     assert client.get("/api/auth/me", **headers).json()["data"]["timezone"] == (
         "Asia/Shanghai"
     )
+    config = AppSettings.load()
+    config.last_upstream_check_at = timezone.now() - timedelta(hours=13)
+    config.stale_warning_hours = 12
+    config.save(
+        update_fields=["last_upstream_check_at", "stale_warning_hours", "updated_at"]
+    )
 
     dashboard = client.get("/api/dashboard", **headers)
     assert dashboard.status_code == 200
     assert dashboard.json()["data"]["quota_query_mode"] == "passive"
+    assert dashboard.json()["data"]["snapshot_stale"] is True
     assert user.is_staff
 
 @pytest.mark.django_db
@@ -959,7 +966,6 @@ def test_monitor_status_exposes_global_countdown_and_hides_it_when_disabled():
     now = timezone.now()
     config.monitoring_enabled = True
     config.local_poll_minutes = 10
-    config.last_local_check_at = now - timedelta(minutes=3)
     config.next_local_check_at = now + timedelta(minutes=7)
     config.run_lease_until = now + timedelta(minutes=1)
     config.save()
@@ -972,9 +978,6 @@ def test_monitor_status_exposes_global_countdown_and_hides_it_when_disabled():
     assert data["interval_seconds"] == 600
     assert data["next_local_check_at"] == config.next_local_check_at.isoformat()
     assert data["server_time"]
-    assert data["last_local_check_at"] == config.last_local_check_at.isoformat()
-    assert data["latest_observation_at"] is None
-    assert data["last_error"] == ""
     assert data["run_in_progress"] is True
 
     config.monitoring_enabled = False

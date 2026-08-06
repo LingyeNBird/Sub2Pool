@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import SettingLabel from "@/components/common/SettingLabel.vue";
 import { useAuthStore } from "@/stores/auth";
 import {
   ApiError,
@@ -362,7 +363,10 @@ onMounted(load);
           />
         </fieldset>
         <fieldset class="fieldset">
-          <label class="label">OpenAI 上游账号</label>
+          <SettingLabel
+            label="OpenAI 上游账号"
+            help="使用当前填写的 Sub2API 地址和 Admin Token 临时读取账号列表，无需先保存。选中的账号用于限定本地用量聚合和周限快照。"
+          />
           <div class="join w-full">
             <select
               v-model.number="settings.openai_account_id"
@@ -401,10 +405,12 @@ onMounted(load);
               读取账号
             </button>
           </div>
-          <p class="label">使用当前填写的地址和 Token 读取，不必先保存设置。</p>
         </fieldset>
         <fieldset class="fieldset">
-          <label class="label">额度百分比查询方式</label>
+          <SettingLabel
+            label="额度百分比查询方式"
+            help="被动模式只读取 Sub2API 在真实转发请求中保存的账号快照，不请求 OpenAI；主动模式会通过 Sub2API 调用 OpenAI 官方额度接口。"
+          />
           <select v-model="settings.quota_query_mode" class="select w-full">
             <option value="passive">
               被动：仅读取 Sub2API 已保存快照（默认）
@@ -412,23 +418,6 @@ onMounted(load);
             <option value="direct">主动：调用上游账号额度接口</option>
           </select>
         </fieldset>
-        <div
-          v-if="settings.quota_query_mode === 'passive'"
-          class="alert text-sm alert-info"
-        >
-          <AppIcon name="information-circle" class="size-5" />
-          <span
-            >不会请求 OpenAI 官方额度接口。快照由 Sub2API
-            在正常转发请求中被动更新。</span
-          >
-        </div>
-        <div v-else class="alert text-sm alert-warning">
-          <AppIcon name="exclamation-triangle" class="size-5" />
-          <span
-            >主动模式会调用 OpenAI
-            官方额度接口，频繁使用可能增加风控风险。</span
-          >
-        </div>
         <div class="grid gap-3 md:grid-cols-2">
           <fieldset class="fieldset">
             <label class="label">请求超时（秒）</label>
@@ -489,21 +478,10 @@ onMounted(load);
           <AppIcon name="calculator" class="size-5" />分配模型
         </h2>
         <fieldset class="fieldset max-w-full min-w-0 grid-cols-[minmax(0,1fr)]">
-          <label class="label justify-start gap-1">
-            成本口径
-            <span
-              class="tooltip tooltip-right"
-              data-tip="实际扣费会应用 Sub2API 的计费倍率，并与用户余额真实扣减一致；标准计费只按模型标准单价计算。余额分配建议通常应选择实际扣费。"
-            >
-              <button
-                type="button"
-                class="btn btn-circle cursor-help btn-ghost btn-xs"
-                aria-label="查看成本口径说明"
-              >
-                ?
-              </button>
-            </span>
-          </label>
+          <SettingLabel
+            label="成本口径"
+            help="实际扣费会应用 Sub2API 的计费倍率，并与用户余额真实扣减一致；标准计费只按模型标准单价计算。余额分配建议通常应选择实际扣费。"
+          />
           <select
             v-model="settings.cost_basis"
             class="select w-full max-w-full min-w-0"
@@ -514,7 +492,10 @@ onMounted(load);
         </fieldset>
         <div class="grid gap-3 md:grid-cols-2">
           <fieldset class="fieldset min-w-0">
-            <label class="label">无样本时美元 / 1%</label>
+            <SettingLabel
+              label="无样本时美元 / 1%"
+              help="尚无有效校准样本时使用的兜底估值。它参与首次进度触发成本和余额建议；产生有效样本后由历史样本估值替代。"
+            />
             <input
               v-model.number="settings.initial_usd_per_percent"
               type="number"
@@ -524,7 +505,10 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset min-w-0">
-            <label class="label">安全系数</label>
+            <SettingLabel
+              label="安全系数"
+              help="余额建议 = 剩余百分比权益 × 保守美元/1% × 安全系数。小于 1 会预留安全余量，降低超分配风险。"
+            />
             <input
               v-model.number="settings.safety_factor"
               type="number"
@@ -535,7 +519,10 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset min-w-0">
-            <label class="label">保守分位数</label>
+            <SettingLabel
+              label="保守分位数"
+              help="对最近有效的美元/1% 样本按已用周限加权后取较低分位。数值越低越保守，用于最终的保守美元/1% 估值。"
+            />
             <input
               v-model.number="settings.conservative_percentile"
               type="number"
@@ -545,7 +532,10 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset min-w-0">
-            <label class="label">参与计算的历史样本数</label>
+            <SettingLabel
+              label="参与计算的历史样本数"
+              help="最多取最近多少个有效累计样本计算保守分位数。更多样本更稳定，但对额度变化的响应更慢。"
+            />
             <input
               v-model.number="settings.rate_history_samples"
               type="number"
@@ -555,7 +545,10 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset min-w-0 grid-cols-[minmax(0,1fr)]">
-            <label class="label">日估算最小周限跨度（%）</label>
+            <SettingLabel
+              label="日估算最小周限跨度（%）"
+              help="今日观测至少跨过该百分比后才给出日估算，避免 OpenAI 只返回整数周限而造成过大误差。"
+            />
             <input
               v-model.number="settings.daily_estimate_min_percent_span"
               type="number"
@@ -564,12 +557,12 @@ onMounted(load);
               step="1"
               class="input w-full max-w-full min-w-0"
             />
-            <p class="label">
-              今日观测至少跨过该百分比后才给出日估算，避免整数周限造成过大误差。
-            </p>
           </fieldset>
           <fieldset class="fieldset min-w-0">
-            <label class="label">建议差额阈值（美元）</label>
+            <SettingLabel
+              label="建议差额阈值（美元）"
+              help="建议余额与当前 Sub2API 用户余额的绝对差达到该金额后，标记为“建议调整”，并可触发对应通知。"
+            />
             <input
               v-model.number="settings.recommendation_change_usd"
               type="number"
@@ -579,7 +572,10 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset min-w-0">
-            <label class="label">用户余额耗尽预警余量（美元）</label>
+            <SettingLabel
+              label="用户余额耗尽预警余量（美元）"
+              help="Sub2API 用户余额低于或等于该金额时视为接近耗尽；若仍有剩余权益，会触发校准并可发送提醒。"
+            />
             <input
               v-model.number="settings.limit_warning_usd"
               type="number"
@@ -612,7 +608,10 @@ onMounted(load);
         </h2>
         <div class="grid gap-3 md:grid-cols-2">
           <fieldset class="fieldset">
-            <label class="label">本地探测间隔（分钟）</label>
+            <SettingLabel
+              label="本地探测间隔（分钟）"
+              help="后台按此间隔读取 Sub2API 本地用量和参与者余额。每次都会执行本地探测，但不一定读取周限快照或新增校准历史。"
+            />
             <input
               v-model.number="settings.local_poll_minutes"
               type="number"
@@ -621,7 +620,10 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset">
-            <label class="label">进度触发阈值（%）</label>
+            <SettingLabel
+              label="进度触发阈值（%）"
+              help="不是直接比较上游百分比。触发成本 = 当前保守美元/1% × 此百分比；本地成本增量达到触发成本后才读取新的周限快照。"
+            />
             <input
               v-model.number="settings.progress_threshold_percent"
               type="number"
@@ -632,7 +634,10 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset">
-            <label class="label">活跃期最长校准间隔（小时）</label>
+            <SettingLabel
+              label="活跃期最长校准间隔（小时）"
+              help="已有本地成本增长但迟迟未达到进度阈值时，距离上次校准超过该时长会强制读取一次周限快照。"
+            />
             <input
               v-model.number="settings.active_max_calibration_hours"
               type="number"
@@ -641,7 +646,10 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset">
-            <label class="label">重置前强制读取（分钟）</label>
+            <SettingLabel
+              label="重置前强制读取（分钟）"
+              help="进入预计周限重置时间之前的该分钟范围后，强制读取快照，用于捕捉重置边界。"
+            />
             <input
               v-model.number="settings.reset_proximity_minutes"
               type="number"
@@ -650,7 +658,10 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset">
-            <label class="label">快照陈旧警告（小时）</label>
+            <SettingLabel
+              label="快照陈旧警告（小时）"
+              help="上游额度快照超过该时长未更新时，首页采集状态会标记为“快照陈旧”。它只影响告警展示，不会提高探测频率。"
+            />
             <input
               v-model.number="settings.stale_warning_hours"
               type="number"
@@ -659,15 +670,17 @@ onMounted(load);
             />
           </fieldset>
         </div>
-        <label class="label justify-between"
-          >启用后台监控<input
+        <div class="flex items-center justify-between">
+          <SettingLabel
+            label="启用后台监控"
+            help="开启后由容器内 Django 后台进程按本地探测间隔运行；关闭后不会自动探测，手动“立即测算”仍可使用。"
+          />
+          <input
             v-model="settings.monitoring_enabled"
             type="checkbox"
             class="toggle toggle-sm"
-        /></label>
-        <p class="text-sm opacity-60">
-          空闲时只做低频本地探测；达到成本进度、用户余额耗尽或重置条件后才形成新观测。
-        </p>
+          />
+        </div>
         <button
           class="btn btn-primary btn-sm"
           :disabled="saving === 'sampling'"
@@ -781,20 +794,16 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset">
-            <label class="label">Resend 发件人</label>
+            <SettingLabel
+              label="Resend 发件人"
+              help="支持“名称 <邮箱>”格式；正式发送前必须在 Resend 中验证对应域名。"
+            />
             <input
               v-model="settings.resend_from_email"
               class="input w-full"
               placeholder="拼车额度 &lt;notice@example.com&gt;"
             />
           </fieldset>
-          <div class="alert text-sm alert-info">
-            <AppIcon name="information-circle" class="size-5" />
-            <span>
-              发件人支持“名称 &lt;邮箱&gt;”格式；正式发送前需要在 Resend
-              中验证对应域名。
-            </span>
-          </div>
         </template>
 
         <div class="flex flex-wrap gap-2">
@@ -857,7 +866,10 @@ onMounted(load);
         /></label>
         <div class="grid gap-3 md:grid-cols-2">
           <fieldset class="fieldset">
-            <label class="label">汇率变化阈值（%）</label>
+            <SettingLabel
+              label="汇率变化阈值（%）"
+              help="新旧保守美元/1% 估值的相对变化达到该百分比后，才发送“美元/百分比变化”通知。"
+            />
             <input
               v-model.number="settings.rate_change_alert_percent"
               type="number"
@@ -867,7 +879,10 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset">
-            <label class="label">相同通知冷却（分钟）</label>
+            <SettingLabel
+              label="相同通知冷却（分钟）"
+              help="相同去重键的通知在该时间内只发送一次，避免余额耗尽或采集失败反复发信。"
+            />
             <input
               v-model.number="settings.notification_cooldown_minutes"
               type="number"

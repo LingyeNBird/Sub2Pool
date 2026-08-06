@@ -73,6 +73,7 @@ export interface DashboardData {
   monitoring_enabled: boolean;
   last_local_check_at: string | null;
   last_upstream_check_at: string | null;
+  snapshot_stale: boolean;
   last_success_at: string | null;
   last_error: string;
   quota_query_mode: string;
@@ -120,9 +121,6 @@ export interface MonitorSchedule {
   monitoring_enabled: boolean;
   interval_seconds: number;
   next_local_check_at: string | null;
-  last_local_check_at: string | null;
-  latest_observation_at: string | null;
-  last_error: string;
   run_in_progress: boolean;
   server_time: string;
 }

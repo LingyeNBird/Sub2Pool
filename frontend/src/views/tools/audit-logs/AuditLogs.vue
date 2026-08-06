@@ -69,20 +69,6 @@ const remainingLabel = computed(() => {
   if (hours) return `${hours} 小时 ${minutes} 分 ${remainder} 秒`;
   return `${minutes} 分 ${remainder} 秒`;
 });
-const samplingOutcomeLabel = computed(() => {
-  if (schedule.value?.run_in_progress) return "本轮本地探测正在执行";
-  if (!schedule.value?.last_local_check_at) return "尚未完成本地探测";
-  if (schedule.value.last_error) return "上次本地探测失败";
-  const latestObservation = schedule.value.latest_observation_at;
-  if (
-    !latestObservation ||
-    new Date(latestObservation).getTime() <
-      new Date(schedule.value.last_local_check_at).getTime()
-  ) {
-    return "上次仅完成本地探测，未触发校准";
-  }
-  return "上次本地探测已形成校准记录";
-});
 
 function currency(value: number | null) {
   return value == null ? "—" : `$${value.toFixed(2)}`;
@@ -332,11 +318,6 @@ onUnmounted(() => window.clearInterval(clockTimer));
           <div class="stat-desc">
             {{ dateTime(schedule.next_local_check_at) }} ·
             全局探测全部启用参与者
-          </div>
-          <div class="stat-desc">
-            {{ samplingOutcomeLabel }} · 上次：{{
-              dateTime(schedule.last_local_check_at)
-            }}
           </div>
         </div>
         <AppIcon name="clock" class="size-7 shrink-0 opacity-40" />

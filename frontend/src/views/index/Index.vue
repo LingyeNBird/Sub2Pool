@@ -258,7 +258,17 @@ onMounted(load);
             </tr>
             <tr>
               <th>额度快照读取</th>
-              <td>{{ dateTime(data.last_upstream_check_at) }}</td>
+              <td>
+                <span class="inline-flex items-center gap-2">
+                  {{ dateTime(data.last_upstream_check_at) }}
+                  <span
+                    v-if="data.snapshot_stale"
+                    class="badge badge-sm badge-warning"
+                  >
+                    快照陈旧
+                  </span>
+                </span>
+              </td>
             </tr>
             <tr>
               <th>最近成功</th>

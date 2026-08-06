@@ -1,6 +1,9 @@
 """首页额度总览 API。"""
 
 from decimal import Decimal
+from datetime import timedelta
+
+from django.utils import timezone
 
 from .base import AdminAPIView, ok
 from .presenters import iso, participant_data
@@ -10,6 +13,11 @@ from ..models import AppSettings, Observation, Participant, QuotaCycle
 class DashboardView(AdminAPIView):
     def get(self, _request):
         config = AppSettings.load()
+        snapshot_stale = bool(
+            config.last_upstream_check_at
+            and timezone.now() - config.last_upstream_check_at
+            >= timedelta(hours=config.stale_warning_hours)
+        )
         cycle = QuotaCycle.objects.filter(active=True).first()
         observation = (
             Observation.objects.filter(cycle=cycle)
@@ -64,6 +72,7 @@ class DashboardView(AdminAPIView):
             "monitoring_enabled": config.monitoring_enabled,
             "last_local_check_at": iso(config.last_local_check_at),
             "last_upstream_check_at": iso(config.last_upstream_check_at),
+            "snapshot_stale": snapshot_stale,
             "last_success_at": iso(config.last_success_at),
             "last_error": config.last_error,
             "quota_query_mode": config.quota_query_mode,
