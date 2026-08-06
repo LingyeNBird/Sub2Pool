@@ -107,6 +107,7 @@ SETTINGS_FIELDS = (
     "safety_factor",
     "conservative_percentile",
     "rate_history_samples",
+    "daily_estimate_min_percent_span",
     "local_poll_minutes",
     "progress_threshold_percent",
     "active_max_calibration_hours",

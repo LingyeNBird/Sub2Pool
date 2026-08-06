@@ -153,6 +153,7 @@ function saveAllocation() {
     "safety_factor",
     "conservative_percentile",
     "rate_history_samples",
+    "daily_estimate_min_percent_span",
     "recommendation_change_usd",
     "limit_warning_usd",
   ]);
@@ -532,6 +533,20 @@ onMounted(load);
               max="100"
               class="input w-full"
             />
+          </fieldset>
+          <fieldset class="fieldset">
+            <label class="label">日估算最小周限跨度（%）</label>
+            <input
+              v-model.number="settings.daily_estimate_min_percent_span"
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              class="input w-full"
+            />
+            <p class="label">
+              今日观测至少跨过该百分比后才给出日估算，避免整数周限造成过大误差。
+            </p>
           </fieldset>
           <fieldset class="fieldset">
             <label class="label">建议差额阈值（美元）</label>

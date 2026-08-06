@@ -28,6 +28,7 @@ CENT = Decimal("0.01")
 PCT_PRECISION = Decimal("0.00001")
 RESET_ROLLBACK_TOLERANCE = Decimal("0.1")
 RATE_METHOD = "cumulative_cycle_v1"
+RESET_TIME_TOLERANCE_SECONDS = 300
 
 
 @dataclass
@@ -147,7 +148,8 @@ def _ensure_cycle(
         not force_new
         and current is not None
         and current.account_id == config.openai_account_id
-        and abs((current.resets_at - reset_at).total_seconds()) <= 60
+        and abs((current.resets_at - reset_at).total_seconds())
+        <= RESET_TIME_TOLERANCE_SECONDS
     )
     if same:
         return current, False
@@ -484,11 +486,14 @@ def _run_monitor_locked(config: AppSettings, *, force_upstream: bool, requested_
             config.openai_account_id,
             config.quota_query_mode,
         )
-        same_reset = abs(
-            (
-                _epoch_datetime(window.reset_at) - current.resets_at
-            ).total_seconds()
-        ) <= 60
+        same_reset = (
+            abs(
+                (
+                    _epoch_datetime(window.reset_at) - current.resets_at
+                ).total_seconds()
+            )
+            <= RESET_TIME_TOLERANCE_SECONDS
+        )
         manual_refresh = bool(
             same_reset
             and previous

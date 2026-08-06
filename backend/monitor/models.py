@@ -57,6 +57,15 @@ class AppSettings(models.Model):
     )
     conservative_percentile = models.PositiveSmallIntegerField(default=25, validators=[MinValueValidator(1), MaxValueValidator(50)])
     rate_history_samples = models.PositiveSmallIntegerField(default=8, validators=[MinValueValidator(1), MaxValueValidator(100)])
+    daily_estimate_min_percent_span = models.DecimalField(
+        max_digits=6,
+        decimal_places=3,
+        default=Decimal("5"),
+        validators=[
+            MinValueValidator(Decimal("1")),
+            MaxValueValidator(Decimal("100")),
+        ],
+    )
 
     local_poll_minutes = models.PositiveIntegerField(default=10, validators=[MinValueValidator(2), MaxValueValidator(1440)])
     progress_threshold_percent = models.DecimalField(

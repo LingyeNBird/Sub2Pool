@@ -130,6 +130,36 @@ export interface CapacityPoint {
   sample_count: number;
 }
 
+export interface CycleCapacityEstimate {
+  estimate_usd: number;
+  raw_estimate_usd: number | null;
+  cost_usd: number;
+  used_percent: number;
+  confidence: "低" | "中" | "高";
+  observed_at: string;
+  starts_at: string;
+  resets_at: string;
+}
+
+export interface DailyCapacityEstimate {
+  estimate_usd: number | null;
+  minimum_usd: number | null;
+  maximum_usd: number | null;
+  cost_delta_usd: number | null;
+  percent_delta: number | null;
+  sample_count: number;
+  observed_from: string | null;
+  observed_to: string | null;
+  min_percent_span: number;
+  sufficient: boolean;
+  reason: string;
+}
+
+export interface CapacitySummary {
+  cycle: CycleCapacityEstimate | null;
+  today: DailyCapacityEstimate;
+}
+
 export interface UsagePoint {
   observed_at: string;
   label: string;
@@ -147,6 +177,7 @@ export interface ParticipantUsageSeries {
 export interface StatisticsData {
   capacity_period: "day" | "month";
   capacity_series: CapacityPoint[];
+  capacity_summary: CapacitySummary;
   usage_days: number;
   usage_precision: "raw" | "hour" | "day";
   sample_interval_minutes: number;
@@ -175,6 +206,7 @@ export interface AppSettingsData {
   safety_factor: number;
   conservative_percentile: number;
   rate_history_samples: number;
+  daily_estimate_min_percent_span: number;
   local_poll_minutes: number;
   progress_threshold_percent: number;
   active_max_calibration_hours: number;

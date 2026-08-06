@@ -384,6 +384,57 @@ def test_integer_percent_plateau_uses_cumulative_cost_for_capacity(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_passive_reset_timestamp_drift_keeps_the_same_cycle(monkeypatch):
+    """被动快照重置时间漂移几十秒时不能误建一个新的官方周期。"""
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save()
+    Participant.objects.create(
+        name="车主",
+        sub2api_user_id=1,
+        share_percent=100,
+        is_owner=True,
+    )
+    reset_at = timezone.now() + timedelta(days=4)
+
+    class FakeClient:
+        run_count = 0
+
+        def __init__(self, _config):
+            self.step = type(self).run_count
+            type(self).run_count += 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def query_weekly_window(self, _account_id, _mode):
+            return WeeklyWindow(
+                Decimal("10") + self.step,
+                604800,
+                345600,
+                int((reset_at + timedelta(seconds=70 * self.step)).timestamp()),
+                "passive_snapshot",
+            )
+
+        def usage_stats(self, **_kwargs):
+            cost = Decimal("100") + Decimal("10") * self.step
+            return UsageStats(cost, cost)
+
+        def user_balance(self, _user_id):
+            return UserBalance(Decimal("1000"), Decimal("0"))
+
+    monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+    run_monitor(force_upstream=True, source="manual")
+    run_monitor(force_upstream=True, source="manual")
+
+    assert QuotaCycle.objects.count() == 1
+    assert Observation.objects.count() == 2
+
+
+@pytest.mark.django_db
 def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
     monkeypatch,
 ):
@@ -1055,6 +1106,9 @@ def test_statistics_groups_capacity_and_participant_usage():
     )
     client = Client()
     headers, _ = jwt_login(client)
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save()
     participant = Participant.objects.create(
         name="车友",
         sub2api_user_id=22,
@@ -1083,6 +1137,7 @@ def test_statistics_groups_capacity_and_participant_usage():
             total_standard_cost=100,
             total_actual_cost=100,
             effective_usd_per_percent=Decimal(rate),
+            raw_window={"rate_method": "cumulative_cycle_v1"},
         )
 
     observation(base, "10")
@@ -1112,6 +1167,8 @@ def test_statistics_groups_capacity_and_participant_usage():
         **headers,
     ).json()["data"]
     assert daily["capacity_series"][-1]["weekly_total_usd"] == 1600.0
+    assert daily["capacity_summary"]["cycle"]["estimate_usd"] == 1600.0
+    assert daily["capacity_summary"]["today"]["sufficient"] is False
     assert len(daily["participant_series"][0]["points"]) == 1
     point = daily["participant_series"][0]["points"][0]
     assert point["account_cycle_usage_usd"] == 12.0
@@ -1129,6 +1186,68 @@ def test_statistics_groups_capacity_and_participant_usage():
     assert month["minimum_usd"] == 1000.0
     assert month["maximum_usd"] == 1400.0
     assert month["sample_count"] == 2
+
+
+@pytest.mark.django_db
+def test_statistics_separates_cycle_and_daily_capacity_estimates():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.daily_estimate_min_percent_span = Decimal("5")
+    config.save()
+
+    now = timezone.now()
+    local_day_start = now.astimezone(ZoneInfo("Asia/Shanghai")).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    cycle = QuotaCycle.objects.create(
+        account_id=7,
+        starts_at=now - timedelta(days=2),
+        resets_at=now + timedelta(days=5),
+    )
+
+    def observation(at, used_percent, cost):
+        Observation.objects.create(
+            cycle=cycle,
+            observed_at=at,
+            upstream_used_percent=used_percent,
+            selected_total_cost=cost,
+            total_standard_cost=cost,
+            total_actual_cost=cost,
+            effective_usd_per_percent=Decimal("20"),
+            raw_window={"rate_method": "cumulative_cycle_v1"},
+        )
+
+    first_at = local_day_start + timedelta(minutes=5)
+    last_at = local_day_start + timedelta(hours=20)
+    observation(first_at, Decimal("10"), Decimal("200"))
+    observation(last_at, Decimal("15"), Decimal("300"))
+
+    result = client.get("/api/statistics", **headers).json()["data"]
+    assert result["capacity_summary"]["cycle"]["estimate_usd"] == 2000.0
+    assert result["capacity_summary"]["cycle"]["cost_usd"] == 300.0
+    assert result["capacity_summary"]["today"] == {
+        "estimate_usd": 2000.0,
+        "minimum_usd": 1666.67,
+        "maximum_usd": 2500.0,
+        "cost_delta_usd": 100.0,
+        "percent_delta": 5.0,
+        "sample_count": 2,
+        "observed_from": first_at.astimezone(ZoneInfo("UTC")).isoformat(),
+        "observed_to": last_at.astimezone(ZoneInfo("UTC")).isoformat(),
+        "min_percent_span": 5.0,
+        "sufficient": True,
+        "reason": "按今日已覆盖观测区间的成本增量与周限增量折算",
+    }
 
 
 @pytest.mark.django_db
