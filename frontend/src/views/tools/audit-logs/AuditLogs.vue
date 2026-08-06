@@ -177,11 +177,11 @@ onUnmounted(() => window.clearInterval(clockTimer));
       <div class="stat-figure">
         <AppIcon name="check-circle" class="size-7 opacity-40" />
       </div>
-      <div class="stat-title">有效汇率样本</div>
+      <div class="stat-title">累计口径有效样本</div>
       <div class="stat-value text-xl font-semibold tabular-nums">
         {{ validCount }}
       </div>
-      <div class="stat-desc">百分比和成本均有正增量</div>
+      <div class="stat-desc">本周期累计成本 ÷ 上游已用百分比</div>
     </div>
     <div class="stat">
       <div class="stat-figure">
@@ -230,7 +230,7 @@ onUnmounted(() => window.clearInterval(clockTimer));
               <th>上游已用</th>
               <th>成本增量</th>
               <th>百分比增量</th>
-              <th>样本美元 / 1%</th>
+              <th>累计样本美元 / 1%</th>
               <th>采用值</th>
               <th></th>
             </tr>

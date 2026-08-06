@@ -73,6 +73,7 @@ export interface Observation {
   effective_usd_per_percent: number;
   valid_sample: boolean;
   sample_note: string;
+  rate_method: string;
   query_mode: string;
   snapshot_sampled_at: string | null;
   participants: Snapshot[];

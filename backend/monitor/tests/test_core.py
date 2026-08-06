@@ -305,9 +305,82 @@ def test_initial_observation_conserves_percent_and_builds_manual_recommendations
     assert snapshots[owner.id].charged_cycle_percent == Decimal("30")
     assert snapshots[rider.id].charged_cycle_percent == Decimal("10")
     assert sum((item.charged_cycle_percent for item in snapshots.values()), Decimal("0")) == Decimal("40")
-    assert snapshots[owner.id].recommended_balance_usd == Decimal("304.00")
-    assert snapshots[rider.id].recommended_balance_usd == Decimal("608.00")
+    assert snapshots[owner.id].recommended_balance_usd == Decimal("190.00")
+    assert snapshots[rider.id].recommended_balance_usd == Decimal("380.00")
     assert ParticipantUsageSample.objects.count() == 2
+
+
+@pytest.mark.django_db
+def test_integer_percent_plateau_uses_cumulative_cost_for_capacity(monkeypatch):
+    """16% 平台期内的消费不能在跳到 17% 时被漏掉并产生 $687 的错误总额。"""
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.cost_basis = "actual"
+    config.initial_usd_per_percent = Decimal("16")
+    config.safety_factor = Decimal("0.95")
+    config.save()
+    owner = Participant.objects.create(
+        name="车主",
+        sub2api_user_id=1,
+        share_percent=50,
+        is_owner=True,
+    )
+    reset_at = timezone.now() + timedelta(days=4)
+    used_values = [Decimal("16"), Decimal("16"), Decimal("17")]
+    cost_values = [
+        Decimal("419.409971"),
+        Decimal("431.558149"),
+        Decimal("438.431382"),
+    ]
+
+    class FakeClient:
+        run_count = 0
+
+        def __init__(self, _config):
+            self.step = type(self).run_count
+            type(self).run_count += 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def query_weekly_window(self, _account_id, _mode):
+            return WeeklyWindow(
+                used_values[self.step],
+                604800,
+                345600,
+                int(reset_at.timestamp()),
+                "passive_snapshot",
+            )
+
+        def usage_stats(self, **_kwargs):
+            cost = cost_values[self.step]
+            return UsageStats(cost, cost)
+
+        def user_balance(self, _user_id):
+            return UserBalance(Decimal("1561.568618"), Decimal("0"))
+
+    monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+    for _ in range(3):
+        run_monitor(force_upstream=True, source="manual")
+
+    observations = list(Observation.objects.order_by("observed_at"))
+    assert observations[0].sample_usd_per_percent == Decimal("26.213123")
+    assert observations[1].sample_usd_per_percent is None
+    assert observations[2].delta_cost == Decimal("6.873233")
+    assert observations[2].sample_usd_per_percent == Decimal("25.790081")
+    assert observations[2].effective_usd_per_percent == Decimal("25.790081")
+    assert observations[2].raw_window["rate_method"] == "cumulative_cycle_v1"
+
+    snapshot = ParticipantSnapshot.objects.get(
+        observation=observations[2],
+        participant=owner,
+    )
+    assert snapshot.charged_cycle_percent == Decimal("17")
+    assert snapshot.remaining_share_percent == Decimal("33")
+    assert snapshot.recommended_balance_usd == Decimal("808.52")
 
 
 @pytest.mark.django_db

@@ -27,6 +27,7 @@ ZERO = Decimal("0")
 CENT = Decimal("0.01")
 PCT_PRECISION = Decimal("0.00001")
 RESET_ROLLBACK_TOLERANCE = Decimal("0.1")
+RATE_METHOD = "cumulative_cycle_v1"
 
 
 @dataclass
@@ -172,12 +173,25 @@ def _effective_rate(
     current_rate: Decimal | None,
     current_weight: Decimal | None,
 ) -> Decimal:
+    # 上游百分比快照通常只保留整数。若直接用相邻两次观测的增量相除，
+    # 百分比从 16% 跳到 17% 前累积在“16% 平台”里的消费会被漏掉，
+    # 一个很短的尾段就可能被错误当成完整 1% 的成本。
     history = list(
-        Observation.objects.filter(cycle=cycle, valid_sample=True, sample_usd_per_percent__isnull=False)
+        Observation.objects.filter(
+            cycle=cycle,
+            valid_sample=True,
+            sample_usd_per_percent__isnull=False,
+            raw_window__rate_method=RATE_METHOD,
+        )
         .order_by("-observed_at")
-        .values_list("sample_usd_per_percent", "delta_percent")[: max(config.rate_history_samples - 1, 0)]
+        .values_list("sample_usd_per_percent", "upstream_used_percent")[
+            : max(config.rate_history_samples - 1, 0)
+        ]
     )
-    samples = [(Decimal(str(rate)), Decimal(str(weight or 0))) for rate, weight in history]
+    samples = [
+        (Decimal(str(rate)), Decimal(str(weight or 0)))
+        for rate, weight in history
+    ]
     if current_rate is not None and current_weight is not None:
         samples.append((current_rate, current_weight))
     if not samples:
@@ -202,19 +216,35 @@ def _collect_observation(
     previous = Observation.objects.filter(cycle=cycle).order_by("-observed_at").first()
     selected_total = local.total.selected(config.cost_basis)
     used_percent = window.used_percent
+    has_cumulative_sample = Observation.objects.filter(
+        cycle=cycle,
+        valid_sample=True,
+        sample_usd_per_percent__isnull=False,
+        raw_window__rate_method=RATE_METHOD,
+    ).exists()
 
     delta_percent: Decimal | None = None
     delta_cost: Decimal | None = None
     sample_rate: Decimal | None = None
     valid_sample = False
-    note = "首次观测，按当前累计用量初始化账本"
+    note = "首次观测，当前没有足够数据形成累计口径样本"
     if previous is not None:
         delta_percent = used_percent - previous.upstream_used_percent
         delta_cost = selected_total - previous.selected_total_cost
+
+    # 美元/1% 使用“本周期累计成本 ÷ 当前已用百分比”。这与用户实际关心的
+    # 总周限容量口径一致，也不会被整数百分比快照的跳变边界放大。
+    if selected_total > 0 and used_percent > 0 and (
+        previous is None or not has_cumulative_sample
+    ):
+        sample_rate = selected_total / used_percent
+        valid_sample = True
+        note = "本周期累计口径初始化样本"
+    elif previous is not None:
         if delta_percent > 0 and delta_cost > 0:
-            sample_rate = delta_cost / delta_percent
+            sample_rate = selected_total / used_percent
             valid_sample = True
-            note = "有效进度样本"
+            note = "有效累计口径样本"
         elif delta_percent == 0:
             note = "上游百分比未变化，本次不更新美元/百分比"
         elif delta_percent < 0:
@@ -222,7 +252,12 @@ def _collect_observation(
         else:
             note = "成本没有正向变化，本次样本无效"
 
-    effective_rate = _effective_rate(config, cycle, sample_rate, delta_percent if valid_sample else None)
+    effective_rate = _effective_rate(
+        config,
+        cycle,
+        sample_rate,
+        used_percent if valid_sample else None,
+    )
     previous_rate = previous.effective_usd_per_percent if previous else None
 
     previous_snapshots: dict[int, ParticipantSnapshot] = {}
@@ -262,6 +297,7 @@ def _collect_observation(
                 "reset_at": window.reset_at,
                 "query_mode": config.quota_query_mode,
                 "sampled_at": window.sampled_at,
+                "rate_method": RATE_METHOD,
             },
         )
 

@@ -42,6 +42,7 @@ class ObservationListView(AdminAPIView):
                     ),
                     "valid_sample": item.valid_sample,
                     "sample_note": item.sample_note,
+                    "rate_method": item.raw_window.get("rate_method", "incremental_legacy"),
                     "query_mode": item.raw_window.get("query_mode", "direct"),
                     "snapshot_sampled_at": item.raw_window.get("sampled_at"),
                     "participants": [
