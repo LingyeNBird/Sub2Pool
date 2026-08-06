@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { ApiError, api } from "@/services/api";
@@ -14,29 +14,48 @@ const router = useRouter();
 const username = ref("");
 const password = ref("");
 const loading = ref(false);
+const networkReady = ref(false);
+const networkBlocked = ref(false);
 const message = ref("");
+const clientNetwork = ref<WebRtcNetworkInfo>({
+  webrtc_supported: false,
+  webrtc_ips: [],
+});
+
+async function checkLoginNetwork() {
+  try {
+    const config = await api<{
+      webrtc_enabled: boolean;
+      stun_url: string;
+    }>("auth/client-config");
+    clientNetwork.value = await collectWebRtcNetworkInfo(
+      config.webrtc_enabled,
+      config.stun_url,
+    );
+    const response = await fetch("/api/auth/network-check", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ client_network: clientNetwork.value }),
+    });
+    if (response.status === 204) {
+      networkBlocked.value = true;
+      return;
+    }
+  } catch {
+    // WebRTC 是浏览器自报的辅助线索。预检异常时仍允许管理员通过服务端 IP 鉴权。
+  }
+  networkReady.value = true;
+}
 
 async function submit() {
   loading.value = true;
   message.value = "";
   try {
-    let clientNetwork: WebRtcNetworkInfo = {
-      webrtc_supported: false,
-      webrtc_ips: [],
-    };
-    try {
-      const config = await api<{
-        webrtc_enabled: boolean;
-        stun_url: string;
-      }>("auth/client-config");
-      clientNetwork = await collectWebRtcNetworkInfo(
-        config.webrtc_enabled,
-        config.stun_url,
-      );
-    } catch {
-      // 网络审计增强失败不能阻止管理员登录，服务端仍会记录请求来源地址。
-    }
-    await auth.signIn(username.value, password.value, clientNetwork);
+    await auth.signIn(username.value, password.value, clientNetwork.value);
     await router.replace("/");
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "登录失败";
@@ -44,11 +63,16 @@ async function submit() {
     loading.value = false;
   }
 }
+
+onMounted(checkLoginNetwork);
 </script>
 
 <template>
   <main class="hero min-h-screen bg-base-200">
-    <div class="hero-content w-full max-w-md">
+    <div
+      v-if="networkReady && !networkBlocked"
+      class="hero-content w-full max-w-md"
+    >
       <section class="card w-full bg-base-100 shadow-xs">
         <div class="card-body gap-5">
           <div>

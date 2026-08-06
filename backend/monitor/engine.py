@@ -178,6 +178,9 @@ def _effective_rate(
     # 上游百分比快照通常只保留整数。若直接用相邻两次观测的增量相除，
     # 百分比从 16% 跳到 17% 前累积在“16% 平台”里的消费会被漏掉，
     # 一个很短的尾段就可能被错误当成完整 1% 的成本。
+    history_limit = config.rate_history_samples - (
+        1 if current_rate is not None else 0
+    )
     history = list(
         Observation.objects.filter(
             cycle=cycle,
@@ -187,7 +190,7 @@ def _effective_rate(
         )
         .order_by("-observed_at")
         .values_list("sample_usd_per_percent", "upstream_used_percent")[
-            : max(config.rate_history_samples - 1, 0)
+            :history_limit
         ]
     )
     samples = [
@@ -300,6 +303,8 @@ def _collect_observation(
                 "query_mode": config.quota_query_mode,
                 "sampled_at": window.sampled_at,
                 "rate_method": RATE_METHOD,
+                "conservative_percentile": config.conservative_percentile,
+                "rate_history_samples": config.rate_history_samples,
             },
         )
 

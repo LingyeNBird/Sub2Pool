@@ -2,27 +2,118 @@
 import { onMounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
-import { ApiError, api } from "@/services/api";
-import type { LoginEventData } from "@/types";
+import { ApiError, api, jsonBody } from "@/services/api";
+import type {
+  BlockedIPAddress,
+  BlockedIPSource,
+  LoginEventData,
+} from "@/types";
+
+interface PendingBlockAction {
+  mode: "block" | "unblock";
+  address: string;
+  sourceType: BlockedIPSource;
+  sourceLabel: string;
+  eventId: number | null;
+  blockId: number | null;
+}
 
 const data = ref<LoginEventData | null>(null);
+const blockedAddresses = ref<BlockedIPAddress[]>([]);
 const loading = ref(true);
+const saving = ref(false);
 const message = ref("");
+const notes = ref("");
+const pendingAction = ref<PendingBlockAction | null>(null);
+const blockDialog = ref<HTMLDialogElement | null>(null);
 
 function dateTime(value: string) {
   return new Date(value).toLocaleString("zh-CN");
+}
+
+function existingBlock(address: string, sourceType: BlockedIPSource) {
+  return blockedAddresses.value.find(
+    (item) => item.address === address && item.source_type === sourceType,
+  );
+}
+
+function openBlock(
+  address: string | null,
+  sourceType: BlockedIPSource,
+  sourceLabel: string,
+  eventId: number,
+) {
+  if (!address || existingBlock(address, sourceType)) return;
+  notes.value = "";
+  pendingAction.value = {
+    mode: "block",
+    address,
+    sourceType,
+    sourceLabel,
+    eventId,
+    blockId: null,
+  };
+  blockDialog.value?.showModal();
+}
+
+function openUnblock(item: BlockedIPAddress) {
+  pendingAction.value = {
+    mode: "unblock",
+    address: item.address,
+    sourceType: item.source_type,
+    sourceLabel: item.source_label,
+    eventId: item.login_event_id,
+    blockId: item.id,
+  };
+  blockDialog.value?.showModal();
 }
 
 async function load() {
   loading.value = true;
   message.value = "";
   try {
-    data.value = await api<LoginEventData>("login-events?limit=200");
+    const [events, blocks] = await Promise.all([
+      api<LoginEventData>("login-events?limit=200"),
+      api<BlockedIPAddress[]>("ip-blocks"),
+    ]);
+    data.value = events;
+    blockedAddresses.value = blocks;
   } catch (error) {
     message.value =
       error instanceof ApiError ? error.message : "加载登录记录失败";
   } finally {
     loading.value = false;
+  }
+}
+
+async function confirmBlockAction() {
+  if (!pendingAction.value) return;
+  saving.value = true;
+  message.value = "";
+  try {
+    if (pendingAction.value.mode === "block") {
+      await api<BlockedIPAddress>("ip-blocks", {
+        method: "POST",
+        body: jsonBody({
+          address: pendingAction.value.address,
+          source_type: pendingAction.value.sourceType,
+          notes: notes.value,
+          login_event_id: pendingAction.value.eventId,
+        }),
+      });
+    } else if (pendingAction.value.blockId != null) {
+      await api(`ip-blocks/${pendingAction.value.blockId}`, {
+        method: "DELETE",
+      });
+    }
+    blockDialog.value?.close();
+    pendingAction.value = null;
+    await load();
+  } catch (error) {
+    message.value =
+      error instanceof ApiError ? error.message : "更新封禁列表失败";
+  } finally {
+    saving.value = false;
   }
 }
 
@@ -87,10 +178,62 @@ onMounted(load);
   <div class="col-span-12 alert alert-info">
     <AppIcon name="information-circle" class="size-5" />
     <span>
-      服务端来源 IP 是主要审计依据。WebRTC IP
-      由浏览器自报，可能被浏览器隐私策略隐藏，也可能被客户端伪造，只能作为辅助线索。
+      服务器来源 IP 和直连地址由后端在所有路由前拦截。WebRTC IP
+      由浏览器运行后自报，只能在登录预检与提交时限制，可能被隐私策略隐藏或被客户端伪造。
     </span>
   </div>
+
+  <section class="card col-span-12 bg-base-200 shadow-xs">
+    <div class="card-body gap-4">
+      <div>
+        <h2 class="card-title">
+          <AppIcon name="no-symbol" class="size-5" />已封禁列表
+        </h2>
+        <p class="mt-1 text-sm opacity-60">
+          请求来源与直连地址封禁会返回空响应；WebRTC
+          封禁会让标准登录页保持空白。
+        </p>
+      </div>
+      <div v-if="blockedAddresses.length" class="overflow-x-auto">
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>类型</th>
+              <th>地址</th>
+              <th>备注</th>
+              <th>封禁时间</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in blockedAddresses" :key="item.id">
+              <td>
+                <span class="badge badge-ghost badge-sm">{{
+                  item.source_label
+                }}</span>
+              </td>
+              <td class="font-mono text-xs">{{ item.address }}</td>
+              <td>{{ item.notes || "—" }}</td>
+              <td class="whitespace-nowrap">
+                {{ dateTime(item.created_at) }}
+              </td>
+              <td class="text-right">
+                <button
+                  class="btn btn-ghost text-error btn-xs"
+                  @click="openUnblock(item)"
+                >
+                  解除
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else class="py-4 text-center text-sm opacity-60">
+        当前没有已封禁地址
+      </div>
+    </div>
+  </section>
 
   <section class="card col-span-12 bg-base-200 shadow-xs">
     <div class="card-body gap-4">
@@ -128,22 +271,68 @@ onMounted(load);
                 </div>
               </td>
               <td>{{ item.username || "—" }}</td>
-              <td class="font-mono text-xs">{{ item.request_ip || "—" }}</td>
+              <td>
+                <button
+                  v-if="item.request_ip"
+                  class="btn btn-ghost font-mono btn-xs"
+                  :disabled="Boolean(existingBlock(item.request_ip, 'request'))"
+                  @click="
+                    openBlock(
+                      item.request_ip,
+                      'request',
+                      '服务器来源 IP',
+                      item.id,
+                    )
+                  "
+                >
+                  {{ item.request_ip }}
+                  <span
+                    v-if="existingBlock(item.request_ip, 'request')"
+                    class="badge badge-xs badge-error"
+                    >已封禁</span
+                  >
+                </button>
+                <span v-else>—</span>
+              </td>
               <td>
                 <div v-if="item.webrtc_ips.length" class="flex flex-wrap gap-1">
-                  <span
+                  <button
                     v-for="address in item.webrtc_ips"
                     :key="address"
-                    class="badge badge-ghost font-mono badge-sm"
+                    class="btn btn-ghost font-mono btn-xs"
+                    :disabled="Boolean(existingBlock(address, 'webrtc'))"
+                    @click="openBlock(address, 'webrtc', 'WebRTC IP', item.id)"
                   >
                     {{ address }}
-                  </span>
+                    <span
+                      v-if="existingBlock(address, 'webrtc')"
+                      class="badge badge-xs badge-error"
+                      >已封禁</span
+                    >
+                  </button>
                 </div>
                 <span v-else class="text-sm opacity-50">
                   {{ item.webrtc_supported ? "未暴露" : "不支持或已禁用" }}
                 </span>
               </td>
-              <td class="font-mono text-xs">{{ item.remote_ip || "—" }}</td>
+              <td>
+                <button
+                  v-if="item.remote_ip"
+                  class="btn btn-ghost font-mono btn-xs"
+                  :disabled="Boolean(existingBlock(item.remote_ip, 'remote'))"
+                  @click="
+                    openBlock(item.remote_ip, 'remote', '直连地址', item.id)
+                  "
+                >
+                  {{ item.remote_ip }}
+                  <span
+                    v-if="existingBlock(item.remote_ip, 'remote')"
+                    class="badge badge-xs badge-error"
+                    >已封禁</span
+                  >
+                </button>
+                <span v-else>—</span>
+              </td>
               <td>
                 <div
                   class="tooltip tooltip-left"
@@ -165,4 +354,62 @@ onMounted(load);
       </div>
     </div>
   </section>
+  <dialog ref="blockDialog" class="modal">
+    <div class="modal-box">
+      <form method="dialog">
+        <button
+          class="btn absolute top-3 right-3 btn-circle btn-ghost btn-sm"
+          aria-label="关闭"
+        >
+          ✕
+        </button>
+      </form>
+      <template v-if="pendingAction">
+        <h3 class="text-lg font-bold">
+          {{ pendingAction.mode === "block" ? "确认封禁地址" : "确认解除封禁" }}
+        </h3>
+        <div class="mt-4 rounded-box bg-base-200 p-4">
+          <div class="text-sm opacity-60">{{ pendingAction.sourceLabel }}</div>
+          <div class="mt-1 font-mono">{{ pendingAction.address }}</div>
+        </div>
+        <p class="mt-4 text-sm opacity-70">
+          <template v-if="pendingAction.mode === 'block'">
+            {{
+              pendingAction.sourceType === "webrtc"
+                ? "命中该浏览器自报地址时，标准登录页将保持空白，登录提交也会被拒绝。"
+                : "命中该服务端可见地址时，所有路由都会直接返回空响应。"
+            }}
+          </template>
+          <template v-else>解除后，该地址可再次访问对应路径。</template>
+        </p>
+        <fieldset v-if="pendingAction.mode === 'block'" class="mt-3 fieldset">
+          <label class="label" for="block-notes">备注</label>
+          <input
+            id="block-notes"
+            v-model="notes"
+            class="input w-full"
+            maxlength="255"
+            placeholder="例如：连续登录失败"
+          />
+        </fieldset>
+      </template>
+      <div class="modal-action">
+        <form method="dialog">
+          <button class="btn" :disabled="saving">取消</button>
+        </form>
+        <button
+          class="btn"
+          :class="pendingAction?.mode === 'block' ? 'btn-error' : 'btn-primary'"
+          :disabled="saving"
+          @click="confirmBlockAction"
+        >
+          <span v-if="saving" class="loading loading-xs loading-spinner"></span>
+          {{ pendingAction?.mode === "block" ? "确认封禁" : "确认解除" }}
+        </button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button>关闭</button>
+    </form>
+  </dialog>
 </template>

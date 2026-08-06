@@ -17,6 +17,7 @@ from monitor.engine import run_monitor
 from monitor.management.commands.runmonitor import schedule_next_run
 from monitor.models import (
     AppSettings,
+    BlockedIPAddress,
     LoginEvent,
     NotificationEvent,
     Observation,
@@ -1014,6 +1015,7 @@ def test_sqlite_import_replaces_database_and_keeps_recovery_copy(
         assert recovery.execute("SELECT value FROM marker").fetchone()[0] == "before"
 
 
+@pytest.mark.django_db
 def test_django_serves_vue_entry_for_root_and_history_routes():
     client = Client()
 
@@ -1024,6 +1026,126 @@ def test_django_serves_vue_entry_for_root_and_history_routes():
         assert b"/static/frontend/assets/index-" in response.content
 
     assert client.get("/api/unknown").status_code == 404
+
+
+@pytest.mark.django_db
+def test_request_and_remote_ip_blocks_return_empty_response(settings):
+    settings.TRUSTED_PROXY_COUNT = 1
+    BlockedIPAddress.objects.create(
+        address="198.51.100.21",
+        source_type="request",
+    )
+    BlockedIPAddress.objects.create(
+        address="10.0.0.8",
+        source_type="remote",
+    )
+    client = Client()
+
+    request_blocked = client.get(
+        "/",
+        REMOTE_ADDR="10.0.0.7",
+        HTTP_X_FORWARDED_FOR="198.51.100.21",
+    )
+    remote_blocked = client.get(
+        "/api/health",
+        REMOTE_ADDR="10.0.0.8",
+        HTTP_X_FORWARDED_FOR="198.51.100.22",
+    )
+
+    assert request_blocked.status_code == 204
+    assert request_blocked.content == b""
+    assert remote_blocked.status_code == 204
+    assert remote_blocked.content == b""
+
+
+@pytest.mark.django_db
+def test_admin_manages_blocks_and_cannot_block_current_server_address():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    self_block = client.post(
+        "/api/ip-blocks",
+        data=json.dumps(
+            {
+                "address": "127.0.0.1",
+                "source_type": "request",
+            }
+        ),
+        content_type="application/json",
+        **headers,
+    )
+    assert self_block.status_code == 400
+
+    created = client.post(
+        "/api/ip-blocks",
+        data=json.dumps(
+            {
+                "address": "203.0.113.17",
+                "source_type": "request",
+                "notes": "测试封禁",
+            }
+        ),
+        content_type="application/json",
+        **headers,
+    )
+    assert created.status_code == 201
+    block = created.json()["data"]
+    assert block["address"] == "203.0.113.17"
+    assert block["source_label"] == "服务器来源 IP"
+
+    listed = client.get("/api/ip-blocks", **headers).json()["data"]
+    assert [item["id"] for item in listed] == [block["id"]]
+    assert (
+        client.delete(f"/api/ip-blocks/{block['id']}", **headers).status_code
+        == 200
+    )
+    assert not BlockedIPAddress.objects.exists()
+
+
+@pytest.mark.django_db
+def test_webrtc_block_rejects_preflight_and_login_with_empty_response():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    BlockedIPAddress.objects.create(
+        address="203.0.113.29",
+        source_type="webrtc",
+    )
+    payload = {
+        "username": "owner",
+        "password": "very-strong-password",
+        "client_network": {
+            "webrtc_supported": True,
+            "webrtc_ips": ["203.0.113.29"],
+        },
+    }
+    client = Client()
+
+    preflight = client.post(
+        "/api/auth/network-check",
+        data=json.dumps({"client_network": payload["client_network"]}),
+        content_type="application/json",
+    )
+    login = client.post(
+        "/api/auth/login",
+        data=json.dumps(payload),
+        content_type="application/json",
+    )
+
+    assert preflight.status_code == 204
+    assert preflight.content == b""
+    assert login.status_code == 204
+    assert login.content == b""
+    event = LoginEvent.objects.get()
+    assert event.success is False
+    assert event.failure_reason == "WebRTC IP 已封禁"
 
 
 @pytest.mark.django_db
@@ -1223,7 +1345,9 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
             selected_total_cost=cost,
             total_standard_cost=cost,
             total_actual_cost=cost,
+            sample_usd_per_percent=Decimal(cost) / Decimal(used_percent),
             effective_usd_per_percent=Decimal("20"),
+            valid_sample=True,
             raw_window={"rate_method": "cumulative_cycle_v1"},
         )
 
@@ -1235,10 +1359,21 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
     result = client.get("/api/statistics", **headers).json()["data"]
     assert result["capacity_summary"]["cycle"]["estimate_usd"] == 2000.0
     assert result["capacity_summary"]["cycle"]["cost_usd"] == 300.0
+    assert result["capacity_summary"]["cycle"]["start_cost_usd"] == 0.0
+    assert result["capacity_summary"]["cycle"]["start_percent"] == 0.0
+    assert result["capacity_summary"]["cycle"]["end_cost_usd"] == 300.0
+    assert result["capacity_summary"]["cycle"]["end_percent"] == 15.0
+    assert result["capacity_summary"]["cycle"]["raw_estimate_usd"] == 2000.0
+    assert result["capacity_summary"]["cycle"]["rate_calculated"] is True
+    assert result["capacity_summary"]["cycle"]["rate_sample_count"] == 2
     assert result["capacity_summary"]["today"] == {
         "estimate_usd": 2000.0,
         "minimum_usd": 1666.67,
         "maximum_usd": 2500.0,
+        "start_cost_usd": 200.0,
+        "start_percent": 10.0,
+        "end_cost_usd": 300.0,
+        "end_percent": 15.0,
         "cost_delta_usd": 100.0,
         "percent_delta": 5.0,
         "sample_count": 2,

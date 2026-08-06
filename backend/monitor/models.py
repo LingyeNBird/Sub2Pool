@@ -310,3 +310,40 @@ class LoginEvent(models.Model):
                 name="login_success_time",
             ),
         ]
+
+
+class BlockedIPAddress(models.Model):
+    """管理员封禁的登录来源地址；同一地址可按不同来源类型分别封禁。"""
+
+    SOURCE_CHOICES = (
+        ("request", "服务器来源 IP"),
+        ("remote", "直连地址"),
+        ("webrtc", "WebRTC IP"),
+    )
+
+    address = models.GenericIPAddressField()
+    source_type = models.CharField(max_length=16, choices=SOURCE_CHOICES)
+    notes = models.CharField(max_length=255, blank=True)
+    login_event = models.ForeignKey(
+        LoginEvent,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_ip_blocks",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["address", "source_type"],
+                name="unique_blocked_ip_source",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["source_type", "address"],
+                name="blocked_ip_source_addr",
+            )
+        ]

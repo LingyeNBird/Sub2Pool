@@ -1,6 +1,13 @@
 from django.urls import path
 
-from .views.auth import LoginView, LogoutView, MeView, PasswordView, RefreshView
+from .views.auth import (
+    LoginView,
+    LogoutView,
+    MeView,
+    NetworkCheckView,
+    PasswordView,
+    RefreshView,
+)
 from .views.dashboard import DashboardView
 from .views.database import DatabaseExportView, DatabaseImportView
 from .views.monitoring import RunMonitorView
@@ -11,6 +18,8 @@ from .views.participants import (
 )
 from .views.public import AuthClientConfigView, HealthView
 from .views.records import (
+    BlockedIPAddressDetailView,
+    BlockedIPAddressListView,
     LoginEventListView,
     NotificationListView,
     ObservationListView,
@@ -26,12 +35,15 @@ from .views.statistics import StatisticsView
 urlpatterns = [
     path("health", HealthView.as_view()),
     path("auth/client-config", AuthClientConfigView.as_view()),
+    path("auth/network-check", NetworkCheckView.as_view()),
     path("auth/login", LoginView.as_view()),
     path("auth/refresh", RefreshView.as_view()),
     path("auth/logout", LogoutView.as_view()),
     path("auth/me", MeView.as_view()),
     path("auth/password", PasswordView.as_view()),
     path("login-events", LoginEventListView.as_view()),
+    path("ip-blocks", BlockedIPAddressListView.as_view()),
+    path("ip-blocks/<int:block_id>", BlockedIPAddressDetailView.as_view()),
     path("dashboard", DashboardView.as_view()),
     path("statistics", StatisticsView.as_view()),
     path("database/export", DatabaseExportView.as_view()),

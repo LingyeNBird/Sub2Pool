@@ -12,6 +12,16 @@ const capacityPeriod = ref<"day" | "month">("day");
 const capacityDays = ref(90);
 const usageDays = ref(7);
 const usagePrecision = ref<"raw" | "hour" | "day">("hour");
+const basisDialog = ref<HTMLDialogElement | null>(null);
+const basisKind = ref<"cycle" | "today">("cycle");
+
+function openBasis(kind: "cycle" | "today") {
+  const summary = data.value?.capacity_summary;
+  if (kind === "cycle" && !summary?.cycle?.rate_calculated) return;
+  if (kind === "today" && !summary?.today.sufficient) return;
+  basisKind.value = kind;
+  basisDialog.value?.showModal();
+}
 
 const capacityValues = computed(
   () => data.value?.capacity_series.map((item) => item.weekly_total_usd) ?? [],
@@ -109,7 +119,11 @@ onMounted(load);
       </div>
 
       <div class="stats stats-vertical bg-base-100 xl:stats-horizontal">
-        <div class="stat">
+        <button
+          class="stat text-left"
+          :disabled="!data?.capacity_summary.cycle?.rate_calculated"
+          @click="openBasis('cycle')"
+        >
           <div class="stat-title">本周期累计折算</div>
           <div class="stat-value text-xl font-semibold">
             {{ currency(data?.capacity_summary.cycle?.estimate_usd) }}
@@ -120,8 +134,18 @@ onMounted(load);
             {{ percent(data?.capacity_summary.cycle?.used_percent) }} · 置信度
             {{ data?.capacity_summary.cycle?.confidence ?? "—" }}
           </div>
-        </div>
-        <div class="stat">
+          <div
+            v-if="data?.capacity_summary.cycle?.rate_calculated"
+            class="mt-1 text-xs opacity-50"
+          >
+            点击查看计算依据
+          </div>
+        </button>
+        <button
+          class="stat text-left"
+          :disabled="!data?.capacity_summary.today.sufficient"
+          @click="openBasis('today')"
+        >
           <div class="stat-title">今日用量折算</div>
           <div class="stat-value text-xl font-semibold">
             {{
@@ -134,7 +158,13 @@ onMounted(load);
             需要至少跨过
             {{ percent(data?.capacity_summary.today.min_percent_span) }}
           </div>
-        </div>
+          <div
+            v-if="data?.capacity_summary.today.sufficient"
+            class="mt-1 text-xs opacity-50"
+          >
+            点击查看计算依据
+          </div>
+        </button>
         <div class="stat">
           <div class="stat-title">今日已覆盖观测区间</div>
           <div class="stat-value text-xl font-semibold">
@@ -268,4 +298,155 @@ onMounted(load);
       </div>
     </div>
   </section>
+  <dialog ref="basisDialog" class="modal">
+    <div class="modal-box max-w-3xl">
+      <form method="dialog">
+        <button
+          class="btn absolute top-3 right-3 btn-circle btn-ghost btn-sm"
+          aria-label="关闭"
+        >
+          ✕
+        </button>
+      </form>
+
+      <template
+        v-if="
+          basisKind === 'cycle' && data?.capacity_summary.cycle?.rate_calculated
+        "
+      >
+        <h3 class="text-lg font-bold">本周期累计折算依据</h3>
+        <p class="mt-2 text-sm opacity-60">
+          先用本周期累计成本与官方已用百分比形成样本，再按设置的保守分位采用结果。
+        </p>
+        <div class="mt-5 grid gap-3 md:grid-cols-2">
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="text-sm opacity-60">计算起点</div>
+            <div class="mt-2 font-semibold">
+              {{ dateTime(data.capacity_summary.cycle.starts_at) }}
+            </div>
+            <div class="mt-1 tabular-nums">
+              {{ currency(data.capacity_summary.cycle.start_cost_usd) }} /
+              {{ percent(data.capacity_summary.cycle.start_percent) }}
+            </div>
+          </div>
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="text-sm opacity-60">计算终点</div>
+            <div class="mt-2 font-semibold">
+              {{ dateTime(data.capacity_summary.cycle.observed_at) }}
+            </div>
+            <div class="mt-1 tabular-nums">
+              {{ currency(data.capacity_summary.cycle.end_cost_usd) }} /
+              {{ percent(data.capacity_summary.cycle.end_percent) }}
+            </div>
+          </div>
+        </div>
+        <div class="mt-3 rounded-box border border-base-300 p-4">
+          <div class="font-semibold">累计样本公式</div>
+          <p class="mt-2 font-mono text-sm">
+            ({{ currency(data.capacity_summary.cycle.end_cost_usd) }} −
+            {{ currency(data.capacity_summary.cycle.start_cost_usd) }}) ÷ ({{
+              percent(data.capacity_summary.cycle.end_percent)
+            }}
+            − {{ percent(data.capacity_summary.cycle.start_percent) }}) × 100 =
+            {{ currency(data.capacity_summary.cycle.raw_estimate_usd) }}
+          </p>
+          <p class="mt-2 text-sm opacity-70">
+            最近 {{ data.capacity_summary.cycle.rate_sample_count }}
+            个有效累计样本按已用百分比加权，取
+            {{ data.capacity_summary.cycle.conservative_percentile }}%
+            保守分位；采用
+            {{
+              currency(data.capacity_summary.cycle.effective_usd_per_percent)
+            }}
+            / 1%，最终为
+            <strong>{{
+              currency(data.capacity_summary.cycle.estimate_usd)
+            }}</strong
+            >。
+          </p>
+        </div>
+        <div class="mt-3 overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>样本时间</th>
+                <th>累计成本</th>
+                <th>已用周限</th>
+                <th>美元 / 1%</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="sample in data.capacity_summary.cycle.rate_samples"
+                :key="sample.observed_at"
+              >
+                <td>{{ dateTime(sample.observed_at) }}</td>
+                <td>{{ currency(sample.cost_usd) }}</td>
+                <td>{{ percent(sample.used_percent) }}</td>
+                <td>{{ currency(sample.usd_per_percent) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <template
+        v-else-if="
+          basisKind === 'today' && data?.capacity_summary.today.sufficient
+        "
+      >
+        <h3 class="text-lg font-bold">今日用量折算依据</h3>
+        <p class="mt-2 text-sm opacity-60">
+          只比较今天首个和末个采样点，减少整数百分比在短间隔内造成的误差。
+        </p>
+        <div class="mt-5 grid gap-3 md:grid-cols-2">
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="text-sm opacity-60">计算起点</div>
+            <div class="mt-2 font-semibold">
+              {{ dateTime(data.capacity_summary.today.observed_from) }}
+            </div>
+            <div class="mt-1 tabular-nums">
+              {{ currency(data.capacity_summary.today.start_cost_usd) }} /
+              {{ percent(data.capacity_summary.today.start_percent) }}
+            </div>
+          </div>
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="text-sm opacity-60">计算终点</div>
+            <div class="mt-2 font-semibold">
+              {{ dateTime(data.capacity_summary.today.observed_to) }}
+            </div>
+            <div class="mt-1 tabular-nums">
+              {{ currency(data.capacity_summary.today.end_cost_usd) }} /
+              {{ percent(data.capacity_summary.today.end_percent) }}
+            </div>
+          </div>
+        </div>
+        <div class="mt-3 rounded-box border border-base-300 p-4">
+          <div class="font-semibold">日内增量公式</div>
+          <p class="mt-2 font-mono text-sm">
+            ({{ currency(data.capacity_summary.today.end_cost_usd) }} −
+            {{ currency(data.capacity_summary.today.start_cost_usd) }}) ÷ ({{
+              percent(data.capacity_summary.today.end_percent)
+            }}
+            − {{ percent(data.capacity_summary.today.start_percent) }}) × 100 =
+            {{ currency(data.capacity_summary.today.estimate_usd) }}
+          </p>
+          <p class="mt-2 text-sm opacity-70">
+            端点百分比是整数，误差区间约为
+            {{ currency(data.capacity_summary.today.minimum_usd) }} 至
+            {{ currency(data.capacity_summary.today.maximum_usd) }}。
+          </p>
+        </div>
+      </template>
+
+      <div class="modal-action">
+        <form method="dialog">
+          <button class="btn">关闭</button>
+        </form>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button>关闭</button>
+    </form>
+  </dialog>
 </template>

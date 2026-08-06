@@ -14,6 +14,7 @@ from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .base import AdminAPIView, PublicAPIView, error, ok
+from ..ip_blocking import blocked_webrtc_addresses, empty_block_response
 from ..login_audit import record_login_attempt, request_addresses
 from ..serializers import LoginSerializer, PasswordChangeSerializer
 
@@ -60,6 +61,18 @@ def _blacklist_cookie(request) -> None:
         pass
 
 
+
+
+class NetworkCheckView(PublicAPIView):
+    """登录页在展示表单前上报 WebRTC 地址；命中封禁时只返回空响应。"""
+
+    def post(self, request):
+        payload = request.data if isinstance(request.data, dict) else {}
+        if blocked_webrtc_addresses(payload):
+            return empty_block_response()
+        return ok({"allowed": True})
+
+
 class LoginView(PublicAPIView):
     def post(self, request):
         try:
@@ -75,6 +88,15 @@ class LoginView(PublicAPIView):
             return error("请求体必须是有效的 JSON 对象")
 
         payload = raw_payload if isinstance(raw_payload, dict) else {}
+        if blocked_webrtc_addresses(payload):
+            record_login_attempt(
+                request._request,
+                payload,
+                username=str(payload.get("username", "")),
+                success=False,
+                failure_reason="WebRTC IP 已封禁",
+            )
+            return empty_block_response()
         serializer = LoginSerializer(data=raw_payload)
         if not serializer.is_valid():
             record_login_attempt(

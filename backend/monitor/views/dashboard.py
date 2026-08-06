@@ -29,6 +29,34 @@ class DashboardView(AdminAPIView):
             (item.charged_cycle_percent for item in snapshots),
             Decimal("0"),
         )
+        basis_percentile = int(
+            observation.raw_window.get(
+                "conservative_percentile",
+                config.conservative_percentile,
+            )
+            if observation
+            else config.conservative_percentile
+        )
+        basis_history_samples = int(
+            observation.raw_window.get(
+                "rate_history_samples",
+                config.rate_history_samples,
+            )
+            if observation
+            else config.rate_history_samples
+        )
+        rate_rows = (
+            list(
+                Observation.objects.filter(
+                    cycle=cycle,
+                    valid_sample=True,
+                    sample_usd_per_percent__isnull=False,
+                    raw_window__rate_method="cumulative_cycle_v1",
+                ).order_by("-observed_at", "-id")[:basis_history_samples]
+            )
+            if cycle
+            else []
+        )
         data = {
             "configured": bool(
                 config.sub2api_admin_token_encrypted and config.openai_account_id
@@ -78,5 +106,18 @@ class DashboardView(AdminAPIView):
                 "snapshot_sampled_at": (
                     observation.raw_window.get("sampled_at") if observation else None
                 ),
+                "rate_calculated": bool(rate_rows),
+                "conservative_percentile": basis_percentile,
+                "rate_history_samples": basis_history_samples,
+                "rate_sample_count": len(rate_rows),
+                "rate_samples": [
+                    {
+                        "observed_at": iso(row.observed_at),
+                        "cost_usd": float(row.selected_total_cost),
+                        "used_percent": float(row.upstream_used_percent),
+                        "usd_per_percent": float(row.sample_usd_per_percent),
+                    }
+                    for row in rate_rows
+                ],
             }
         return ok(data)

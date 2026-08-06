@@ -36,6 +36,12 @@ export interface Sub2APIUserOption {
   role: string;
 }
 
+export interface RateSample {
+  observed_at: string;
+  cost_usd: number;
+  used_percent: number;
+  usd_per_percent: number;
+}
 export interface DashboardData {
   configured: boolean;
   monitoring_enabled: boolean;
@@ -55,6 +61,11 @@ export interface DashboardData {
     unattributed_used_percent: number | null;
     sample_note: string;
     snapshot_sampled_at: string | null;
+    rate_calculated: boolean;
+    conservative_percentile: number;
+    rate_history_samples: number;
+    rate_sample_count: number;
+    rate_samples: RateSample[];
   };
   participants: Participant[];
 }
@@ -122,6 +133,18 @@ export interface LoginEventData {
   items: LoginEventRecord[];
 }
 
+export type BlockedIPSource = "request" | "remote" | "webrtc";
+
+export interface BlockedIPAddress {
+  id: number;
+  address: string;
+  source_type: BlockedIPSource;
+  source_label: string;
+  notes: string;
+  login_event_id: number | null;
+  created_at: string;
+}
+
 export interface CapacityPoint {
   period: string;
   weekly_total_usd: number;
@@ -133,8 +156,18 @@ export interface CapacityPoint {
 export interface CycleCapacityEstimate {
   estimate_usd: number;
   raw_estimate_usd: number | null;
+  start_cost_usd: number;
+  start_percent: number;
+  end_cost_usd: number;
+  end_percent: number;
   cost_usd: number;
   used_percent: number;
+  effective_usd_per_percent: number;
+  rate_calculated: boolean;
+  conservative_percentile: number;
+  rate_history_samples: number;
+  rate_sample_count: number;
+  rate_samples: RateSample[];
   confidence: "低" | "中" | "高";
   observed_at: string;
   starts_at: string;
@@ -145,6 +178,10 @@ export interface DailyCapacityEstimate {
   estimate_usd: number | null;
   minimum_usd: number | null;
   maximum_usd: number | null;
+  start_cost_usd: number | null;
+  start_percent: number | null;
+  end_cost_usd: number | null;
+  end_percent: number | null;
   cost_delta_usd: number | null;
   percent_delta: number | null;
   sample_count: number;

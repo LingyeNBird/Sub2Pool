@@ -11,7 +11,13 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import AppSettings, Participant, validate_service_url
+from .models import (
+    AppSettings,
+    BlockedIPAddress,
+    LoginEvent,
+    Participant,
+    validate_service_url,
+)
 from .secrets import encrypt_secret
 
 
@@ -24,6 +30,35 @@ class LoginSerializer(serializers.Serializer):
 class PasswordChangeSerializer(serializers.Serializer):
     old_password = serializers.CharField(trim_whitespace=False, write_only=True)
     new_password = serializers.CharField(trim_whitespace=False, write_only=True)
+
+
+class BlockedIPAddressSerializer(serializers.ModelSerializer):
+    """IP 封禁写入契约；地址由 GenericIPAddressField 统一规范化。"""
+
+    login_event_id = serializers.PrimaryKeyRelatedField(
+        source="login_event",
+        queryset=LoginEvent.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    source_label = serializers.CharField(
+        source="get_source_type_display",
+        read_only=True,
+    )
+
+    class Meta:
+        model = BlockedIPAddress
+        fields = (
+            "id",
+            "address",
+            "source_type",
+            "source_label",
+            "notes",
+            "login_event_id",
+            "created_at",
+        )
+        read_only_fields = ("id", "created_at")
+
 
 class Sub2APIConnectionSerializer(serializers.Serializer):
     """设置页临时连接参数；校验后仅用于本次请求，不会写入数据库。"""

@@ -9,6 +9,12 @@ const data = ref<DashboardData | null>(null);
 const loading = ref(true);
 const running = ref(false);
 const message = ref("");
+const rateBasisDialog = ref<HTMLDialogElement | null>(null);
+
+function openRateBasis() {
+  if (!data.value?.cycle?.rate_calculated) return;
+  rateBasisDialog.value?.showModal();
+}
 
 function currency(value: number | null | undefined) {
   return value == null ? "—" : `$${value.toFixed(2)}`;
@@ -113,7 +119,11 @@ onMounted(load);
       </div>
       <div class="stat-desc">按 OpenAI 七天窗口</div>
     </div>
-    <div class="stat">
+    <button
+      class="stat text-left"
+      :disabled="!data.cycle?.rate_calculated"
+      @click="openRateBasis"
+    >
       <div class="stat-figure">
         <AppIcon name="banknotes" class="size-7 opacity-40" />
       </div>
@@ -124,7 +134,10 @@ onMounted(load);
       <div class="stat-desc">
         {{ data.cycle?.sample_note || "等待有效样本" }}
       </div>
-    </div>
+      <div v-if="data.cycle?.rate_calculated" class="mt-1 text-xs opacity-50">
+        点击查看计算依据
+      </div>
+    </button>
     <div class="stat">
       <div class="stat-figure">
         <AppIcon name="clipboard-document-check" class="size-7 opacity-40" />
@@ -278,4 +291,96 @@ onMounted(load);
       </p>
     </div>
   </section>
+  <dialog ref="rateBasisDialog" class="modal">
+    <div class="modal-box max-w-3xl">
+      <form method="dialog">
+        <button
+          class="btn absolute top-3 right-3 btn-circle btn-ghost btn-sm"
+          aria-label="关闭"
+        >
+          ✕
+        </button>
+      </form>
+      <template v-if="data?.cycle?.rate_calculated">
+        <h3 class="text-lg font-bold">保守美元 / 1% 计算依据</h3>
+        <p class="mt-2 text-sm opacity-60">
+          每个有效样本都从本周期 0 美元、0%
+          起算；系统按已用百分比加权后取保守分位。
+        </p>
+        <div
+          v-if="data.cycle.rate_samples[0]"
+          class="mt-5 grid gap-3 md:grid-cols-2"
+        >
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="text-sm opacity-60">计算起点</div>
+            <div class="mt-2 font-semibold">
+              {{ dateTime(data.cycle.starts_at) }}
+            </div>
+            <div class="mt-1 tabular-nums">$0.00 / 0.00%</div>
+          </div>
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="text-sm opacity-60">最近有效样本终点</div>
+            <div class="mt-2 font-semibold">
+              {{ dateTime(data.cycle.rate_samples[0].observed_at) }}
+            </div>
+            <div class="mt-1 tabular-nums">
+              {{ currency(data.cycle.rate_samples[0].cost_usd) }} /
+              {{ percent(data.cycle.rate_samples[0].used_percent) }}
+            </div>
+          </div>
+        </div>
+        <div
+          v-if="data.cycle.rate_samples[0]"
+          class="mt-3 rounded-box border border-base-300 p-4"
+        >
+          <div class="font-semibold">最近样本公式</div>
+          <p class="mt-2 font-mono text-sm">
+            {{ currency(data.cycle.rate_samples[0].cost_usd) }} ÷
+            {{ percent(data.cycle.rate_samples[0].used_percent) }} =
+            {{ currency(data.cycle.rate_samples[0].usd_per_percent) }} / 1%
+          </p>
+          <p class="mt-2 text-sm opacity-70">
+            最近
+            {{ data.cycle.rate_sample_count }} 个有效样本按已用百分比加权，取
+            {{ data.cycle.conservative_percentile }}% 保守分位，最终采用
+            <strong>{{
+              currency(data.cycle.effective_usd_per_percent)
+            }}</strong>
+            / 1%。
+          </p>
+        </div>
+        <div class="mt-3 overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>样本时间</th>
+                <th>累计成本</th>
+                <th>已用周限</th>
+                <th>美元 / 1%</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="sample in data.cycle.rate_samples"
+                :key="sample.observed_at"
+              >
+                <td>{{ dateTime(sample.observed_at) }}</td>
+                <td>{{ currency(sample.cost_usd) }}</td>
+                <td>{{ percent(sample.used_percent) }}</td>
+                <td>{{ currency(sample.usd_per_percent) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+      <div class="modal-action">
+        <form method="dialog">
+          <button class="btn">关闭</button>
+        </form>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button>关闭</button>
+    </form>
+  </dialog>
 </template>

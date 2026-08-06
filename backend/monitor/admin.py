@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from .models import (
     AppSettings,
+    BlockedIPAddress,
     LoginEvent,
     NotificationEvent,
     Observation,
@@ -20,3 +21,4 @@ admin.site.register(ParticipantSnapshot)
 admin.site.register(NotificationEvent)
 admin.site.register(ParticipantUsageSample)
 admin.site.register(LoginEvent)
+admin.site.register(BlockedIPAddress)

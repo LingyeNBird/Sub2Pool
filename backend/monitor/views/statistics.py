@@ -36,6 +36,10 @@ def _capacity_summary(
         "estimate_usd": None,
         "minimum_usd": None,
         "maximum_usd": None,
+        "start_cost_usd": None,
+        "start_percent": None,
+        "end_cost_usd": None,
+        "end_percent": None,
         "cost_delta_usd": None,
         "percent_delta": None,
         "sample_count": 0,
@@ -78,6 +82,25 @@ def _capacity_summary(
         if used_percent > 0
         else None
     )
+    basis_percentile = int(
+        latest.raw_window.get(
+            "conservative_percentile",
+            config.conservative_percentile,
+        )
+    )
+    basis_history_samples = int(
+        latest.raw_window.get(
+            "rate_history_samples",
+            config.rate_history_samples,
+        )
+    )
+    valid_rate_rows = list(
+        observations.filter(
+            valid_sample=True,
+            sample_usd_per_percent__isnull=False,
+            raw_window__rate_method=RATE_METHOD,
+        ).order_by("-observed_at", "-id")[:basis_history_samples]
+    )
     if used_percent >= 50:
         confidence = "高"
     elif used_percent >= 20:
@@ -93,8 +116,28 @@ def _capacity_summary(
             if raw_cycle_estimate is not None
             else None
         ),
+        "start_cost_usd": 0.0,
+        "start_percent": 0.0,
+        "end_cost_usd": _money(latest.selected_total_cost),
+        "end_percent": float(used_percent),
         "cost_usd": _money(latest.selected_total_cost),
         "used_percent": float(used_percent),
+        "effective_usd_per_percent": float(
+            latest.effective_usd_per_percent
+        ),
+        "rate_calculated": bool(valid_rate_rows),
+        "conservative_percentile": basis_percentile,
+        "rate_history_samples": basis_history_samples,
+        "rate_sample_count": len(valid_rate_rows),
+        "rate_samples": [
+            {
+                "observed_at": iso(row.observed_at),
+                "cost_usd": _money(row.selected_total_cost),
+                "used_percent": float(row.upstream_used_percent),
+                "usd_per_percent": float(row.sample_usd_per_percent),
+            }
+            for row in valid_rate_rows
+        ],
         "confidence": confidence,
         "observed_at": iso(latest.observed_at),
         "starts_at": iso(min(cycle.starts_at for cycle in logical_cycles)),
@@ -120,6 +163,10 @@ def _capacity_summary(
     percent_delta = last.upstream_used_percent - first.upstream_used_percent
     today.update(
         {
+            "start_cost_usd": _money(first.selected_total_cost),
+            "start_percent": float(first.upstream_used_percent),
+            "end_cost_usd": _money(last.selected_total_cost),
+            "end_percent": float(last.upstream_used_percent),
             "cost_delta_usd": _money(cost_delta),
             "percent_delta": float(percent_delta),
             "observed_from": iso(first.observed_at),

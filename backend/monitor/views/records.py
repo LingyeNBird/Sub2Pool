@@ -1,8 +1,50 @@
 """观测、通知和登录审计只读 API。"""
 
-from .base import AdminAPIView, ok
+from django.shortcuts import get_object_or_404
+
+from .base import AdminAPIView, error, ok
 from .presenters import bounded_query_int, iso, snapshot_data
-from ..models import LoginEvent, NotificationEvent, Observation
+from ..login_audit import request_addresses
+from ..models import (
+    BlockedIPAddress,
+    LoginEvent,
+    NotificationEvent,
+    Observation,
+)
+from ..serializers import BlockedIPAddressSerializer
+
+
+class BlockedIPAddressListView(AdminAPIView):
+    """列出封禁项，并允许管理员从登录审计记录创建封禁。"""
+
+    def get(self, _request):
+        rows = BlockedIPAddress.objects.select_related("login_event")
+        return ok(BlockedIPAddressSerializer(rows, many=True).data)
+
+    def post(self, request):
+        serializer = BlockedIPAddressSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error("封禁参数无效", details=serializer.errors)
+
+        address = str(serializer.validated_data["address"])
+        source_type = serializer.validated_data["source_type"]
+        request_ip, remote_ip = request_addresses(request._request)
+        if source_type == "request" and address == request_ip:
+            return error("不能封禁当前会话的服务器来源 IP")
+        if source_type == "remote" and address == remote_ip:
+            return error("不能封禁当前会话的直连地址")
+
+        blocked = serializer.save()
+        return ok(BlockedIPAddressSerializer(blocked).data, 201)
+
+
+class BlockedIPAddressDetailView(AdminAPIView):
+    """解除一个持久化 IP 封禁。"""
+
+    def delete(self, _request, block_id: int):
+        blocked = get_object_or_404(BlockedIPAddress, pk=block_id)
+        blocked.delete()
+        return ok()
 
 
 class ObservationListView(AdminAPIView):
