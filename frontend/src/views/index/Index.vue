@@ -2,6 +2,8 @@
 import { onMounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import CalculationBasisHeader from "@/components/common/CalculationBasisHeader.vue";
+import CalculationBasisTimeline from "@/components/common/CalculationBasisTimeline.vue";
 import { ApiError, api } from "@/services/api";
 import type { DashboardData } from "@/types";
 
@@ -131,7 +133,7 @@ onMounted(load);
         <button
           v-if="data.cycle?.rate_calculated"
           type="button"
-          class="text-xs underline underline-offset-2 opacity-50"
+          class="cursor-pointer text-xs underline underline-offset-2 opacity-50"
           @click="openRateBasis"
         >
           查看依据
@@ -305,39 +307,30 @@ onMounted(load);
         </button>
       </form>
       <template v-if="data?.cycle?.rate_calculated">
-        <h3 class="text-lg font-bold">保守美元 / 1% 计算依据</h3>
-        <p class="mt-2 text-sm opacity-60">
-          每个有效样本都从本周期 0 美元、0%
-          起算；系统按已用百分比加权后取保守分位。
-        </p>
-        <div
+        <CalculationBasisHeader
+          title="保守美元 / 1% 计算依据"
+          help="每个有效样本都从本周期 0 美元、0% 起算；系统按已用百分比加权后取保守分位。"
+        />
+        <CalculationBasisTimeline
           v-if="data.cycle.rate_samples[0]"
-          class="mt-5 grid gap-3 md:grid-cols-2"
-        >
-          <div class="rounded-box bg-base-200 p-4">
-            <div class="text-sm opacity-60">计算起点</div>
-            <div class="mt-2 font-semibold">
-              {{ dateTime(data.cycle.starts_at) }}
-            </div>
-            <div class="mt-1 tabular-nums">$0.00 / 0.00%</div>
-          </div>
-          <div class="rounded-box bg-base-200 p-4">
-            <div class="text-sm opacity-60">最近有效样本终点</div>
-            <div class="mt-2 font-semibold">
-              {{ dateTime(data.cycle.rate_samples[0].observed_at) }}
-            </div>
-            <div class="mt-1 tabular-nums">
-              {{ currency(data.cycle.rate_samples[0].cost_usd) }} /
-              {{ percent(data.cycle.rate_samples[0].used_percent) }}
-            </div>
-          </div>
-        </div>
+          :start-time="dateTime(data.cycle.starts_at)"
+          start-value="$0.00 / 0.00%"
+          end-label="最近有效样本终点"
+          :end-time="dateTime(data.cycle.rate_samples[0].observed_at)"
+          :end-value="`${currency(
+            data.cycle.rate_samples[0].cost_usd,
+          )} / ${percent(data.cycle.rate_samples[0].used_percent)}`"
+        />
         <div
           v-if="data.cycle.rate_samples[0]"
           class="mt-3 rounded-box border border-base-300 p-4"
         >
-          <div class="font-semibold">最近样本公式</div>
-          <p class="mt-2 font-mono text-sm">
+          <div class="text-center text-sm font-semibold opacity-60">
+            最近样本公式
+          </div>
+          <p
+            class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
+          >
             {{ currency(data.cycle.rate_samples[0].cost_usd) }} ÷
             {{ percent(data.cycle.rate_samples[0].used_percent) }} =
             {{ currency(data.cycle.rate_samples[0].usd_per_percent) }} / 1%

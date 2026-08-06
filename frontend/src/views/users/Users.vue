@@ -56,6 +56,25 @@ function percent(value: number | null | undefined) {
   return value == null ? "—" : `${value.toFixed(2)}%`;
 }
 
+function compactPercent(value: number | null | undefined) {
+  if (value == null) return "—";
+  return `${Number(value.toFixed(2))}%`;
+}
+
+function remainingShare(participant: Participant) {
+  return (
+    participant.snapshot?.remaining_share_percent ?? participant.share_percent
+  );
+}
+
+function allocationSegmentWidth(participant: Participant, value: number) {
+  const used = participant.snapshot?.charged_cycle_percent ?? 0;
+  const remaining = remainingShare(participant);
+  const total = Math.max(used, 0) + Math.max(remaining, 0);
+  if (total === 0) return 0;
+  return (Math.max(value, 0) / total) * 100;
+}
+
 function dateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString("zh-CN") : "—";
 }
@@ -287,131 +306,182 @@ onMounted(() => {
 
     <div
       v-else-if="participants.length && viewMode === 'cards'"
-      class="grid gap-4 xl:grid-cols-2"
+      class="grid gap-3 xl:grid-cols-2"
     >
-      <article
+      <div
         v-for="participant in participants"
         :key="participant.id"
-        class="card bg-base-200 shadow-xs"
+        class="relative min-w-0 p-3"
       >
-        <div class="card-body gap-4">
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div class="flex flex-wrap items-center gap-2">
-                <h3 class="card-title">{{ participant.name }}</h3>
-                <span
-                  class="badge badge-sm"
-                  :class="
-                    participant.is_owner ? 'badge-neutral' : 'badge-ghost'
-                  "
-                >
-                  {{ participant.is_owner ? "车主" : "车友" }}
-                </span>
-                <span
-                  class="badge badge-sm"
-                  :class="participant.enabled ? 'badge-success' : 'badge-ghost'"
-                >
-                  {{ participant.enabled ? "启用" : "停用" }}
-                </span>
+        <div class="hover-3d w-full">
+          <article class="card w-full bg-base-200 shadow-xs">
+            <div class="card-body gap-4">
+              <div class="pr-20">
+                <div class="flex flex-wrap items-center gap-2">
+                  <h3 class="card-title">{{ participant.name }}</h3>
+                  <span
+                    class="badge badge-sm"
+                    :class="
+                      participant.is_owner ? 'badge-neutral' : 'badge-ghost'
+                    "
+                  >
+                    {{ participant.is_owner ? "车主" : "车友" }}
+                  </span>
+                  <span
+                    class="badge badge-sm"
+                    :class="
+                      participant.enabled ? 'badge-success' : 'badge-ghost'
+                    "
+                  >
+                    {{ participant.enabled ? "启用" : "停用" }}
+                  </span>
+                </div>
+                <p class="mt-1 text-sm opacity-60">
+                  {{ participant.email || "未填写邮箱" }} · Sub2API 用户
+                  <span class="font-mono">{{
+                    participant.sub2api_user_id
+                  }}</span>
+                </p>
               </div>
-              <p class="mt-1 text-sm opacity-60">
-                {{ participant.email || "未填写邮箱" }} · Sub2API 用户
-                <span class="font-mono">{{ participant.sub2api_user_id }}</span>
-              </p>
-            </div>
-            <div class="flex gap-1">
-              <button
-                class="btn btn-ghost btn-xs"
-                @click="openEdit(participant)"
+
+              <div
+                class="rounded-box bg-base-100 p-3 sm:flex sm:items-center sm:gap-5"
               >
-                编辑
-              </button>
-              <button
-                class="btn btn-ghost text-error btn-xs"
-                @click="remove(participant)"
-              >
-                删除
-              </button>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <div class="rounded-box bg-base-100 p-3">
-              <div class="text-xs opacity-60">合同权益</div>
-              <div class="mt-1 font-semibold tabular-nums">
-                {{ percent(participant.share_percent) }}
-              </div>
-            </div>
-            <div class="rounded-box bg-base-100 p-3">
-              <div class="text-xs opacity-60">已归属周限</div>
-              <div class="mt-1 font-semibold tabular-nums">
-                {{ percent(participant.snapshot?.charged_cycle_percent) }}
-              </div>
-            </div>
-            <div class="rounded-box bg-base-100 p-3">
-              <div class="text-xs opacity-60">剩余权益</div>
-              <div class="mt-1 font-semibold tabular-nums">
-                {{ percent(participant.snapshot?.remaining_share_percent) }}
-              </div>
-            </div>
-            <div class="rounded-box bg-base-100 p-3">
-              <div class="text-xs opacity-60">账号本周期用量</div>
-              <div class="mt-1 font-semibold tabular-nums">
-                {{ currency(participant.latest_selected_cost) }}
-              </div>
-            </div>
-            <div class="rounded-box bg-base-100 p-3">
-              <div class="text-xs opacity-60">当前用户余额</div>
-              <div class="mt-1 font-semibold tabular-nums">
-                {{ currency(participant.latest_balance_usd) }}
-              </div>
-            </div>
-            <div class="rounded-box bg-base-100 p-3">
-              <div class="text-xs opacity-60">建议用户余额</div>
-              <div class="mt-1 font-semibold tabular-nums">
-                {{ currency(participant.snapshot?.recommended_balance_usd) }}
-              </div>
-            </div>
-          </div>
-
-          <div class="grid gap-3 sm:grid-cols-2">
-            <div>
-              <div class="text-xs opacity-60">备注</div>
-              <p class="mt-1 text-sm whitespace-pre-wrap">
-                {{ participant.notes || "未填写备注" }}
-              </p>
-            </div>
-            <div>
-              <div class="text-xs opacity-60">额度建议</div>
-              <div class="mt-1 flex flex-wrap items-center gap-2">
-                <span
-                  class="badge badge-sm"
-                  :class="
-                    participant.snapshot?.needs_manual_update
-                      ? 'badge-warning'
-                      : 'badge-success'
-                  "
+                <div class="mb-3 shrink-0 sm:mb-0 sm:min-w-24">
+                  <div class="text-xs opacity-60">合同权益</div>
+                  <div class="mt-1 text-xl font-semibold tabular-nums">
+                    {{ percent(participant.share_percent) }}
+                  </div>
+                </div>
+                <div
+                  class="flex h-8 min-w-0 grow overflow-hidden rounded-box bg-base-300 text-xs font-semibold tabular-nums"
+                  role="img"
+                  :aria-label="`已归属 ${percent(participant.snapshot?.charged_cycle_percent)}, 剩余 ${percent(remainingShare(participant))}`"
                 >
-                  {{
-                    !participant.snapshot
-                      ? "等待测算"
-                      : participant.snapshot.needs_manual_update
-                        ? "建议调整"
-                        : "无需调整"
-                  }}
-                </span>
-                <span class="text-sm opacity-60">
-                  {{ participant.snapshot?.reason || "尚无测算依据" }}
-                </span>
+                  <div
+                    v-if="
+                      (participant.snapshot?.charged_cycle_percent ?? 0) > 0
+                    "
+                    class="flex items-center justify-center overflow-hidden bg-warning px-1 text-warning-content"
+                    :style="{
+                      width: `${allocationSegmentWidth(
+                        participant,
+                        participant.snapshot?.charged_cycle_percent ?? 0,
+                      )}%`,
+                    }"
+                  >
+                    <span class="text-[10px] whitespace-nowrap sm:text-xs">
+                      已用
+                      {{
+                        compactPercent(
+                          participant.snapshot?.charged_cycle_percent,
+                        )
+                      }}
+                    </span>
+                  </div>
+                  <div
+                    v-if="remainingShare(participant) > 0"
+                    class="flex items-center justify-center overflow-hidden bg-primary px-1 text-primary-content"
+                    :style="{
+                      width: `${allocationSegmentWidth(
+                        participant,
+                        remainingShare(participant),
+                      )}%`,
+                    }"
+                  >
+                    <span class="text-[10px] whitespace-nowrap sm:text-xs">
+                      剩余 {{ compactPercent(remainingShare(participant)) }}
+                    </span>
+                  </div>
+                  <div
+                    v-if="
+                      (participant.snapshot?.charged_cycle_percent ?? 0) <= 0 &&
+                      remainingShare(participant) <= 0
+                    "
+                    class="flex grow items-center justify-center opacity-60"
+                  >
+                    暂无可分配权益
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div class="rounded-box bg-base-100 p-3">
+                  <div class="text-xs opacity-60">账号本周期用量</div>
+                  <div class="mt-1 font-semibold tabular-nums">
+                    {{ currency(participant.latest_selected_cost) }}
+                  </div>
+                </div>
+                <div class="rounded-box bg-base-100 p-3">
+                  <div class="text-xs opacity-60">余额</div>
+                  <div class="mt-1 font-semibold tabular-nums">
+                    当前 {{ currency(participant.latest_balance_usd) }} / 建议
+                    {{
+                      currency(participant.snapshot?.recommended_balance_usd)
+                    }}
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <div class="text-xs opacity-60">备注</div>
+                  <p class="mt-1 text-sm whitespace-pre-wrap">
+                    {{ participant.notes || "未填写备注" }}
+                  </p>
+                </div>
+                <div>
+                  <div class="text-xs opacity-60">额度建议</div>
+                  <div class="mt-1 flex flex-wrap items-center gap-2">
+                    <span
+                      class="badge badge-sm"
+                      :class="
+                        participant.snapshot?.needs_manual_update
+                          ? 'badge-warning'
+                          : 'badge-success'
+                      "
+                    >
+                      {{
+                        !participant.snapshot
+                          ? "等待测算"
+                          : participant.snapshot.needs_manual_update
+                            ? "建议调整"
+                            : "无需调整"
+                      }}
+                    </span>
+                    <span class="text-sm opacity-60">
+                      {{ participant.snapshot?.reason || "尚无测算依据" }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="text-xs opacity-50">
+                最近探测：{{ dateTime(participant.last_checked_at) }}
               </div>
             </div>
-          </div>
-
-          <div class="text-xs opacity-50">
-            最近探测：{{ dateTime(participant.last_checked_at) }}
-          </div>
+          </article>
+          <div></div>
+          <div></div>
+          <div></div>
+          <div></div>
+          <div></div>
+          <div></div>
+          <div></div>
+          <div></div>
         </div>
-      </article>
+        <div class="absolute top-8 right-8 z-10 flex gap-1">
+          <button class="btn btn-ghost btn-xs" @click="openEdit(participant)">
+            编辑
+          </button>
+          <button
+            class="btn btn-ghost text-error btn-xs"
+            @click="remove(participant)"
+          >
+            删除
+          </button>
+        </div>
+      </div>
     </div>
 
     <div

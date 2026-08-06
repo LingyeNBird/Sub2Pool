@@ -2,6 +2,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import CalculationBasisHeader from "@/components/common/CalculationBasisHeader.vue";
+import CalculationBasisTimeline from "@/components/common/CalculationBasisTimeline.vue";
 import { ApiError, api } from "@/services/api";
 import type { StatisticsData } from "@/types";
 
@@ -128,7 +130,7 @@ onMounted(load);
             <button
               v-if="data?.capacity_summary.cycle?.rate_calculated"
               type="button"
-              class="text-xs underline underline-offset-2 opacity-50"
+              class="cursor-pointer text-xs underline underline-offset-2 opacity-50"
               @click="openBasis('cycle')"
             >
               查看依据
@@ -154,7 +156,7 @@ onMounted(load);
             <button
               v-if="data?.capacity_summary.today.sufficient"
               type="button"
-              class="text-xs underline underline-offset-2 opacity-50"
+              class="cursor-pointer text-xs underline underline-offset-2 opacity-50"
               @click="openBasis('today')"
             >
               查看依据
@@ -314,35 +316,27 @@ onMounted(load);
           basisKind === 'cycle' && data?.capacity_summary.cycle?.rate_calculated
         "
       >
-        <h3 class="text-lg font-bold">本周期累计折算依据</h3>
-        <p class="mt-2 text-sm opacity-60">
-          先用本周期累计成本与官方已用百分比形成样本，再按设置的保守分位采用结果。
-        </p>
-        <div class="mt-5 grid gap-3 md:grid-cols-2">
-          <div class="rounded-box bg-base-200 p-4">
-            <div class="text-sm opacity-60">计算起点</div>
-            <div class="mt-2 font-semibold">
-              {{ dateTime(data.capacity_summary.cycle.starts_at) }}
-            </div>
-            <div class="mt-1 tabular-nums">
-              {{ currency(data.capacity_summary.cycle.start_cost_usd) }} /
-              {{ percent(data.capacity_summary.cycle.start_percent) }}
-            </div>
-          </div>
-          <div class="rounded-box bg-base-200 p-4">
-            <div class="text-sm opacity-60">计算终点</div>
-            <div class="mt-2 font-semibold">
-              {{ dateTime(data.capacity_summary.cycle.observed_at) }}
-            </div>
-            <div class="mt-1 tabular-nums">
-              {{ currency(data.capacity_summary.cycle.end_cost_usd) }} /
-              {{ percent(data.capacity_summary.cycle.end_percent) }}
-            </div>
-          </div>
-        </div>
+        <CalculationBasisHeader
+          title="本周期累计折算依据"
+          help="先用本周期累计成本与官方已用百分比形成样本，再按设置的保守分位采用结果。"
+        />
+        <CalculationBasisTimeline
+          :start-time="dateTime(data.capacity_summary.cycle.starts_at)"
+          :start-value="`${currency(
+            data.capacity_summary.cycle.start_cost_usd,
+          )} / ${percent(data.capacity_summary.cycle.start_percent)}`"
+          :end-time="dateTime(data.capacity_summary.cycle.observed_at)"
+          :end-value="`${currency(
+            data.capacity_summary.cycle.end_cost_usd,
+          )} / ${percent(data.capacity_summary.cycle.end_percent)}`"
+        />
         <div class="mt-3 rounded-box border border-base-300 p-4">
-          <div class="font-semibold">累计样本公式</div>
-          <p class="mt-2 font-mono text-sm">
+          <div class="text-center text-sm font-semibold opacity-60">
+            累计样本公式
+          </div>
+          <p
+            class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
+          >
             ({{ currency(data.capacity_summary.cycle.end_cost_usd) }} −
             {{ currency(data.capacity_summary.cycle.start_cost_usd) }}) ÷ ({{
               percent(data.capacity_summary.cycle.end_percent)
@@ -395,35 +389,27 @@ onMounted(load);
           basisKind === 'today' && data?.capacity_summary.today.sufficient
         "
       >
-        <h3 class="text-lg font-bold">今日用量折算依据</h3>
-        <p class="mt-2 text-sm opacity-60">
-          只比较今天首个和末个采样点，减少整数百分比在短间隔内造成的误差。
-        </p>
-        <div class="mt-5 grid gap-3 md:grid-cols-2">
-          <div class="rounded-box bg-base-200 p-4">
-            <div class="text-sm opacity-60">计算起点</div>
-            <div class="mt-2 font-semibold">
-              {{ dateTime(data.capacity_summary.today.observed_from) }}
-            </div>
-            <div class="mt-1 tabular-nums">
-              {{ currency(data.capacity_summary.today.start_cost_usd) }} /
-              {{ percent(data.capacity_summary.today.start_percent) }}
-            </div>
-          </div>
-          <div class="rounded-box bg-base-200 p-4">
-            <div class="text-sm opacity-60">计算终点</div>
-            <div class="mt-2 font-semibold">
-              {{ dateTime(data.capacity_summary.today.observed_to) }}
-            </div>
-            <div class="mt-1 tabular-nums">
-              {{ currency(data.capacity_summary.today.end_cost_usd) }} /
-              {{ percent(data.capacity_summary.today.end_percent) }}
-            </div>
-          </div>
-        </div>
+        <CalculationBasisHeader
+          title="今日用量折算依据"
+          help="只比较今天首个和末个采样点，减少整数百分比在短间隔内造成的误差。"
+        />
+        <CalculationBasisTimeline
+          :start-time="dateTime(data.capacity_summary.today.observed_from)"
+          :start-value="`${currency(
+            data.capacity_summary.today.start_cost_usd,
+          )} / ${percent(data.capacity_summary.today.start_percent)}`"
+          :end-time="dateTime(data.capacity_summary.today.observed_to)"
+          :end-value="`${currency(
+            data.capacity_summary.today.end_cost_usd,
+          )} / ${percent(data.capacity_summary.today.end_percent)}`"
+        />
         <div class="mt-3 rounded-box border border-base-300 p-4">
-          <div class="font-semibold">日内增量公式</div>
-          <p class="mt-2 font-mono text-sm">
+          <div class="text-center text-sm font-semibold opacity-60">
+            日内增量公式
+          </div>
+          <p
+            class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
+          >
             ({{ currency(data.capacity_summary.today.end_cost_usd) }} −
             {{ currency(data.capacity_summary.today.start_cost_usd) }}) ÷ ({{
               percent(data.capacity_summary.today.end_percent)
