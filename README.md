@@ -8,7 +8,7 @@
 
 - 通过 Sub2API Admin Token 被动读取已保存的 OpenAI 周限快照，默认不主动请求上游额度接口。
 - 按参与者合同权益维护百分比账本，并根据真实消费增量估算每 1% 周限对应的美元价值。
-- 在参与者额度耗尽、建议限额变化、测算率变化或采集异常时发送邮件通知。
+- 在参与者用户余额耗尽、建议余额变化、测算率变化或采集异常时发送邮件通知。
 - 支持 SMTP 和 Resend 邮件服务。
 - 提供额度总览、参与者管理、观测记录、额度统计、登录审计和使用教程。
 - 记录服务端来源 IP，并可选记录浏览器通过 WebRTC 上报的辅助地址。
@@ -165,8 +165,10 @@ uv run --with pillow python scripts/prepare_icon.py 原图.png frontend/public/f
 
 ## 许可证
 
-除另有标注的第三方材料外，本项目自有代码以 [GNU Affero General Public License v3.0 only](LICENSE) 发布。
-
-前端基于用户提供的 daisyUI 商业模板修改，相关材料继续遵循 [`frontend/LICENSE.txt`](frontend/LICENSE.txt)；该许可证允许购买者修改和分发修改后的软件，但不允许原样转售或免费分发模板包。Sub2API 仅作为外部服务通过 Admin API 交互，其源码不会被打包进本项目镜像；本地研究副本位于被 Git 忽略的 `reference/` 目录。
+本项目以 [GNU Affero General Public License v3.0 only](LICENSE) 发布。
 
 运行中的 Web 界面在账户菜单中提供本仓库源码链接，以满足 AGPL 网络交互场景下的源码获取要求。
+
+## 前端来源
+
+本项目的前端基于 daisyUI 的 [HTML Dashboard Template](https://daisyui.com/store/html-dashboard) 开发。
