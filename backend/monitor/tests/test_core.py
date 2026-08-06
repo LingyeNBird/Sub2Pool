@@ -594,6 +594,10 @@ def test_api_requires_admin_jwt_and_accepts_admin_login():
     assert "refresh" not in logged_in.json()["data"]
     assert logged_in.cookies["pinche_refresh"]["httponly"]
     assert "sessionid" not in logged_in.cookies
+    assert logged_in.json()["data"]["timezone"] == "Asia/Shanghai"
+    assert client.get("/api/auth/me", **headers).json()["data"]["timezone"] == (
+        "Asia/Shanghai"
+    )
 
     dashboard = client.get("/api/dashboard", **headers)
     assert dashboard.status_code == 200
@@ -873,6 +877,27 @@ def test_partial_settings_patch_does_not_touch_other_cards():
 
 
 @pytest.mark.django_db
+def test_settings_rejects_invalid_iana_timezone():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    response = client.patch(
+        "/api/settings",
+        data=json.dumps({"timezone": "Shanghai"}),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["details"]["timezone"]
+    assert AppSettings.load().timezone == "Asia/Shanghai"
+
+@pytest.mark.django_db
 def test_global_monitor_schedule_records_next_wake_time():
     config = AppSettings.load()
     config.local_poll_minutes = 13
@@ -931,9 +956,12 @@ def test_monitor_status_exposes_global_countdown_and_hides_it_when_disabled():
     client = Client()
     headers, _ = jwt_login(client)
     config = AppSettings.load()
+    now = timezone.now()
     config.monitoring_enabled = True
     config.local_poll_minutes = 10
-    config.next_local_check_at = timezone.now() + timedelta(minutes=7)
+    config.last_local_check_at = now - timedelta(minutes=3)
+    config.next_local_check_at = now + timedelta(minutes=7)
+    config.run_lease_until = now + timedelta(minutes=1)
     config.save()
 
     enabled = client.get("/api/monitor/run", **headers)
@@ -944,6 +972,10 @@ def test_monitor_status_exposes_global_countdown_and_hides_it_when_disabled():
     assert data["interval_seconds"] == 600
     assert data["next_local_check_at"] == config.next_local_check_at.isoformat()
     assert data["server_time"]
+    assert data["last_local_check_at"] == config.last_local_check_at.isoformat()
+    assert data["latest_observation_at"] is None
+    assert data["last_error"] == ""
+    assert data["run_in_progress"] is True
 
     config.monitoring_enabled = False
     config.save(update_fields=["monitoring_enabled"])

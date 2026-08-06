@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import PaginationControls from "@/components/common/PaginationControls.vue";
+import { useDateTime, useZonedDateTimeIso } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
 import type {
   MonitorSchedule,
@@ -13,6 +14,8 @@ import type {
 
 type FilterKind = "time" | "source" | "query";
 
+const dateTime = useDateTime();
+const toIso = useZonedDateTimeIso();
 const rows = ref<Observation[]>([]);
 const summary = reactive({ total: 0, valid_count: 0, passive_count: 0 });
 const pagination = ref<PaginationMeta>({
@@ -40,6 +43,8 @@ const clientNow = ref(Date.now());
 const serverOffsetMs = ref(0);
 let clockTimer: number | undefined;
 let lastScheduleRefreshAt = 0;
+let expiredScheduleAt: string | null = null;
+let refreshingSchedule = false;
 
 const remainingMs = computed(() => {
   if (
@@ -64,6 +69,20 @@ const remainingLabel = computed(() => {
   if (hours) return `${hours} 小时 ${minutes} 分 ${remainder} 秒`;
   return `${minutes} 分 ${remainder} 秒`;
 });
+const samplingOutcomeLabel = computed(() => {
+  if (schedule.value?.run_in_progress) return "本轮本地探测正在执行";
+  if (!schedule.value?.last_local_check_at) return "尚未完成本地探测";
+  if (schedule.value.last_error) return "上次本地探测失败";
+  const latestObservation = schedule.value.latest_observation_at;
+  if (
+    !latestObservation ||
+    new Date(latestObservation).getTime() <
+      new Date(schedule.value.last_local_check_at).getTime()
+  ) {
+    return "上次仅完成本地探测，未触发校准";
+  }
+  return "上次本地探测已形成校准记录";
+});
 
 function currency(value: number | null) {
   return value == null ? "—" : `$${value.toFixed(2)}`;
@@ -71,10 +90,6 @@ function currency(value: number | null) {
 
 function percent(value: number | null) {
   return value == null ? "—" : `${value.toFixed(2)}%`;
-}
-
-function dateTime(value: string | null) {
-  return value ? new Date(value).toLocaleString("zh-CN") : "—";
 }
 
 function sourceLabel(value: string) {
@@ -95,19 +110,44 @@ function applySchedule(value: MonitorSchedule) {
 }
 
 async function refreshSchedule() {
+  if (refreshingSchedule) return;
+  refreshingSchedule = true;
   try {
-    applySchedule(await api<MonitorSchedule>("monitor/run"));
+    const awaitedSchedule = expiredScheduleAt;
+    const wasRunning = schedule.value?.run_in_progress ?? false;
+    const value = await api<MonitorSchedule>("monitor/run");
+    const scheduleAdvanced = Boolean(
+      awaitedSchedule &&
+      value.next_local_check_at &&
+      new Date(value.next_local_check_at).getTime() >
+        new Date(awaitedSchedule).getTime(),
+    );
+    applySchedule(value);
+    if (!value.monitoring_enabled) expiredScheduleAt = null;
+    if ((scheduleAdvanced || wasRunning) && !value.run_in_progress) {
+      expiredScheduleAt = null;
+      await load();
+    }
   } catch {
-    // 倒计时归零后的轻量刷新失败时，等待下一轮重试，不覆盖表格错误。
+    // 后台任务尚未登记下一时隙时继续轮询，不覆盖表格自身的加载错误。
+  } finally {
+    refreshingSchedule = false;
   }
 }
 
 function tickCountdown() {
   clientNow.value = Date.now();
   if (
+    remainingMs.value === 0 &&
     schedule.value?.monitoring_enabled &&
     schedule.value.next_local_check_at &&
-    remainingMs.value === 0 &&
+    !expiredScheduleAt
+  ) {
+    expiredScheduleAt = schedule.value.next_local_check_at;
+  }
+  if (
+    schedule.value?.monitoring_enabled &&
+    (expiredScheduleAt || schedule.value.run_in_progress) &&
     Date.now() - lastScheduleRefreshAt >= 5000
   ) {
     lastScheduleRefreshAt = Date.now();
@@ -120,8 +160,8 @@ function queryString() {
     page: String(pagination.value.page),
     page_size: String(pagination.value.page_size),
   });
-  if (filters.from) query.set("from", new Date(filters.from).toISOString());
-  if (filters.to) query.set("to", new Date(filters.to).toISOString());
+  if (filters.from) query.set("from", toIso(filters.from));
+  if (filters.to) query.set("to", toIso(filters.to));
   if (filters.source) query.set("source", filters.source);
   if (filters.query_mode) query.set("query_mode", filters.query_mode);
   return query.toString();
@@ -292,6 +332,11 @@ onUnmounted(() => window.clearInterval(clockTimer));
           <div class="stat-desc">
             {{ dateTime(schedule.next_local_check_at) }} ·
             全局探测全部启用参与者
+          </div>
+          <div class="stat-desc">
+            {{ samplingOutcomeLabel }} · 上次：{{
+              dateTime(schedule.last_local_check_at)
+            }}
           </div>
         </div>
         <AppIcon name="clock" class="size-7 shrink-0 opacity-40" />

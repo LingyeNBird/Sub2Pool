@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import PaginationControls from "@/components/common/PaginationControls.vue";
+import { useDateTime, useZonedDateTimeIso } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
 import type {
   NotificationListData,
@@ -13,6 +14,8 @@ import type {
 
 type FilterKind = "time" | "type" | "participant" | "subject" | "status";
 
+const dateTime = useDateTime();
+const toIso = useZonedDateTimeIso();
 const rows = ref<NotificationRecord[]>([]);
 const summary = reactive({ total: 0, sent_count: 0, failed_count: 0 });
 const pagination = ref<PaginationMeta>({
@@ -42,17 +45,13 @@ const message = ref("");
 const selected = ref<NotificationRecord | null>(null);
 const dialog = ref<HTMLDialogElement | null>(null);
 
-function dateTime(value: string | null) {
-  return value ? new Date(value).toLocaleString("zh-CN") : "—";
-}
-
 function queryString() {
   const query = new URLSearchParams({
     page: String(pagination.value.page),
     page_size: String(pagination.value.page_size),
   });
-  if (filters.from) query.set("from", new Date(filters.from).toISOString());
-  if (filters.to) query.set("to", new Date(filters.to).toISOString());
+  if (filters.from) query.set("from", toIso(filters.from));
+  if (filters.to) query.set("to", toIso(filters.to));
   if (filters.event_type) query.set("event_type", filters.event_type);
   if (filters.participant) query.set("participant", filters.participant);
   if (filters.subject) query.set("subject", filters.subject);

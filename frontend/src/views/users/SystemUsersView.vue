@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api, jsonBody } from "@/services/api";
 import type { Participant, SystemUser } from "@/types";
 
@@ -12,6 +13,7 @@ type FieldErrorKey =
   | "participant_ids"
   | "non_field_errors";
 
+const dateTime = useDateTime("从未登录");
 const users = ref<SystemUser[]>([]);
 const participants = ref<Participant[]>([]);
 const loading = ref(true);
@@ -41,10 +43,6 @@ const activeCount = computed(
 const bindingCount = computed(() =>
   users.value.reduce((total, item) => total + item.participant_ids.length, 0),
 );
-
-function dateTime(value: string | null) {
-  return value ? new Date(value).toLocaleString("zh-CN") : "从未登录";
-}
 
 function clearFormErrors() {
   formMessage.value = "";

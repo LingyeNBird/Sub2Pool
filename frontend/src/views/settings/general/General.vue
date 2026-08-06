@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import { useAuthStore } from "@/stores/auth";
 import {
   ApiError,
   api,
@@ -12,6 +13,7 @@ import {
 } from "@/services/api";
 import type { AppSettingsData, OpenAIAccountOption } from "@/types";
 
+const auth = useAuthStore();
 const settings = ref<AppSettingsData | null>(null);
 const loading = ref(true);
 const saving = ref("");
@@ -117,6 +119,7 @@ async function saveSection(
     settings.value.smtp_password_configured = updated.smtp_password_configured;
     settings.value.resend_api_key_configured =
       updated.resend_api_key_configured;
+    if (fields.includes("timezone")) auth.setTimezone(updated.timezone);
     if (section === "connection") adminToken.value = "";
     if (section === "email") {
       smtpPassword.value = "";
@@ -437,8 +440,12 @@ onMounted(load);
             />
           </fieldset>
           <fieldset class="fieldset">
-            <label class="label">统计时区</label>
-            <input v-model="settings.timezone" class="input w-full" />
+            <label class="label">显示与统计时区</label>
+            <input
+              v-model="settings.timezone"
+              class="input w-full"
+              placeholder="Asia/Shanghai"
+            />
           </fieldset>
         </div>
         <label class="label justify-between"

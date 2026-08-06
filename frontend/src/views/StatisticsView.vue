@@ -4,9 +4,11 @@ import { computed, onMounted, ref, watch } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import CalculationBasisHeader from "@/components/common/CalculationBasisHeader.vue";
 import CalculationBasisTimeline from "@/components/common/CalculationBasisTimeline.vue";
+import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
 import type { StatisticsData } from "@/types";
 
+const dateTime = useDateTime();
 const data = ref<StatisticsData | null>(null);
 const loading = ref(true);
 const message = ref("");
@@ -38,10 +40,6 @@ function currency(value: number | null | undefined) {
 
 function percent(value: number | null | undefined) {
   return value == null ? "—" : `${value.toFixed(2)}%`;
-}
-
-function dateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString("zh-CN") : "—";
 }
 
 async function load() {

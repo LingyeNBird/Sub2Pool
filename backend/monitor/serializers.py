@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 
@@ -322,6 +323,15 @@ class AppSettingsSerializer(serializers.ModelSerializer):
 
     def get_resend_api_key_configured(self, obj) -> bool:
         return bool(obj.resend_api_key_encrypted)
+
+    def validate_timezone(self, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise serializers.ValidationError(
+                "请输入有效的 IANA 时区，例如 Asia/Shanghai"
+            ) from exc
+        return value
 
     def validate(self, attrs):
         instance = self.instance

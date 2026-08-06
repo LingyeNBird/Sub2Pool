@@ -2,9 +2,11 @@
 import { computed, onMounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api, jsonBody } from "@/services/api";
 import type { Participant, Sub2APIUserOption } from "@/types";
 
+const dateTime = useDateTime();
 const participants = ref<Participant[]>([]);
 const sub2apiUsers = ref<Sub2APIUserOption[]>([]);
 const loading = ref(true);
@@ -76,10 +78,6 @@ function allocationSegmentWidth(participant: Participant, value: number) {
   const total = Math.max(used, 0) + Math.max(remaining, 0);
   if (total === 0) return 0;
   return (Math.max(value, 0) / total) * 100;
-}
-
-function dateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString("zh-CN") : "—";
 }
 
 function userRoleLabel(role: string) {

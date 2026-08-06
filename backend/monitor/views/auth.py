@@ -17,6 +17,7 @@ from .base import AuthenticatedAPIView, PublicAPIView, error, ok
 from ..ip_blocking import blocked_webrtc_addresses, empty_block_response
 from ..login_audit import record_login_attempt, request_addresses
 from ..serializers import LoginSerializer, PasswordChangeSerializer
+from ..models import AppSettings
 
 
 def _cookie_name() -> str:
@@ -156,6 +157,7 @@ class LoginView(PublicAPIView):
                 "username": user.get_username(),
                 "is_staff": user.is_staff,
                 "access": access,
+                "timezone": AppSettings.load().timezone,
             }
         )
         _set_refresh_cookie(response, refresh)
@@ -198,6 +200,7 @@ class MeView(AuthenticatedAPIView):
             {
                 "username": request.user.get_username(),
                 "is_staff": request.user.is_staff,
+                "timezone": AppSettings.load().timezone,
             }
         )
 

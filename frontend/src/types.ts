@@ -120,6 +120,10 @@ export interface MonitorSchedule {
   monitoring_enabled: boolean;
   interval_seconds: number;
   next_local_check_at: string | null;
+  last_local_check_at: string | null;
+  latest_observation_at: string | null;
+  last_error: string;
+  run_in_progress: boolean;
   server_time: string;
 }
 

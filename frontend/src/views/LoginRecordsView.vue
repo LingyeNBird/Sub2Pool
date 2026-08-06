@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import PaginationControls from "@/components/common/PaginationControls.vue";
+import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api, jsonBody } from "@/services/api";
 import type {
   BlockedIPAddress,
@@ -20,6 +21,7 @@ interface PendingBlockAction {
   blockId: number | null;
 }
 
+const dateTime = useDateTime();
 const data = ref<LoginEventData | null>(null);
 const blockedAddresses = ref<BlockedIPAddress[]>([]);
 const loading = ref(true);
@@ -34,10 +36,6 @@ const pagination = ref<PaginationMeta>({
   total: 0,
   total_pages: 1,
 });
-
-function dateTime(value: string) {
-  return new Date(value).toLocaleString("zh-CN");
-}
 
 function existingBlock(address: string, sourceType: BlockedIPSource) {
   return blockedAddresses.value.find(
