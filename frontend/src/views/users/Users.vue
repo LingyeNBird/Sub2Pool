@@ -385,7 +385,7 @@ onMounted(() => {
           @pointercancel="pressedCardId = null"
           @pointerleave="pressedCardId = null"
         >
-          <div class="w-full" :class="{ 'hover-3d': auth.isStaff }">
+          <div class="hover-3d w-full">
             <article class="card w-full bg-base-200 shadow-xs">
               <div class="card-body gap-4">
                 <div>
@@ -536,16 +536,14 @@ onMounted(() => {
                 </div>
               </div>
             </article>
-            <template v-if="auth.isStaff">
-              <div></div>
-              <div></div>
-              <div></div>
-              <div></div>
-              <div></div>
-              <div></div>
-              <div></div>
-              <div></div>
-            </template>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
           </div>
         </div>
       </div>
