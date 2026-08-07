@@ -494,7 +494,7 @@ onMounted(load);
           <fieldset class="fieldset min-w-0">
             <SettingLabel
               label="无样本时美元 / 1%"
-              help="尚无有效校准样本时使用的兜底估值。它参与首次进度触发成本和余额建议；产生有效样本后由历史样本估值替代。"
+              help="该 OpenAI 账号从未形成有效历史样本时使用的兜底估值，参与进度触发成本和余额建议。正常进入新周期时会沿用上一周期最终有效估值，而不是重新使用此值。"
             />
             <input
               v-model.number="settings.initial_usd_per_percent"

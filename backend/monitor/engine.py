@@ -174,7 +174,7 @@ def _effective_rate(
     cycle: QuotaCycle,
     current_rate: Decimal | None,
     current_weight: Decimal | None,
-) -> Decimal:
+) -> tuple[Decimal, str]:
     # 上游百分比快照通常只保留整数。若直接用相邻两次观测的增量相除，
     # 百分比从 16% 跳到 17% 前累积在“16% 平台”里的消费会被漏掉，
     # 一个很短的尾段就可能被错误当成完整 1% 的成本。
@@ -199,9 +199,30 @@ def _effective_rate(
     ]
     if current_rate is not None and current_weight is not None:
         samples.append((current_rate, current_weight))
-    if not samples:
-        return config.initial_usd_per_percent
-    return _weighted_percentile(samples, config.conservative_percentile)
+    if samples:
+        return (
+            _weighted_percentile(samples, config.conservative_percentile),
+            "current_cycle_samples",
+        )
+
+    # 正常换周不代表账号容量失效。新周期产生自己的有效样本前，沿用该
+    # OpenAI 账号最近一次由真实样本形成的保守估值；只有一个从未测算过
+    # 的账号才使用“无样本时美元 / 1%”。
+    previous_rate = (
+        Observation.objects.filter(
+            cycle__account_id=cycle.account_id,
+            valid_sample=True,
+            sample_usd_per_percent__isnull=False,
+            raw_window__rate_method=RATE_METHOD,
+        )
+        .exclude(cycle=cycle)
+        .order_by("-observed_at", "-id")
+        .values_list("effective_usd_per_percent", flat=True)
+        .first()
+    )
+    if previous_rate is not None:
+        return Decimal(str(previous_rate)), "previous_cycle_history"
+    return config.initial_usd_per_percent, "initial_fallback"
 
 
 def _is_limit_exhausted(config: AppSettings, row: LocalParticipantData, previous: ParticipantSnapshot | None) -> bool:
@@ -257,12 +278,14 @@ def _collect_observation(
         else:
             note = "成本没有正向变化，本次样本无效"
 
-    effective_rate = _effective_rate(
+    effective_rate, rate_source = _effective_rate(
         config,
         cycle,
         sample_rate,
         used_percent if valid_sample else None,
     )
+    if rate_source == "previous_cycle_history":
+        note = "本周期尚无有效样本，暂沿用上一周期有效估值"
     previous_rate = previous.effective_usd_per_percent if previous else None
 
     previous_snapshots: dict[int, ParticipantSnapshot] = {}
@@ -305,6 +328,7 @@ def _collect_observation(
                 "rate_method": RATE_METHOD,
                 "conservative_percentile": config.conservative_percentile,
                 "rate_history_samples": config.rate_history_samples,
+                "rate_source": rate_source,
             },
         )
 

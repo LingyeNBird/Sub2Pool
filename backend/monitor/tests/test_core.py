@@ -728,6 +728,7 @@ def test_manual_upstream_refresh_starts_new_cycle_without_negative_ledger(
 ):
     config = AppSettings.load()
     config.openai_account_id = 7
+    config.initial_usd_per_percent = Decimal("16")
     config.save()
     owner = Participant.objects.create(
         name="车主",
@@ -748,15 +749,18 @@ def test_manual_upstream_refresh_starts_new_cycle_without_negative_ledger(
         source="manual",
         observed_at=now - timedelta(hours=1),
         upstream_used_percent=Decimal("10"),
-        selected_total_cost=Decimal("100"),
-        total_standard_cost=Decimal("100"),
-        total_actual_cost=Decimal("100"),
-        effective_usd_per_percent=Decimal("10"),
+        selected_total_cost=Decimal("200"),
+        total_standard_cost=Decimal("200"),
+        total_actual_cost=Decimal("200"),
+        sample_usd_per_percent=Decimal("20"),
+        effective_usd_per_percent=Decimal("20"),
+        valid_sample=True,
+        raw_window={"rate_method": "cumulative_cycle_v1"},
     )
     ParticipantSnapshot.objects.create(
         observation=previous,
         participant=owner,
-        selected_cost=Decimal("100"),
+        selected_cost=Decimal("200"),
         charged_delta_percent=Decimal("10"),
         charged_cycle_percent=Decimal("10"),
         remaining_share_percent=Decimal("40"),
@@ -797,11 +801,17 @@ def test_manual_upstream_refresh_starts_new_cycle_without_negative_ledger(
     assert old_cycle.active is False
     current = QuotaCycle.objects.get(active=True)
     assert current.id != old_cycle.id
+    current_observation = Observation.objects.get(cycle=current)
+    assert current_observation.sample_usd_per_percent is None
+    assert current_observation.effective_usd_per_percent == Decimal("20")
+    assert current_observation.raw_window["rate_source"] == "previous_cycle_history"
+    assert current_observation.sample_note == "本周期尚无有效样本，暂沿用上一周期有效估值"
     snapshot = ParticipantSnapshot.objects.get(observation__cycle=current)
     assert snapshot.charged_delta_percent == Decimal("0")
     assert snapshot.charged_cycle_percent == Decimal("0")
     assert snapshot.remaining_share_percent == Decimal("50")
     assert snapshot.delta_cost is None
+    assert snapshot.recommended_balance_usd == Decimal("950.00")
 
 
 @pytest.mark.django_db
