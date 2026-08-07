@@ -821,6 +821,12 @@ def test_regular_user_only_reads_bound_participant_statistics():
         sub2api_username="rider-b",
         share_percent=50,
     )
+    third = Participant.objects.create(
+        name="丙",
+        sub2api_user_id=103,
+        sub2api_username="unbound-rider",
+        share_percent=0,
+    )
     client = Client()
     admin_headers, _ = jwt_login(client)
 
@@ -881,9 +887,51 @@ def test_regular_user_only_reads_bound_participant_statistics():
         item["participant_id"]
         for item in statistics.json()["data"]["participant_series"]
     ] == [first.id, second.id]
+    visible_participants = regular_client.get(
+        "/api/participants",
+        **regular_headers,
+    )
+    assert visible_participants.status_code == 200
+    assert [item["id"] for item in visible_participants.json()["data"]] == [
+        first.id,
+        second.id,
+    ]
+    assert third.id not in {
+        item["id"] for item in visible_participants.json()["data"]
+    }
+    assert (
+        regular_client.post(
+            "/api/participants",
+            data=json.dumps(
+                {
+                    "name": "越权创建",
+                    "sub2api_user_id": 104,
+                    "share_percent": 0,
+                }
+            ),
+            content_type="application/json",
+            **regular_headers,
+        ).status_code
+        == 403
+    )
+    assert (
+        regular_client.put(
+            f"/api/participants/{first.id}",
+            data=json.dumps({"name": "越权修改"}),
+            content_type="application/json",
+            **regular_headers,
+        ).status_code
+        == 403
+    )
+    assert (
+        regular_client.delete(
+            f"/api/participants/{first.id}",
+            **regular_headers,
+        ).status_code
+        == 403
+    )
     for admin_path in (
         "/api/dashboard",
-        "/api/participants",
         "/api/login-events",
         "/api/settings",
         "/api/system-users",
@@ -909,6 +957,13 @@ def test_regular_user_only_reads_bound_participant_statistics():
         item["participant_id"]
         for item in filtered.json()["data"]["participant_series"]
     ] == [second.id]
+    filtered_participants = regular_client.get(
+        "/api/participants",
+        **regular_headers,
+    )
+    assert [item["id"] for item in filtered_participants.json()["data"]] == [
+        second.id
+    ]
 
     deleted = client.delete(
         f"/api/system-users/{user_id}",

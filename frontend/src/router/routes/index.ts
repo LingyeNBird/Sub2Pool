@@ -11,7 +11,7 @@ export const appRoutes: RouteRecordRaw[] = [
     path: "participants",
     name: "participants",
     component: () => import("@/views/users/Users.vue"),
-    meta: { title: "参与者", adminOnly: true },
+    meta: { title: "参与者" },
   },
   {
     path: "system-users",

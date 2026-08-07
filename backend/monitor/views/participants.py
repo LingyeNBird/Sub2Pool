@@ -1,8 +1,9 @@
 """参与者资源 API。"""
 
 from rest_framework import status
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 
-from .base import AdminAPIView, error, ok
+from .base import AdminAPIView, AuthenticatedAPIView, error, ok
 from .presenters import participant_data
 from ..models import AppSettings, Participant
 from ..serializers import ParticipantWriteSerializer
@@ -48,9 +49,19 @@ class Sub2APIUserListView(AdminAPIView):
             return error(str(exc), status.HTTP_502_BAD_GATEWAY)
         return ok(users)
 
-class ParticipantListView(AdminAPIView):
-    def get(self, _request):
-        return ok([participant_data(item) for item in Participant.objects.all()])
+
+class ParticipantListView(AuthenticatedAPIView):
+    def get_permissions(self):
+        permission_classes = (
+            [IsAuthenticated] if self.request.method == "GET" else [IsAdminUser]
+        )
+        return [permission() for permission in permission_classes]
+
+    def get(self, request):
+        participants = Participant.objects.all()
+        if not request.user.is_staff:
+            participants = participants.filter(authorized_users=request.user)
+        return ok([participant_data(item) for item in participants])
 
     def post(self, request):
         serializer = ParticipantWriteSerializer(data=request.data)

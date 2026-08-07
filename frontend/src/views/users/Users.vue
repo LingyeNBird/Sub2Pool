@@ -4,8 +4,10 @@ import { computed, onMounted, reactive, ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api, jsonBody } from "@/services/api";
+import { useAuthStore } from "@/stores/auth";
 import type { Participant, Sub2APIUserOption } from "@/types";
 
+const auth = useAuthStore();
 const dateTime = useDateTime();
 const participants = ref<Participant[]>([]);
 const sub2apiUsers = ref<Sub2APIUserOption[]>([]);
@@ -22,8 +24,10 @@ type ParticipantViewMode = "cards" | "table";
 
 const viewModeStorageKey = "sub2pool:participant-view";
 const viewMode = ref<ParticipantViewMode>("cards");
+const showCards = computed(() => !auth.isStaff || viewMode.value === "cards");
 
 function setViewMode(mode: ParticipantViewMode) {
+  if (!auth.isStaff) return;
   viewMode.value = mode;
   localStorage.setItem(viewModeStorageKey, mode);
 }
@@ -151,6 +155,7 @@ function applySelectedUser() {
 }
 
 function openNew() {
+  if (!auth.isStaff) return;
   userListMessage.value = "";
   userListError.value = "";
   editingId.value = null;
@@ -170,6 +175,7 @@ function openNew() {
 }
 
 function openEdit(participant: Participant) {
+  if (!auth.isStaff) return;
   userListMessage.value = "";
   userListError.value = "";
   editingId.value = participant.id;
@@ -236,12 +242,14 @@ async function removeEditingParticipant() {
 }
 
 onMounted(() => {
-  const storedMode = localStorage.getItem(viewModeStorageKey);
-  if (storedMode === "cards" || storedMode === "table") {
-    viewMode.value = storedMode;
+  if (auth.isStaff) {
+    const storedMode = localStorage.getItem(viewModeStorageKey);
+    if (storedMode === "cards" || storedMode === "table") {
+      viewMode.value = storedMode;
+    }
+    void loadSub2APIUsers(false);
   }
   void load();
-  void loadSub2APIUsers(false);
 });
 </script>
 
@@ -250,12 +258,16 @@ onMounted(() => {
     <div class="grow">
       <div class="breadcrumbs text-sm">
         <ul>
-          <li><RouterLink to="/">额度管理</RouterLink></li>
+          <li>
+            <RouterLink :to="auth.isStaff ? '/' : '/statistics'">
+              {{ auth.isStaff ? "额度管理" : "额度统计" }}
+            </RouterLink>
+          </li>
           <li><h1>参与者</h1></li>
         </ul>
       </div>
     </div>
-    <button class="btn btn-primary btn-sm" @click="openNew">
+    <button v-if="auth.isStaff" class="btn btn-primary btn-sm" @click="openNew">
       <AppIcon name="plus" class="size-4" />
       添加参与者
     </button>
@@ -267,6 +279,7 @@ onMounted(() => {
   </div>
 
   <section
+    v-if="auth.isStaff"
     class="stats col-span-12 stats-vertical bg-base-200 shadow-xs xl:stats-horizontal"
   >
     <div class="stat">
@@ -312,7 +325,7 @@ onMounted(() => {
       <h2 class="flex items-center gap-2 text-lg font-semibold">
         <AppIcon name="user-group" class="size-5" />权益与用量
       </h2>
-      <div class="join">
+      <div v-if="auth.isStaff" class="join">
         <button
           type="button"
           class="btn join-item btn-sm"
@@ -341,7 +354,7 @@ onMounted(() => {
     </div>
 
     <div
-      v-else-if="participants.length && viewMode === 'cards'"
+      v-else-if="participants.length && showCards"
       class="grid gap-3 xl:grid-cols-2"
     >
       <div
@@ -350,11 +363,20 @@ onMounted(() => {
         class="relative min-w-0 p-3"
       >
         <div
-          class="w-full cursor-pointer transition-transform duration-150 select-none"
-          :class="{ 'scale-95': pressedCardId === participant.id }"
-          role="button"
-          tabindex="0"
-          :aria-label="`编辑参与者 ${participant.name}`"
+          class="w-full"
+          :class="[
+            auth.isStaff
+              ? 'cursor-pointer transition-transform duration-150 select-none'
+              : 'cursor-default',
+            {
+              'scale-95': auth.isStaff && pressedCardId === participant.id,
+            },
+          ]"
+          :role="auth.isStaff ? 'button' : undefined"
+          :tabindex="auth.isStaff ? 0 : undefined"
+          :aria-label="
+            auth.isStaff ? `编辑参与者 ${participant.name}` : undefined
+          "
           @click="openEdit(participant)"
           @keydown.enter.prevent="openEdit(participant)"
           @keydown.space.prevent="openEdit(participant)"
@@ -363,7 +385,7 @@ onMounted(() => {
           @pointercancel="pressedCardId = null"
           @pointerleave="pressedCardId = null"
         >
-          <div class="hover-3d w-full">
+          <div class="w-full" :class="{ 'hover-3d': auth.isStaff }">
             <article class="card w-full bg-base-200 shadow-xs">
               <div class="card-body gap-4">
                 <div>
@@ -514,21 +536,23 @@ onMounted(() => {
                 </div>
               </div>
             </article>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
-            <div></div>
+            <template v-if="auth.isStaff">
+              <div></div>
+              <div></div>
+              <div></div>
+              <div></div>
+              <div></div>
+              <div></div>
+              <div></div>
+              <div></div>
+            </template>
           </div>
         </div>
       </div>
     </div>
 
     <div
-      v-else-if="participants.length"
+      v-else-if="auth.isStaff && participants.length"
       class="overflow-x-auto rounded-box bg-base-200 shadow-xs"
     >
       <table class="table">
@@ -604,7 +628,7 @@ onMounted(() => {
     </div>
   </section>
 
-  <dialog ref="dialog" class="modal">
+  <dialog v-if="auth.isStaff" ref="dialog" class="modal">
     <div class="modal-box">
       <h2 class="text-lg font-bold">
         {{ editingId ? "编辑参与者" : "添加参与者" }}

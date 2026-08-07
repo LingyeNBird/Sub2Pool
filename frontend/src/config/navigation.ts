@@ -22,7 +22,6 @@ export const navigation: NavigationGroup[] = [
     label: "参与者",
     icon: "user-group",
     to: "/participants",
-    adminOnly: true,
   },
   {
     label: "系统用户",
