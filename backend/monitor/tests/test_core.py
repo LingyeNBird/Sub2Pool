@@ -346,6 +346,43 @@ def test_recommendation_balance_write_uses_dedicated_sub2api_endpoint():
 
 
 @pytest.mark.django_db
+def test_dashboard_only_lists_participants_that_need_manual_adjustment():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    actionable = Participant.objects.create(
+        name="需要调整",
+        sub2api_user_id=51,
+        share_percent=50,
+    )
+    settled = Participant.objects.create(
+        name="当前无需调整",
+        sub2api_user_id=52,
+        share_percent=40,
+    )
+    Participant.objects.create(
+        name="等待测算",
+        sub2api_user_id=53,
+        share_percent=10,
+    )
+    create_recommendation_snapshot(actionable)
+    settled_snapshot = create_recommendation_snapshot(settled)
+    settled_snapshot.needs_manual_update = False
+    settled_snapshot.save(update_fields=["needs_manual_update"])
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    dashboard = client.get("/api/dashboard", **headers)
+
+    assert dashboard.status_code == 200
+    assert [
+        item["id"] for item in dashboard.json()["data"]["participants"]
+    ] == [actionable.id]
+
+
+@pytest.mark.django_db
 def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
     monkeypatch,
 ):
