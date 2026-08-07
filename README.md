@@ -173,3 +173,7 @@ uv run --with pillow python scripts/prepare_icon.py 原图.png frontend/public/f
 ## 前端来源
 
 本项目的前端基于 daisyUI 的 [HTML Dashboard Template](https://daisyui.com/store/html-dashboard) 开发。
+
+## 友链
+
+- [LINUX DO](https://linux.do/)
