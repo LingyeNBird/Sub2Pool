@@ -10,6 +10,7 @@ from .base import AdminAPIView, error, ok
 from .presenters import bounded_query_int, iso, snapshot_data
 from ..login_audit import request_addresses
 from ..models import (
+    AppSettings,
     BlockedIPAddress,
     LoginEvent,
     NotificationEvent,
@@ -20,6 +21,7 @@ from ..serializers import BlockedIPAddressSerializer
 from ..replay import (
     clear_manual_start,
     exclude_observation,
+    rebuild_current_interval,
     restore_observation,
     set_manual_start,
 )
@@ -189,6 +191,25 @@ class ObservationListView(AdminAPIView):
                     "passive_count": passive_count,
                     "excluded_count": excluded_count,
                 },
+            }
+        )
+
+
+class ObservationRebuildView(AdminAPIView):
+    """保留原始采样与人工标记，仅重建当前区间的全部派生结论。"""
+
+    def post(self, _request):
+        config = AppSettings.load()
+        if not config.openai_account_id:
+            return error("尚未配置 OpenAI 上游账号", 400)
+        replay, replay_from = rebuild_current_interval(
+            config.openai_account_id,
+            config,
+        )
+        return ok(
+            {
+                **replay.as_dict(),
+                "replay_started_at": iso(replay_from),
             }
         )
 

@@ -129,6 +129,14 @@ export interface Observation {
   manual_start_set_at: string | null;
 }
 
+export interface ObservationRebuildResult {
+  rebuilt_observations: number;
+  automatic_exclusions: number;
+  inferred_intervals: number;
+  latest_observation_id: number | null;
+  replay_started_at: string | null;
+}
+
 export interface MonitorSchedule {
   monitoring_enabled: boolean;
   interval_seconds: number;

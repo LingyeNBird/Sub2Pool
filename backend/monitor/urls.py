@@ -26,6 +26,7 @@ from .views.records import (
     LoginEventListView,
     NotificationListView,
     ObservationListView,
+    ObservationRebuildView,
     ObservationManualStartView,
     ObservationExclusionView,
     ObservationRestoreView,
@@ -65,6 +66,7 @@ urlpatterns = [
     path("system-users", SystemUserListView.as_view()),
     path("system-users/<int:user_id>", SystemUserDetailView.as_view()),
     path("observations", ObservationListView.as_view()),
+    path("observations/rebuild", ObservationRebuildView.as_view()),
     path(
         "observations/<int:observation_id>/exclude",
         ObservationExclusionView.as_view(),

@@ -7,6 +7,7 @@ import { ApiError, api } from "@/services/api";
 import type {
   MonitorSchedule,
   Observation,
+  ObservationRebuildResult,
   ObservationListData,
   PaginationMeta,
 } from "@/types";
@@ -51,6 +52,8 @@ const message = ref("");
 const excluding = ref(false);
 const restoringId = ref<number | null>(null);
 const manualStartId = ref<number | null>(null);
+const rebuilding = ref(false);
+const success = ref("");
 
 const filterDialog = ref<InstanceType<typeof ObservationFilterDialog> | null>(
   null,
@@ -181,6 +184,30 @@ async function clearManualStart(row: Observation) {
   }
 }
 
+async function rebuildCalculations() {
+  if (
+    !window.confirm(
+      "将保留全部原始采样、排除记录和管理员起点，从当前区间起点重新计算成本增量、百分比增量、折算率与参与者归属。是否继续？",
+    )
+  ) {
+    return;
+  }
+  rebuilding.value = true;
+  message.value = "";
+  success.value = "";
+  try {
+    const result = await api<ObservationRebuildResult>("observations/rebuild", {
+      method: "POST",
+    });
+    await load();
+    success.value = `计算重建完成，共重算 ${result.rebuilt_observations} 条观测记录。`;
+  } catch (error) {
+    message.value = error instanceof ApiError ? error.message : "重建计算失败";
+  } finally {
+    rebuilding.value = false;
+  }
+}
+
 function openFilter(kind: ObservationFilterKind) {
   filterDialog.value?.open(kind, filters);
 }
@@ -221,6 +248,11 @@ onMounted(load);
     <span>{{ message }}</span>
   </div>
 
+  <div v-if="success" class="col-span-12 alert alert-success">
+    <AppIcon name="check-circle" class="size-5" />
+    <span>{{ success }}</span>
+  </div>
+
   <ObservationStats
     :summary="summary"
     :schedule="schedule"
@@ -235,6 +267,7 @@ onMounted(load);
     :filters="filters"
     :restoring-id="restoringId"
     :manual-start-id="manualStartId"
+    :rebuilding="rebuilding"
     @filter="openFilter"
     @detail="detailDialog?.open($event)"
     @cost-detail="costDetailDialog?.open($event)"
@@ -242,6 +275,7 @@ onMounted(load);
     @restore="restore"
     @manual-start="manualStartDialog?.open($event)"
     @clear-manual-start="clearManualStart"
+    @rebuild="rebuildCalculations"
     @page-change="changePage"
   />
 

@@ -13,6 +13,7 @@ defineProps<{
   filters: ObservationFilters;
   restoringId: number | null;
   manualStartId: number | null;
+  rebuilding: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   manualStart: [row: Observation];
   clearManualStart: [row: Observation];
   pageChange: [page: number];
+  rebuild: [];
 }>();
 
 const dateTime = useDateTime();
@@ -43,9 +45,24 @@ function sourceLabel(value: string) {
 <template>
   <section class="card col-span-12 bg-base-200 shadow-xs">
     <div class="card-body gap-4">
-      <h2 class="card-title">
-        <AppIcon name="document-magnifying-glass" class="size-5" />校准历史
-      </h2>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="card-title">
+          <AppIcon name="document-magnifying-glass" class="size-5" />校准历史
+        </h2>
+        <button
+          type="button"
+          class="btn btn-sm"
+          :disabled="rebuilding || loading"
+          @click="emit('rebuild')"
+        >
+          <span
+            v-if="rebuilding"
+            class="loading loading-xs loading-spinner"
+          ></span>
+          <AppIcon v-else name="arrow-path" class="size-4" />
+          {{ rebuilding ? "重建中" : "重建计算" }}
+        </button>
+      </div>
       <div v-if="loading" class="flex justify-center py-10">
         <span class="loading loading-lg loading-spinner"></span>
       </div>
@@ -174,11 +191,15 @@ function sourceLabel(value: string) {
                     <template v-if="row.excluded">
                       <button
                         v-if="row.exclusion_source === 'automatic'"
-                        class="btn btn-ghost text-primary btn-xs"
-                        :disabled="manualStartId === row.id"
-                        @click="emit('manualStart', row)"
+                        class="btn btn-ghost text-success btn-xs"
+                        :disabled="restoringId === row.id"
+                        @click="emit('restore', row)"
                       >
-                        设为起点
+                        <span
+                          v-if="restoringId === row.id"
+                          class="loading loading-xs loading-spinner"
+                        ></span>
+                        恢复为起点
                       </button>
                       <button
                         v-else
@@ -190,7 +211,7 @@ function sourceLabel(value: string) {
                           v-if="restoringId === row.id"
                           class="loading loading-xs loading-spinner"
                         ></span>
-                        恢复
+                        取消排除
                       </button>
                     </template>
                     <template v-else>

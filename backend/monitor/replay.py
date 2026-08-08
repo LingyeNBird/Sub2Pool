@@ -1041,6 +1041,34 @@ def rebuild_observation_suffix(
     )
 
 
+def rebuild_current_interval(
+    account_id: int,
+    config: AppSettings | None = None,
+) -> tuple[ReplayResult, datetime | None]:
+    """只重建当前归属区间的派生结果，并保留全部原始采样事实。"""
+
+    latest = (
+        Observation.objects.filter(account_id=account_id)
+        .order_by("-observed_at", "-id")
+        .first()
+    )
+    if latest is None:
+        return rebuild_account(account_id, config), None
+
+    replay_from = _replay_anchor(
+        latest,
+        merge_previous=latest.is_manual_start,
+    )
+    return (
+        rebuild_account(
+            account_id,
+            config,
+            replay_from=replay_from,
+        ),
+        replay_from,
+    )
+
+
 @transaction.atomic
 def exclude_observation(
     observation: Observation,

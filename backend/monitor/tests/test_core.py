@@ -1314,6 +1314,115 @@ def test_exclusion_restore_and_manual_start_cancellation_replay_affected_suffix(
     assert false_reset.exclusion_source == "automatic"
     assert false_reset.excluded_at is not None
 
+
+@pytest.mark.django_db
+def test_rebuild_api_recomputes_current_interval_without_changing_raw_samples():
+    """管理员可只重建派生字段；错误点排除后，后续增量重新衔接上一有效点。"""
+
+    get_user_model().objects.create_superuser(
+        username="rebuild-owner",
+        password="very-strong-password",
+        email="rebuild-owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save()
+    participant = Participant.objects.create(
+        name="车主",
+        sub2api_user_id=1,
+        share_percent=100,
+        is_owner=True,
+    )
+    now = timezone.now()
+    reset_at = now + timedelta(days=3)
+
+    def raw_observation(minutes_ago, percent_value, cost_value):
+        observation = Observation.objects.create(
+            account_id=7,
+            source="manual",
+            observed_at=now - timedelta(minutes=minutes_ago),
+            window_seconds=604800,
+            upstream_resets_at=reset_at,
+            upstream_used_percent=percent_value,
+            raw_selected_total_cost=cost_value,
+            selected_total_cost=cost_value,
+            total_standard_cost=cost_value,
+            total_actual_cost=cost_value,
+            effective_usd_per_percent=Decimal("20"),
+            raw_window={"rate_method": RATE_METHOD},
+        )
+        ParticipantSnapshot.objects.create(
+            observation=observation,
+            participant=participant,
+            raw_selected_cost=cost_value,
+            selected_cost=cost_value,
+            current_balance_usd=Decimal("1000"),
+            remaining_share_percent=Decimal("100"),
+        )
+        return observation
+
+    first = raw_observation(60, Decimal("47"), Decimal("940"))
+    false_reset = raw_observation(40, Decimal("18"), Decimal("960"))
+    recovered = raw_observation(20, Decimal("49"), Decimal("980"))
+    rebuild_account(7, config)
+    exclude_observation(false_reset, "异常的 18% 快照")
+
+    recovered.refresh_from_db()
+    assert recovered.delta_percent == Decimal("2")
+    assert recovered.delta_cost == Decimal("40")
+    raw_totals_before = list(
+        Observation.objects.order_by("observed_at", "id").values_list(
+            "raw_selected_total_cost",
+            flat=True,
+        )
+    )
+
+    recovered.selected_total_cost = Decimal("180")
+    recovered.delta_percent = Decimal("-29")
+    recovered.delta_cost = Decimal("-800")
+    recovered.sample_usd_per_percent = Decimal("0.2")
+    recovered.save(
+        update_fields=[
+            "selected_total_cost",
+            "delta_percent",
+            "delta_cost",
+            "sample_usd_per_percent",
+        ]
+    )
+    recovered_snapshot = ParticipantSnapshot.objects.get(
+        observation=recovered,
+        participant=participant,
+    )
+    recovered_snapshot.selected_cost = Decimal("180")
+    recovered_snapshot.delta_cost = Decimal("-800")
+    recovered_snapshot.save(update_fields=["selected_cost", "delta_cost"])
+
+    client = Client()
+    headers, _ = jwt_login(client, username="rebuild-owner")
+    response = client.post("/api/observations/rebuild", **headers)
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["rebuilt_observations"] == 2
+    assert payload["replay_started_at"] is not None
+    assert list(
+        Observation.objects.order_by("observed_at", "id").values_list(
+            "raw_selected_total_cost",
+            flat=True,
+        )
+    ) == raw_totals_before
+    first.refresh_from_db()
+    false_reset.refresh_from_db()
+    recovered.refresh_from_db()
+    recovered_snapshot.refresh_from_db()
+    assert first.selected_total_cost == Decimal("940")
+    assert false_reset.exclusion_source == "manual"
+    assert recovered.selected_total_cost == Decimal("980")
+    assert recovered.delta_percent == Decimal("2")
+    assert recovered.delta_cost == Decimal("40")
+    assert recovered_snapshot.selected_cost == Decimal("980")
+    assert recovered_snapshot.delta_cost == Decimal("40")
+
 @pytest.mark.django_db
 def test_api_requires_admin_jwt_and_accepts_admin_login():
     user = get_user_model().objects.create_superuser(
