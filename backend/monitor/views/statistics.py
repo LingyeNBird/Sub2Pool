@@ -14,7 +14,6 @@ from ..models import (
     Observation,
     Participant,
     ParticipantUsageSample,
-    QuotaCycle,
 )
 
 
@@ -22,8 +21,7 @@ def _money(value: Decimal) -> float:
     return float(value.quantize(Decimal("0.01")))
 
 
-RATE_METHOD = "cumulative_cycle_v1"
-LOGICAL_CYCLE_RESET_TOLERANCE = timedelta(minutes=5)
+RATE_METHOD = "full_replay_v1"
 
 
 def _capacity_summary(
@@ -52,29 +50,23 @@ def _capacity_summary(
     if not config.openai_account_id:
         return {"cycle": None, "today": empty_today}
 
-    current_cycle = QuotaCycle.objects.filter(
-        active=True,
-        account_id=config.openai_account_id,
-    ).first()
-    if current_cycle is None:
-        return {"cycle": None, "today": empty_today}
-
-    logical_cycles = list(
-        QuotaCycle.objects.filter(
-            account_id=current_cycle.account_id,
-            resets_at__gte=(
-                current_cycle.resets_at - LOGICAL_CYCLE_RESET_TOLERANCE
-            ),
-            resets_at__lte=(
-                current_cycle.resets_at + LOGICAL_CYCLE_RESET_TOLERANCE
-            ),
+    latest = (
+        Observation.objects.filter(
+            account_id=config.openai_account_id,
+            excluded_at__isnull=True,
+            attribution_started_at__isnull=False,
         )
+        .order_by("-observed_at", "-id")
+        .first()
     )
-    cycle_ids = [cycle.id for cycle in logical_cycles]
-    observations = Observation.objects.filter(cycle_id__in=cycle_ids)
-    latest = observations.order_by("-observed_at", "-id").first()
     if latest is None:
         return {"cycle": None, "today": empty_today}
+
+    observations = Observation.objects.filter(
+        account_id=latest.account_id,
+        attribution_started_at=latest.attribution_started_at,
+        excluded_at__isnull=True,
+    )
 
     used_percent = latest.upstream_used_percent
     raw_cycle_estimate = (
@@ -140,8 +132,8 @@ def _capacity_summary(
         ],
         "confidence": confidence,
         "observed_at": iso(latest.observed_at),
-        "starts_at": iso(min(cycle.starts_at for cycle in logical_cycles)),
-        "resets_at": iso(current_cycle.resets_at),
+        "starts_at": iso(latest.attribution_started_at),
+        "resets_at": iso(latest.upstream_resets_at),
     }
 
     local_day = now.astimezone(location).date()
@@ -234,7 +226,8 @@ class StatisticsView(AuthenticatedAPIView):
         now = timezone.now()
         capacity_summary = _capacity_summary(config, location, now)
         observation_rows = Observation.objects.filter(
-            cycle__account_id=config.openai_account_id,
+            account_id=config.openai_account_id,
+            excluded_at__isnull=True,
             raw_window__rate_method=RATE_METHOD,
             observed_at__gte=now - timedelta(days=capacity_days),
         ).order_by("observed_at", "id")

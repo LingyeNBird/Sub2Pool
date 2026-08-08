@@ -24,7 +24,6 @@ from monitor.models import (
     Participant,
     ParticipantSnapshot,
     ParticipantUsageSample,
-    QuotaCycle,
 )
 from monitor.notifications import send_notification
 from monitor.secrets import encrypt_secret
@@ -63,16 +62,15 @@ def create_recommendation_snapshot(
     recommended: Decimal = Decimal("123.45"),
 ) -> ParticipantSnapshot:
     now = timezone.now()
-    cycle = QuotaCycle.objects.create(
-        account_id=7,
-        window_seconds=604800,
-        starts_at=now - timedelta(days=3),
-        resets_at=now + timedelta(days=4),
-    )
+    reset_at = now + timedelta(days=4)
     observation = Observation.objects.create(
-        cycle=cycle,
+        account_id=7,
         observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=reset_at,
+        attribution_started_at=now - timedelta(days=3),
         upstream_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("400"),
         selected_total_cost=Decimal("400"),
         total_standard_cost=Decimal("400"),
         total_actual_cost=Decimal("400"),
@@ -81,6 +79,7 @@ def create_recommendation_snapshot(
     return ParticipantSnapshot.objects.create(
         observation=observation,
         participant=participant,
+        raw_selected_cost=Decimal("200"),
         selected_cost=Decimal("200"),
         current_balance_usd=Decimal("80"),
         recommended_balance_usd=recommended,
@@ -600,7 +599,7 @@ def test_integer_percent_plateau_uses_cumulative_cost_for_capacity(monkeypatch):
     assert observations[2].delta_cost == Decimal("6.873233")
     assert observations[2].sample_usd_per_percent == Decimal("25.790081")
     assert observations[2].effective_usd_per_percent == Decimal("25.790081")
-    assert observations[2].raw_window["rate_method"] == "cumulative_cycle_v1"
+    assert observations[2].raw_window["rate_method"] == "full_replay_v1"
 
     snapshot = ParticipantSnapshot.objects.get(
         observation=observations[2],
@@ -658,8 +657,12 @@ def test_passive_reset_timestamp_drift_keeps_the_same_cycle(monkeypatch):
     run_monitor(force_upstream=True, source="manual")
     run_monitor(force_upstream=True, source="manual")
 
-    assert QuotaCycle.objects.count() == 1
-    assert Observation.objects.count() == 2
+    observations = list(Observation.objects.order_by("observed_at", "id"))
+    assert len(observations) == 2
+    assert (
+        observations[0].attribution_started_at
+        == observations[1].attribution_started_at
+    )
 
 
 @pytest.mark.django_db
@@ -723,7 +726,7 @@ def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
 
 
 @pytest.mark.django_db
-def test_manual_upstream_refresh_starts_new_cycle_without_negative_ledger(
+def test_manual_upstream_refresh_is_inferred_by_full_replay_without_negative_ledger(
     monkeypatch,
 ):
     config = AppSettings.load()
@@ -738,28 +741,27 @@ def test_manual_upstream_refresh_starts_new_cycle_without_negative_ledger(
     )
     now = timezone.now()
     reset_at = now + timedelta(days=4)
-    old_cycle = QuotaCycle.objects.create(
-        account_id=7,
-        starts_at=reset_at - timedelta(days=7),
-        resets_at=reset_at,
-        active=True,
-    )
     previous = Observation.objects.create(
-        cycle=old_cycle,
+        account_id=7,
         source="manual",
         observed_at=now - timedelta(hours=1),
+        window_seconds=604800,
+        upstream_resets_at=reset_at,
+        attribution_started_at=reset_at - timedelta(days=7),
         upstream_used_percent=Decimal("10"),
+        raw_selected_total_cost=Decimal("200"),
         selected_total_cost=Decimal("200"),
         total_standard_cost=Decimal("200"),
         total_actual_cost=Decimal("200"),
         sample_usd_per_percent=Decimal("20"),
         effective_usd_per_percent=Decimal("20"),
         valid_sample=True,
-        raw_window={"rate_method": "cumulative_cycle_v1"},
+        raw_window={"rate_method": "full_replay_v1"},
     )
     ParticipantSnapshot.objects.create(
         observation=previous,
         participant=owner,
+        raw_selected_cost=Decimal("200"),
         selected_cost=Decimal("200"),
         charged_delta_percent=Decimal("10"),
         charged_cycle_percent=Decimal("10"),
@@ -769,8 +771,11 @@ def test_manual_upstream_refresh_starts_new_cycle_without_negative_ledger(
     )
 
     class FakeClient:
+        run_count = 0
+
         def __init__(self, _config):
-            pass
+            self.step = type(self).run_count
+            type(self).run_count += 1
 
         def __enter__(self):
             return self
@@ -785,6 +790,7 @@ def test_manual_upstream_refresh_starts_new_cycle_without_negative_ledger(
                 345600,
                 int(reset_at.timestamp()),
                 "passive_snapshot",
+                (now + timedelta(minutes=self.step)).isoformat(),
             )
 
         def usage_stats(self, **_kwargs):
@@ -794,25 +800,250 @@ def test_manual_upstream_refresh_starts_new_cycle_without_negative_ledger(
             return UserBalance(Decimal("500"), Decimal("0"))
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+    pending = run_monitor(force_upstream=True, source="manual")
+    assert pending["status"] == "reset_pending"
+
     result = run_monitor(force_upstream=True, source="manual")
 
-    assert result["reason"] == "检测到官方手动刷新"
-    old_cycle.refresh_from_db()
-    assert old_cycle.active is False
-    current = QuotaCycle.objects.get(active=True)
-    assert current.id != old_cycle.id
-    current_observation = Observation.objects.get(cycle=current)
+    assert result["reason"] == "完整历史中已有两份独立快照确认官方手动刷新"
+    included = list(
+        Observation.objects.filter(excluded_at__isnull=True).order_by(
+            "observed_at",
+            "id",
+        )
+    )
+    assert len(included) == 3
+    current_observation = included[-1]
+    assert current_observation.attribution_started_at == included[-2].observed_at
     assert current_observation.sample_usd_per_percent is None
     assert current_observation.effective_usd_per_percent == Decimal("20")
-    assert current_observation.raw_window["rate_source"] == "previous_cycle_history"
-    assert current_observation.sample_note == "本周期尚无有效样本，暂沿用上一周期有效估值"
-    snapshot = ParticipantSnapshot.objects.get(observation__cycle=current)
+    assert (
+        current_observation.raw_window["rate_source"]
+        == "previous_interval_history"
+    )
+    assert (
+        current_observation.sample_note
+        == "当前区间尚无有效样本，暂沿用上一归属区间的有效估值"
+    )
+    snapshot = ParticipantSnapshot.objects.get(
+        observation=current_observation,
+        participant=owner,
+    )
     assert snapshot.charged_delta_percent == Decimal("0")
     assert snapshot.charged_cycle_percent == Decimal("0")
     assert snapshot.remaining_share_percent == Decimal("50")
-    assert snapshot.delta_cost is None
+    assert snapshot.delta_cost == Decimal("0")
     assert snapshot.recommended_balance_usd == Decimal("950.00")
 
+
+
+@pytest.mark.django_db
+def test_single_false_rollback_is_excluded_by_full_history_replay(
+    monkeypatch,
+):
+    """47→18→49 中的单个 18 只留作审计，完整重放继续使用 47→49。"""
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save()
+    owner = Participant.objects.create(
+        name="车主",
+        sub2api_user_id=1,
+        share_percent=100,
+        is_owner=True,
+    )
+    reset_at = timezone.now() + timedelta(days=3)
+    percents = [Decimal("47"), Decimal("18"), Decimal("49")]
+    costs = [Decimal("940"), Decimal("960"), Decimal("980")]
+    sampled_at = [
+        (timezone.now() + timedelta(minutes=index)).isoformat()
+        for index in range(3)
+    ]
+
+    class FakeClient:
+        run_count = 0
+
+        def __init__(self, _config):
+            self.step = type(self).run_count
+            type(self).run_count += 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def query_weekly_window(self, _account_id, _mode):
+            return WeeklyWindow(
+                percents[self.step],
+                604800,
+                259200,
+                int(reset_at.timestamp()),
+                "passive_snapshot",
+                sampled_at[self.step],
+            )
+
+        def usage_stats(self, **_kwargs):
+            return UsageStats(costs[self.step], costs[self.step])
+
+        def user_balance(self, _user_id):
+            return UserBalance(Decimal("1000"), Decimal("0"))
+
+    monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+    first = run_monitor(force_upstream=True, source="manual")
+    rollback = run_monitor(force_upstream=True, source="manual")
+    recovered = run_monitor(force_upstream=True, source="manual")
+
+    assert first["status"] == "calibrated"
+    assert rollback["status"] == "reset_pending"
+    assert recovered["status"] == "calibrated"
+    assert Observation.objects.count() == 3
+
+    included = list(
+        Observation.objects.filter(excluded_at__isnull=True).order_by(
+            "observed_at",
+            "id",
+        )
+    )
+    assert [item.upstream_used_percent for item in included] == [
+        Decimal("47"),
+        Decimal("49"),
+    ]
+    candidate = Observation.objects.get(pk=rollback["observation_id"])
+    assert candidate.excluded_at is not None
+    assert candidate.exclusion_source == "automatic"
+    assert candidate.raw_window["replay_decision"] == "automatic_exclusion"
+    assert "瞬时异常" in candidate.exclusion_reason
+    assert included[-1].delta_percent == Decimal("2")
+    assert included[-1].delta_cost == Decimal("40")
+    assert (
+        included[-1].attribution_started_at
+        == included[0].attribution_started_at
+    )
+    snapshot = ParticipantSnapshot.objects.get(
+        observation=included[-1],
+        participant=owner,
+    )
+    assert snapshot.charged_cycle_percent == Decimal("49")
+
+
+@pytest.mark.django_db
+def test_manual_exclusion_and_restore_both_replay_all_raw_observations():
+    """排除后忽略错误点；恢复后由管理员确认该回退点是新的区间边界。"""
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save()
+    participant = Participant.objects.create(
+        name="车主",
+        sub2api_user_id=1,
+        share_percent=100,
+        is_owner=True,
+    )
+    now = timezone.now()
+    reset_at = now + timedelta(days=3)
+
+    def raw_observation(minutes_ago, percent_value, cost_value, source):
+        observed_at = now - timedelta(minutes=minutes_ago)
+        observation = Observation.objects.create(
+            account_id=7,
+            source=source,
+            observed_at=observed_at,
+            window_seconds=604800,
+            upstream_resets_at=reset_at,
+            attribution_started_at=reset_at - timedelta(days=7),
+            upstream_used_percent=percent_value,
+            raw_selected_total_cost=cost_value,
+            selected_total_cost=cost_value,
+            total_standard_cost=cost_value,
+            total_actual_cost=cost_value,
+            sample_usd_per_percent=(
+                cost_value / percent_value if percent_value else None
+            ),
+            effective_usd_per_percent=Decimal("20"),
+            valid_sample=percent_value > 0,
+            raw_window={
+                "rate_method": "full_replay_v1",
+                "sampled_at": observed_at.isoformat(),
+            },
+        )
+        ParticipantSnapshot.objects.create(
+            observation=observation,
+            participant=participant,
+            raw_selected_cost=cost_value,
+            selected_cost=cost_value,
+            charged_delta_percent=percent_value,
+            charged_cycle_percent=percent_value,
+            remaining_share_percent=Decimal("100") - percent_value,
+            current_balance_usd=Decimal("1000"),
+            recommended_balance_usd=Decimal("1000"),
+        )
+        return observation
+
+    raw_observation(120, Decimal("47"), Decimal("940"), "manual")
+    false_reset = raw_observation(60, Decimal("18"), Decimal("960"), "reset")
+    raw_observation(40, Decimal("49"), Decimal("980"), "manual")
+    raw_observation(20, Decimal("50"), Decimal("1000"), "manual")
+
+    client = Client()
+    headers, _ = jwt_login(client)
+    response = client.post(
+        f"/api/observations/{false_reset.id}/exclude",
+        data=json.dumps({"reason": "异常的 18% 快照"}),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["rebuilt_observations"] == 3
+    false_reset.refresh_from_db()
+    assert false_reset.excluded_at is not None
+    assert false_reset.exclusion_source == "manual"
+
+    included = list(
+        Observation.objects.filter(excluded_at__isnull=True).order_by(
+            "observed_at",
+            "id",
+        )
+    )
+    assert [item.upstream_used_percent for item in included] == [
+        Decimal("47"),
+        Decimal("49"),
+        Decimal("50"),
+    ]
+    assert [item.selected_total_cost for item in included] == [
+        Decimal("940"),
+        Decimal("980"),
+        Decimal("1000"),
+    ]
+    assert included[-1].delta_percent == Decimal("1")
+    assert included[-1].delta_cost == Decimal("20")
+    latest_snapshot = ParticipantSnapshot.objects.get(
+        observation=included[-1],
+        participant=participant,
+    )
+    assert latest_snapshot.charged_cycle_percent == Decimal("50")
+
+    listed = client.get("/api/observations", **headers).json()["data"]
+    assert listed["summary"]["excluded_count"] == 1
+    dashboard = client.get("/api/dashboard", **headers).json()["data"]
+    assert dashboard["cycle"]["upstream_used_percent"] == 50.0
+    assert dashboard["cycle"]["selected_total_cost"] == 1000.0
+
+    restored = client.post(
+        f"/api/observations/{false_reset.id}/restore",
+        **headers,
+    )
+    assert restored.status_code == 200
+    assert restored.json()["data"]["included"] is True
+    assert restored.json()["data"]["inferred_intervals"] == 2
+    false_reset.refresh_from_db()
+    assert false_reset.excluded_at is None
+    assert false_reset.force_included is True
+    assert Observation.objects.filter(excluded_at__isnull=True).count() == 4
 
 @pytest.mark.django_db
 def test_api_requires_admin_jwt_and_accepts_admin_login():
@@ -903,17 +1134,15 @@ def test_regular_user_only_reads_bound_participant_statistics():
     config.openai_account_id = 7
     config.save()
     now = timezone.now()
-    cycle = QuotaCycle.objects.create(
-        account_id=7,
-        starts_at=now - timedelta(days=2),
-        resets_at=now + timedelta(days=5),
-    )
+    attribution_started_at = now - timedelta(days=2)
     for participant, cost in ((first, 120), (second, 240)):
         ParticipantUsageSample.objects.create(
             participant=participant,
-            cycle=cycle,
+            account_id=7,
+            attribution_started_at=attribution_started_at,
             observed_at=now,
             balance_usd=Decimal("500"),
+            raw_selected_cost=cost,
             selected_cost=cost,
         )
 
@@ -1474,11 +1703,8 @@ def test_observation_records_paginate_and_filter_server_side():
     client = Client()
     headers, _ = jwt_login(client)
     now = timezone.now()
-    cycle = QuotaCycle.objects.create(
-        account_id=7,
-        starts_at=now - timedelta(days=2),
-        resets_at=now + timedelta(days=5),
-    )
+    reset_at = now + timedelta(days=5)
+    attribution_started_at = now - timedelta(days=2)
 
     def create_observation(
         *,
@@ -1491,10 +1717,14 @@ def test_observation_records_paginate_and_filter_server_side():
         if query_mode:
             raw_window["query_mode"] = query_mode
         return Observation.objects.create(
-            cycle=cycle,
+            account_id=7,
             source=source,
             observed_at=now - timedelta(minutes=minutes_ago),
+            window_seconds=604800,
+            upstream_resets_at=reset_at,
+            attribution_started_at=attribution_started_at,
             upstream_used_percent=10,
+            raw_selected_total_cost=200,
             selected_total_cost=200,
             total_standard_cost=200,
             total_actual_cost=200,
@@ -1546,6 +1776,7 @@ def test_observation_records_paginate_and_filter_server_side():
         "total": 2,
         "valid_count": 1,
         "passive_count": 0,
+        "excluded_count": 0,
     }
     assert data["pagination"] == {
         "page": 1,
@@ -1707,7 +1938,7 @@ def test_sqlite_import_replaces_database_and_keeps_recovery_copy(
                 CREATE TABLE auth_user (id INTEGER PRIMARY KEY);
                 CREATE TABLE monitor_appsettings (id INTEGER PRIMARY KEY);
                 CREATE TABLE monitor_participant (id INTEGER PRIMARY KEY);
-                CREATE TABLE monitor_quotacycle (id INTEGER PRIMARY KEY);
+                CREATE TABLE monitor_observation (id INTEGER PRIMARY KEY);
                 CREATE TABLE marker (value TEXT);
                 """
             )
@@ -1984,22 +2215,23 @@ def test_statistics_groups_capacity_and_participant_usage():
         second=0,
         microsecond=0,
     )
-    cycle = QuotaCycle.objects.create(
-        account_id=7,
-        starts_at=base - timedelta(days=7),
-        resets_at=now + timedelta(days=3),
-    )
+    reset_at = now + timedelta(days=3)
+    attribution_started_at = base - timedelta(days=7)
 
     def observation(at, rate):
         return Observation.objects.create(
-            cycle=cycle,
+            account_id=7,
             observed_at=at,
+            window_seconds=604800,
+            upstream_resets_at=reset_at,
+            attribution_started_at=attribution_started_at,
             upstream_used_percent=10,
+            raw_selected_total_cost=100,
             selected_total_cost=100,
             total_standard_cost=100,
             total_actual_cost=100,
             effective_usd_per_percent=Decimal(rate),
-            raw_window={"rate_method": "cumulative_cycle_v1"},
+            raw_window={"rate_method": "full_replay_v1"},
         )
 
     observation(base, "10")
@@ -2010,17 +2242,21 @@ def test_statistics_groups_capacity_and_participant_usage():
     hour = now.replace(minute=5, second=0, microsecond=0)
     ParticipantUsageSample.objects.create(
         participant=participant,
-        cycle=cycle,
+        account_id=7,
+        attribution_started_at=attribution_started_at,
         observed_at=hour,
         balance_usd=Decimal("800"),
         selected_cost=10,
+        raw_selected_cost=10,
     )
     ParticipantUsageSample.objects.create(
         participant=participant,
-        cycle=cycle,
+        account_id=7,
+        attribution_started_at=attribution_started_at,
         observed_at=hour + timedelta(minutes=30),
         balance_usd=Decimal("760"),
         selected_cost=12,
+        raw_selected_cost=12,
     )
 
     daily = client.get(
@@ -2071,24 +2307,25 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
         second=0,
         microsecond=0,
     )
-    cycle = QuotaCycle.objects.create(
-        account_id=7,
-        starts_at=now - timedelta(days=2),
-        resets_at=now + timedelta(days=5),
-    )
+    reset_at = now + timedelta(days=5)
+    attribution_started_at = now - timedelta(days=2)
 
     def observation(at, used_percent, cost):
         Observation.objects.create(
-            cycle=cycle,
+            account_id=7,
             observed_at=at,
+            window_seconds=604800,
+            upstream_resets_at=reset_at,
+            attribution_started_at=attribution_started_at,
             upstream_used_percent=used_percent,
+            raw_selected_total_cost=cost,
             selected_total_cost=cost,
             total_standard_cost=cost,
             total_actual_cost=cost,
             sample_usd_per_percent=Decimal(cost) / Decimal(used_percent),
             effective_usd_per_percent=Decimal("20"),
             valid_sample=True,
-            raw_window={"rate_method": "cumulative_cycle_v1"},
+            raw_window={"rate_method": "full_replay_v1"},
         )
 
     first_at = local_day_start + timedelta(minutes=5)

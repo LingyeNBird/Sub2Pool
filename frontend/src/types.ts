@@ -103,8 +103,9 @@ export interface Observation {
   id: number;
   observed_at: string;
   source: string;
-  cycle_id: number;
-  cycle_resets_at: string;
+  account_id: number;
+  attribution_started_at: string | null;
+  upstream_resets_at: string;
   upstream_used_percent: number;
   selected_total_cost: number;
   delta_percent: number | null;
@@ -117,6 +118,10 @@ export interface Observation {
   query_mode: string;
   snapshot_sampled_at: string | null;
   participants: Snapshot[];
+  excluded: boolean;
+  excluded_at: string | null;
+  exclusion_reason: string;
+  exclusion_source: "" | "manual" | "automatic";
 }
 
 export interface MonitorSchedule {
@@ -167,6 +172,7 @@ export interface ObservationListData extends PaginatedData<Observation> {
     total: number;
     valid_count: number;
     passive_count: number;
+    excluded_count: number;
   };
 }
 

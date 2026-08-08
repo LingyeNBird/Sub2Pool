@@ -26,6 +26,8 @@ from .views.records import (
     LoginEventListView,
     NotificationListView,
     ObservationListView,
+    ObservationExclusionView,
+    ObservationRestoreView,
 )
 from .views.settings import (
     OpenAIAccountListView,
@@ -62,6 +64,14 @@ urlpatterns = [
     path("system-users", SystemUserListView.as_view()),
     path("system-users/<int:user_id>", SystemUserDetailView.as_view()),
     path("observations", ObservationListView.as_view()),
+    path(
+        "observations/<int:observation_id>/exclude",
+        ObservationExclusionView.as_view(),
+    ),
+    path(
+        "observations/<int:observation_id>/restore",
+        ObservationRestoreView.as_view(),
+    ),
     path("notifications", NotificationListView.as_view()),
     path("settings", SettingsView.as_view()),
     path("settings/openai-accounts", OpenAIAccountListView.as_view()),

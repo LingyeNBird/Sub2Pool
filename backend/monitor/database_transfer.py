@@ -23,7 +23,7 @@ REQUIRED_TABLES = {
     "django_migrations",
     "monitor_appsettings",
     "monitor_participant",
-    "monitor_quotacycle",
+    "monitor_observation",
 }
 
 

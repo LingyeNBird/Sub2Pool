@@ -1,4 +1,4 @@
-"""数据库模型：配置、参与者、上游周期、测算观测和通知记录。"""
+"""数据库模型：配置、参与者、原始观测、可重建归属结果和通知记录。"""
 from decimal import Decimal
 from urllib.parse import urlsplit
 
@@ -166,34 +166,27 @@ class Participant(models.Model):
         return self.name
 
 
-class QuotaCycle(models.Model):
-    """OpenAI 上游七天窗口；按上游 reset_at 分段，不使用 Sub2API 的周一窗口。"""
-
-    account_id = models.BigIntegerField()
-    window_seconds = models.PositiveIntegerField(default=604800)
-    starts_at = models.DateTimeField()
-    resets_at = models.DateTimeField()
-    active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["-resets_at"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["account_id", "resets_at", "starts_at"],
-                name="unique_account_reset_cycle",
-            )
-        ]
 
 
 class Observation(models.Model):
-    """一次真正查询上游百分比后的校准观测。"""
+    """一次上游百分比采样；原始事实保持不变，所有计算字段均可重放生成。"""
 
     SOURCE_CHOICES = (("scheduled", "定时"), ("manual", "手动"), ("exhausted", "额度耗尽触发"), ("reset", "重置临近"))
-    cycle = models.ForeignKey(QuotaCycle, on_delete=models.CASCADE, related_name="observations")
+    EXCLUSION_CHOICES = (
+        ("", "未排除"),
+        ("manual", "管理员排除"),
+        ("automatic", "异常检测排除"),
+    )
+    account_id = models.BigIntegerField(db_index=True)
     source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default="scheduled")
     observed_at = models.DateTimeField()
+    window_seconds = models.PositiveIntegerField(default=604800)
+    upstream_resets_at = models.DateTimeField()
+    # 这是每次全量重放得出的边界，不是独立、可变的周期实体。
+    attribution_started_at = models.DateTimeField(null=True, blank=True)
     upstream_used_percent = models.DecimalField(max_digits=8, decimal_places=4, validators=PERCENT_VALIDATORS)
+    # raw_* 与两种成本字段是不可变采样事实；selected_total_cost 是重放后的区间累计值。
+    raw_selected_total_cost = models.DecimalField(max_digits=18, decimal_places=6)
     selected_total_cost = models.DecimalField(max_digits=18, decimal_places=6)
     total_standard_cost = models.DecimalField(max_digits=18, decimal_places=6)
     total_actual_cost = models.DecimalField(max_digits=18, decimal_places=6)
@@ -204,11 +197,31 @@ class Observation(models.Model):
     valid_sample = models.BooleanField(default=False)
     sample_note = models.CharField(max_length=255, blank=True)
     raw_window = models.JSONField(default=dict, blank=True)
+    excluded_at = models.DateTimeField(null=True, blank=True)
+    exclusion_source = models.CharField(
+        max_length=16,
+        choices=EXCLUSION_CHOICES,
+        blank=True,
+        default="",
+    )
+    # 管理员恢复一条自动排除的回退记录时，以人工判断覆盖自动异常检测。
+    # 若该记录本身构成百分比回退，重放器会把它作为人工确认的新边界。
+    force_included = models.BooleanField(default=False)
+    exclusion_reason = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-observed_at"]
-        indexes = [models.Index(fields=["cycle", "-observed_at"])]
+        indexes = [
+            models.Index(
+                fields=["account_id", "-observed_at"],
+                name="observation_account_time",
+            ),
+            models.Index(
+                fields=["account_id", "attribution_started_at"],
+                name="observation_replay_segment",
+            ),
+        ]
 
 
 class ParticipantSnapshot(models.Model):
@@ -217,6 +230,8 @@ class ParticipantSnapshot(models.Model):
     observation = models.ForeignKey(Observation, on_delete=models.CASCADE, related_name="participant_snapshots")
     participant = models.ForeignKey(Participant, on_delete=models.CASCADE, related_name="snapshots")
     selected_cost = models.DecimalField(max_digits=18, decimal_places=6)
+    # 原始累计成本永久保留；selected_cost 是当前重放区间内的累计成本。
+    raw_selected_cost = models.DecimalField(max_digits=18, decimal_places=6)
     delta_cost = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     charged_delta_percent = models.DecimalField(max_digits=10, decimal_places=5, default=0)
     charged_cycle_percent = models.DecimalField(max_digits=10, decimal_places=5, default=0)
@@ -248,11 +263,8 @@ class ParticipantUsageSample(models.Model):
         on_delete=models.CASCADE,
         related_name="usage_samples",
     )
-    cycle = models.ForeignKey(
-        QuotaCycle,
-        on_delete=models.CASCADE,
-        related_name="usage_samples",
-    )
+    account_id = models.BigIntegerField(db_index=True)
+    attribution_started_at = models.DateTimeField(null=True, blank=True)
     observed_at = models.DateTimeField()
     balance_usd = models.DecimalField(
         max_digits=18,
@@ -261,13 +273,14 @@ class ParticipantUsageSample(models.Model):
         blank=True,
     )
     selected_cost = models.DecimalField(max_digits=18, decimal_places=6)
+    raw_selected_cost = models.DecimalField(max_digits=18, decimal_places=6)
 
     class Meta:
         ordering = ["observed_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["participant", "cycle", "observed_at"],
-                name="unique_participant_cycle_sample",
+                fields=["participant", "account_id", "observed_at"],
+                name="unique_participant_account_sample",
             )
         ]
         indexes = [

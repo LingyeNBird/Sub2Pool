@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from .base import AdminAPIView, error, ok
 from .presenters import iso, latest_snapshot, participant_data
-from ..models import AppSettings, Observation, Participant, QuotaCycle
+from ..models import AppSettings, Observation, Participant
 from ..sub2api import Sub2APIClient, Sub2APIError
 
 
@@ -36,12 +36,16 @@ class DashboardView(AdminAPIView):
             and timezone.now() - config.last_upstream_check_at
             >= timedelta(hours=config.stale_warning_hours)
         )
-        cycle = QuotaCycle.objects.filter(active=True).first()
         observation = (
-            Observation.objects.filter(cycle=cycle)
+            Observation.objects.filter(
+                account_id=config.openai_account_id,
+                excluded_at__isnull=True,
+                attribution_started_at__isnull=False,
+            )
             .prefetch_related("participant_snapshots__participant")
+            .order_by("-observed_at", "-id")
             .first()
-            if cycle
+            if config.openai_account_id
             else None
         )
         snapshots = (
@@ -74,13 +78,15 @@ class DashboardView(AdminAPIView):
         rate_rows = (
             list(
                 Observation.objects.filter(
-                    cycle=cycle,
+                    account_id=observation.account_id,
+                    attribution_started_at=observation.attribution_started_at,
+                    excluded_at__isnull=True,
                     valid_sample=True,
                     sample_usd_per_percent__isnull=False,
-                    raw_window__rate_method="cumulative_cycle_v1",
+                    raw_window__rate_method="full_replay_v1",
                 ).order_by("-observed_at", "-id")[:basis_history_samples]
             )
-            if cycle
+            if observation
             else []
         )
         participant_rows = [
@@ -111,11 +117,11 @@ class DashboardView(AdminAPIView):
                 1 for item in snapshots if item.needs_manual_update
             ),
         }
-        if cycle:
+        if observation:
             data["cycle"] = {
-                "id": cycle.id,
-                "starts_at": iso(cycle.starts_at),
-                "resets_at": iso(cycle.resets_at),
+                "id": observation.id,
+                "starts_at": iso(observation.attribution_started_at),
+                "resets_at": iso(observation.upstream_resets_at),
                 "upstream_used_percent": (
                     float(observation.upstream_used_percent) if observation else None
                 ),

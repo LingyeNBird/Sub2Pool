@@ -45,7 +45,8 @@ def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
 
 def latest_snapshot(participant: Participant) -> ParticipantSnapshot | None:
     return (
-        participant.snapshots.select_related("observation", "observation__cycle")
+        participant.snapshots.select_related("observation")
+        .filter(observation__excluded_at__isnull=True)
         .order_by("-observation__observed_at")
         .first()
     )

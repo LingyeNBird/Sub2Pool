@@ -17,7 +17,12 @@ type FilterKind = "time" | "source" | "query";
 const dateTime = useDateTime();
 const toIso = useZonedDateTimeIso();
 const rows = ref<Observation[]>([]);
-const summary = reactive({ total: 0, valid_count: 0, passive_count: 0 });
+const summary = reactive({
+  total: 0,
+  valid_count: 0,
+  passive_count: 0,
+  excluded_count: 0,
+});
 const pagination = ref<PaginationMeta>({
   page: 1,
   page_size: 20,
@@ -38,6 +43,11 @@ const running = ref(false);
 const message = ref("");
 const selected = ref<Observation | null>(null);
 const dialog = ref<HTMLDialogElement | null>(null);
+const exclusionTarget = ref<Observation | null>(null);
+const exclusionReason = ref("");
+const excludeDialog = ref<HTMLDialogElement | null>(null);
+const excluding = ref(false);
+const restoringId = ref<number | null>(null);
 const schedule = ref<MonitorSchedule | null>(null);
 const clientNow = ref(Date.now());
 const serverOffsetMs = ref(0);
@@ -190,6 +200,46 @@ async function run() {
 function show(row: Observation) {
   selected.value = row;
   dialog.value?.showModal();
+}
+
+function promptExclude(row: Observation) {
+  exclusionTarget.value = row;
+  exclusionReason.value = "";
+  excludeDialog.value?.showModal();
+}
+
+async function confirmExclude() {
+  if (!exclusionTarget.value) return;
+  excluding.value = true;
+  message.value = "";
+  try {
+    await api(`observations/${exclusionTarget.value.id}/exclude`, {
+      method: "POST",
+      body: JSON.stringify({ reason: exclusionReason.value }),
+    });
+    excludeDialog.value?.close();
+    exclusionTarget.value = null;
+    await load();
+  } catch (error) {
+    message.value =
+      error instanceof ApiError ? error.message : "排除观测记录失败";
+  } finally {
+    excluding.value = false;
+  }
+}
+
+async function restore(row: Observation) {
+  restoringId.value = row.id;
+  message.value = "";
+  try {
+    await api(`observations/${row.id}/restore`, { method: "POST" });
+    await load();
+  } catch (error) {
+    message.value =
+      error instanceof ApiError ? error.message : "恢复观测记录失败";
+  } finally {
+    restoringId.value = null;
+  }
 }
 
 function openFilter(kind: FilterKind) {
@@ -381,11 +431,25 @@ onUnmounted(() => window.clearInterval(clockTimer));
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in rows" :key="row.id">
+              <tr
+                v-for="row in rows"
+                :key="row.id"
+                :class="{ 'opacity-55': row.excluded }"
+              >
                 <td>
                   <div>{{ dateTime(row.observed_at) }}</div>
                   <div class="text-xs opacity-60">
                     快照 {{ dateTime(row.snapshot_sampled_at) }}
+                  </div>
+                  <div v-if="row.excluded" class="mt-1 flex gap-1">
+                    <span class="badge badge-sm badge-warning">已排除</span>
+                    <span class="badge badge-ghost badge-sm">
+                      {{
+                        row.exclusion_source === "automatic"
+                          ? "自动判定"
+                          : "管理员"
+                      }}
+                    </span>
                   </div>
                 </td>
                 <td>
@@ -413,9 +477,30 @@ onUnmounted(() => window.clearInterval(clockTimer));
                   {{ currency(row.effective_usd_per_percent) }}
                 </td>
                 <td>
-                  <button class="btn btn-ghost btn-xs" @click="show(row)">
-                    详情
-                  </button>
+                  <div class="flex items-center gap-1">
+                    <button class="btn btn-ghost btn-xs" @click="show(row)">
+                      详情
+                    </button>
+                    <button
+                      v-if="!row.excluded"
+                      class="btn btn-ghost text-warning btn-xs"
+                      @click="promptExclude(row)"
+                    >
+                      排除
+                    </button>
+                    <button
+                      v-else
+                      class="btn btn-ghost text-success btn-xs"
+                      :disabled="restoringId === row.id"
+                      @click="restore(row)"
+                    >
+                      <span
+                        v-if="restoringId === row.id"
+                        class="loading loading-xs loading-spinner"
+                      ></span>
+                      恢复
+                    </button>
+                  </div>
                 </td>
               </tr>
               <tr v-if="rows.length === 0">
@@ -502,6 +587,10 @@ onUnmounted(() => window.clearInterval(clockTimer));
     <div class="modal-box max-w-4xl">
       <h2 class="text-lg font-bold">观测详情</h2>
       <p class="mt-1 text-sm opacity-60">{{ selected?.sample_note }}</p>
+      <div v-if="selected?.excluded" class="mt-4 alert alert-warning">
+        <AppIcon name="exclamation-triangle" class="size-5" />
+        <span> 此记录已排除，不参与计算。{{ selected.exclusion_reason }} </span>
+      </div>
       <div class="mt-4 overflow-x-auto">
         <table class="table table-sm">
           <thead>
@@ -531,6 +620,56 @@ onUnmounted(() => window.clearInterval(clockTimer));
       </div>
       <div class="modal-action">
         <button class="btn" @click="dialog?.close()">关闭</button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>关闭</button></form>
+  </dialog>
+
+  <dialog ref="excludeDialog" class="modal">
+    <div class="modal-box">
+      <h2 class="text-lg font-bold">排除校准记录</h2>
+      <p class="mt-3 text-sm opacity-70">
+        排除后，原始记录仍保留作审计，但每次全量重放都会直接忽略它；额度折算和参与者归属会立即从剩余原始采样重新计算。
+      </p>
+      <div v-if="exclusionTarget" class="mt-4 rounded-box bg-base-300 p-4">
+        <div class="font-medium">
+          {{ dateTime(exclusionTarget.observed_at) }}
+        </div>
+        <div class="mt-1 text-sm opacity-70">
+          上游已用 {{ percent(exclusionTarget.upstream_used_percent) }} ·
+          累计成本 {{ currency(exclusionTarget.selected_total_cost) }}
+        </div>
+      </div>
+      <fieldset class="mt-4 fieldset">
+        <label class="label">排除原因（可选）</label>
+        <input
+          v-model="exclusionReason"
+          class="input w-full"
+          maxlength="255"
+          placeholder="例如：上游返回了一次异常百分比"
+        />
+      </fieldset>
+      <div class="modal-action">
+        <button
+          type="button"
+          class="btn"
+          :disabled="excluding"
+          @click="excludeDialog?.close()"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          class="btn btn-warning"
+          :disabled="excluding"
+          @click="confirmExclude"
+        >
+          <span
+            v-if="excluding"
+            class="loading loading-xs loading-spinner"
+          ></span>
+          确认排除
+        </button>
       </div>
     </div>
     <form method="dialog" class="modal-backdrop"><button>关闭</button></form>

@@ -17,6 +17,7 @@ from ..models import (
     Participant,
 )
 from ..serializers import BlockedIPAddressSerializer
+from ..replay import exclude_observation, restore_observation
 
 
 def query_datetime(request, name: str):
@@ -80,7 +81,7 @@ class BlockedIPAddressDetailView(AdminAPIView):
 
 class ObservationListView(AdminAPIView):
     def get(self, request):
-        queryset = Observation.objects.select_related("cycle").prefetch_related(
+        queryset = Observation.objects.prefetch_related(
             "participant_snapshots__participant"
         )
         try:
@@ -114,6 +115,7 @@ class ObservationListView(AdminAPIView):
                 )
 
         total = queryset.count()
+        excluded_count = queryset.filter(excluded_at__isnull=False).count()
         valid_count = queryset.filter(valid_sample=True).count()
         passive_count = queryset.filter(raw_window__query_mode="passive").count()
         rows, pagination = paginated_rows(request, queryset)
@@ -124,8 +126,9 @@ class ObservationListView(AdminAPIView):
                     "id": item.id,
                     "observed_at": iso(item.observed_at),
                     "source": item.source,
-                    "cycle_id": item.cycle_id,
-                    "cycle_resets_at": iso(item.cycle.resets_at),
+                    "account_id": item.account_id,
+                    "attribution_started_at": iso(item.attribution_started_at),
+                    "upstream_resets_at": iso(item.upstream_resets_at),
                     "upstream_used_percent": float(item.upstream_used_percent),
                     "selected_total_cost": float(item.selected_total_cost),
                     "delta_percent": (
@@ -154,6 +157,10 @@ class ObservationListView(AdminAPIView):
                     ),
                     "query_mode": item.raw_window.get("query_mode", "direct"),
                     "snapshot_sampled_at": item.raw_window.get("sampled_at"),
+                    "excluded": item.excluded_at is not None,
+                    "excluded_at": iso(item.excluded_at),
+                    "exclusion_reason": item.exclusion_reason,
+                    "exclusion_source": item.exclusion_source,
                     "participants": [
                         snapshot_data(snapshot)
                         for snapshot in item.participant_snapshots.all()
@@ -168,9 +175,30 @@ class ObservationListView(AdminAPIView):
                     "total": total,
                     "valid_count": valid_count,
                     "passive_count": passive_count,
+                    "excluded_count": excluded_count,
                 },
             }
         )
+
+
+class ObservationExclusionView(AdminAPIView):
+    """排除一条校准记录，并按剩余原始数据重放全部派生结果。"""
+
+    def post(self, request, observation_id: int):
+        observation = get_object_or_404(Observation, pk=observation_id)
+        reason = request.data.get("reason", "管理员手动排除")
+        if not isinstance(reason, str):
+            return error("排除原因格式无效", 400)
+        result = exclude_observation(observation, reason)
+        return ok(result)
+
+
+class ObservationRestoreView(AdminAPIView):
+    """恢复一条排除记录，并立即重放该账号的全部原始观测。"""
+
+    def post(self, _request, observation_id: int):
+        observation = get_object_or_404(Observation, pk=observation_id)
+        return ok(restore_observation(observation))
 
 
 class NotificationListView(AdminAPIView):

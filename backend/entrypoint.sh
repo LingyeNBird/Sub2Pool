@@ -3,6 +3,7 @@ set -eu
 
 python manage.py collectstatic --noinput
 python manage.py migrate --noinput
+python manage.py replayobservations
 python manage.py bootstrap_admin
 
 # 轮询器与 Web 共用 SQLite 和业务代码。无需 Redis/Celery；容器停止时 Docker 会终止整个进程组。
