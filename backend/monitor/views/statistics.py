@@ -22,6 +22,25 @@ def _money(value: Decimal) -> float:
     return float(value.quantize(Decimal("0.01")))
 
 
+def _display_cycle_rates(
+    observation: Observation,
+    config: AppSettings,
+) -> tuple[Decimal, Decimal | None]:
+    """返回当前展示模型采用的汇率，以及周期累计端点的原始汇率。"""
+    used_percent = observation.interval_used_percent
+    raw_rate = (
+        observation.selected_total_cost / used_percent
+        if used_percent > 0
+        else None
+    )
+    if (
+        config.weekly_quota_model == "constant_average"
+        and raw_rate is not None
+    ):
+        return raw_rate, raw_rate
+    return observation.effective_usd_per_percent, raw_rate
+
+
 def _closing_basis(
     observation: Observation,
     rate_rows: list[Observation],
@@ -29,10 +48,9 @@ def _closing_basis(
 ) -> dict:
     """给出某个每日收盘点当时可追溯的累计折算依据。"""
     used_percent = observation.interval_used_percent
+    display_rate, raw_rate = _display_cycle_rates(observation, config)
     raw_estimate = (
-        observation.selected_total_cost * Decimal("100") / used_percent
-        if used_percent > 0
-        else None
+        raw_rate * Decimal("100") if raw_rate is not None else None
     )
     percentile = int(
         observation.raw_window.get(
@@ -56,12 +74,9 @@ def _closing_basis(
         "raw_estimate_usd": (
             _money(raw_estimate) if raw_estimate is not None else None
         ),
-        "estimate_usd": _money(
-            observation.effective_usd_per_percent * Decimal("100")
-        ),
-        "effective_usd_per_percent": float(
-            observation.effective_usd_per_percent
-        ),
+        "estimate_usd": _money(display_rate * Decimal("100")),
+        "effective_usd_per_percent": float(display_rate),
+        "calculation_model": config.weekly_quota_model,
         "rate_source": str(observation.raw_window.get("rate_source", "")),
         "sample_note": observation.sample_note,
         "conservative_percentile": percentile,
@@ -167,9 +182,10 @@ def _capacity_summary(
     )
 
     used_percent = latest.interval_used_percent
+    display_cycle_rate, raw_cycle_rate = _display_cycle_rates(latest, config)
     raw_cycle_estimate = (
-        latest.selected_total_cost * Decimal("100") / used_percent
-        if used_percent > 0
+        raw_cycle_rate * Decimal("100")
+        if raw_cycle_rate is not None
         else None
     )
     basis_percentile = int(
@@ -198,9 +214,7 @@ def _capacity_summary(
     else:
         confidence = "低"
     cycle_summary = {
-        "estimate_usd": _money(
-            latest.effective_usd_per_percent * Decimal("100")
-        ),
+        "estimate_usd": _money(display_cycle_rate * Decimal("100")),
         "raw_estimate_usd": (
             _money(raw_cycle_estimate)
             if raw_cycle_estimate is not None
@@ -212,10 +226,13 @@ def _capacity_summary(
         "end_percent": float(used_percent),
         "cost_usd": _money(latest.selected_total_cost),
         "used_percent": float(used_percent),
-        "effective_usd_per_percent": float(
-            latest.effective_usd_per_percent
+        "effective_usd_per_percent": float(display_cycle_rate),
+        "calculation_model": config.weekly_quota_model,
+        "rate_calculated": (
+            raw_cycle_estimate is not None
+            if config.weekly_quota_model == "constant_average"
+            else bool(valid_rate_rows)
         ),
-        "rate_calculated": bool(valid_rate_rows),
         "conservative_percentile": basis_percentile,
         "rate_history_samples": basis_history_samples,
         "rate_sample_count": len(valid_rate_rows),
@@ -368,7 +385,8 @@ class StatisticsView(AuthenticatedAPIView):
             period = (
                 observation.observed_at.astimezone(location).date().isoformat()
             )
-            total = observation.effective_usd_per_percent * Decimal("100")
+            display_rate, _ = _display_cycle_rates(observation, config)
+            total = display_rate * Decimal("100")
             row = daily.setdefault(
                 period,
                 {

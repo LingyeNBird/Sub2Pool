@@ -3042,6 +3042,69 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
 
 
 @pytest.mark.django_db
+def test_statistics_constant_average_uses_cycle_endpoint_estimate():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.weekly_quota_model = "constant_average"
+    config.save()
+
+    now = timezone.now()
+    attribution_started_at = now - timedelta(days=2)
+    Observation.objects.create(
+        account_id=7,
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=5),
+        attribution_started_at=attribution_started_at,
+        upstream_used_percent=Decimal("20"),
+        interval_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("600"),
+        selected_total_cost=Decimal("600"),
+        total_standard_cost=Decimal("600"),
+        total_actual_cost=Decimal("600"),
+        sample_usd_per_percent=Decimal("30"),
+        effective_usd_per_percent=Decimal("25"),
+        valid_sample=True,
+        raw_window={"rate_method": RATE_METHOD},
+    )
+
+    constant = client.get("/api/statistics", **headers).json()["data"]
+
+    assert constant["capacity_summary"]["cycle"]["calculation_model"] == (
+        "constant_average"
+    )
+    assert constant["capacity_summary"]["cycle"]["raw_estimate_usd"] == 3000.0
+    assert constant["capacity_summary"]["cycle"]["estimate_usd"] == 3000.0
+    assert (
+        constant["capacity_summary"]["cycle"]["effective_usd_per_percent"]
+        == 30.0
+    )
+    assert constant["capacity_series"][-1]["weekly_total_usd"] == 3000.0
+    assert (
+        constant["capacity_series"][-1]["basis"]["calculation_model"]
+        == "constant_average"
+    )
+    assert constant["capacity_series"][-1]["basis"]["estimate_usd"] == 3000.0
+
+    config.weekly_quota_model = "time_varying"
+    config.save(update_fields=["weekly_quota_model"])
+    time_varying = client.get("/api/statistics", **headers).json()["data"]
+
+    assert time_varying["capacity_summary"]["cycle"]["calculation_model"] == (
+        "time_varying"
+    )
+    assert time_varying["capacity_summary"]["cycle"]["estimate_usd"] == 2500.0
+    assert time_varying["capacity_series"][-1]["weekly_total_usd"] == 2500.0
+
+
+@pytest.mark.django_db
 def test_resend_provider_sends_with_encrypted_key(monkeypatch):
     config = AppSettings.load()
     config.email_provider = "resend"

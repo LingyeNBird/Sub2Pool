@@ -231,6 +231,7 @@ export interface CapacityClosingBasis {
   raw_estimate_usd: number | null;
   estimate_usd: number;
   effective_usd_per_percent: number;
+  calculation_model: "time_varying" | "constant_average";
   rate_source: string;
   sample_note: string;
   conservative_percentile: number;
@@ -276,6 +277,7 @@ export interface CycleCapacityEstimate {
   cost_usd: number;
   used_percent: number;
   effective_usd_per_percent: number;
+  calculation_model: "time_varying" | "constant_average";
   rate_calculated: boolean;
   conservative_percentile: number;
   rate_history_samples: number;

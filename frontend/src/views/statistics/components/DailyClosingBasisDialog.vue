@@ -22,6 +22,9 @@ const dateTime = useDateTime();
 
 const rateSourceDescription = computed(() => {
   if (!cycleBasis.value) return "";
+  if (cycleBasis.value.calculation_model === "constant_average") {
+    return "平均恒定模式直接采用周期起点至该收盘点的累计成本和已用百分比，不使用保守分位。";
+  }
   return (
     {
       current_interval_samples: `取收盘时最近 ${cycleBasis.value.rate_sample_count} 个有效累计样本，按已用百分比加权后采用 ${cycleBasis.value.conservative_percentile}% 保守分位。`,
@@ -66,7 +69,11 @@ defineExpose({ open, close });
       <template v-if="cycleBasis">
         <CalculationBasisHeader
           :title="`${point.period} 累计收盘依据`"
-          help="展示该日最后一次有效观测当时保存的周期累计成本、官方百分比和保守美元/1%样本，而不是使用今天的最新数据倒推。"
+          :help="
+            cycleBasis.calculation_model === 'constant_average'
+              ? '展示该日收盘时从周期起点累计得到的平均恒定估算。'
+              : '展示该日最后一次有效观测当时保存的周期累计成本、官方百分比和保守美元/1%样本，而不是使用今天的最新数据倒推。'
+          "
         />
         <CalculationBasisTimeline
           :start-time="
@@ -106,7 +113,13 @@ defineExpose({ open, close });
           </p>
         </div>
 
-        <div v-if="cycleBasis.rate_samples.length" class="mt-3 overflow-x-auto">
+        <div
+          v-if="
+            cycleBasis.calculation_model === 'time_varying' &&
+            cycleBasis.rate_samples.length
+          "
+          class="mt-3 overflow-x-auto"
+        >
           <table class="table table-sm">
             <thead>
               <tr>

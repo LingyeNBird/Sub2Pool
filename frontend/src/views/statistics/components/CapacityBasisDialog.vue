@@ -46,7 +46,11 @@ defineExpose({ open, close });
       >
         <CalculationBasisHeader
           title="本周期累计折算依据"
-          help="先用本周期累计成本与官方已用百分比形成样本，再按设置的保守分位采用结果。"
+          :help="
+            data.capacity_summary.cycle.calculation_model === 'constant_average'
+              ? '平均恒定模式直接采用周期起点至当前观测的累计成本和已用百分比。'
+              : '先用本周期累计成本与官方已用百分比形成样本，再按设置的保守分位采用结果。'
+          "
         />
         <CalculationBasisTimeline
           :start-time="dateTime(data.capacity_summary.cycle.starts_at)"
@@ -60,7 +64,12 @@ defineExpose({ open, close });
         />
         <div class="mt-3 rounded-box border border-base-300 p-4">
           <div class="text-center text-sm font-semibold opacity-60">
-            累计样本公式
+            {{
+              data.capacity_summary.cycle.calculation_model ===
+              "constant_average"
+                ? "周期累计公式"
+                : "累计样本公式"
+            }}
           </div>
           <p
             class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
@@ -72,7 +81,26 @@ defineExpose({ open, close });
             100 =
             {{ formatCurrency(data.capacity_summary.cycle.raw_estimate_usd) }}
           </p>
-          <p class="mt-2 text-sm opacity-70">
+          <p
+            v-if="
+              data.capacity_summary.cycle.calculation_model ===
+              'constant_average'
+            "
+            class="mt-2 text-sm opacity-70"
+          >
+            平均恒定模式直接采用起点至终点的累计折算值；采用
+            <strong>{{
+              formatCurrency(
+                data.capacity_summary.cycle.effective_usd_per_percent,
+              )
+            }}</strong>
+            / 1%，最终为
+            <strong>{{
+              formatCurrency(data.capacity_summary.cycle.estimate_usd)
+            }}</strong>
+            。
+          </p>
+          <p v-else class="mt-2 text-sm opacity-70">
             最近 {{ data.capacity_summary.cycle.rate_sample_count }}
             个有效累计样本按已用百分比加权，取
             {{ data.capacity_summary.cycle.conservative_percentile }}%
@@ -89,7 +117,12 @@ defineExpose({ open, close });
             。
           </p>
         </div>
-        <div class="mt-3 overflow-x-auto">
+        <div
+          v-if="
+            data.capacity_summary.cycle.calculation_model === 'time_varying'
+          "
+          class="mt-3 overflow-x-auto"
+        >
           <table class="table table-sm">
             <thead>
               <tr>
