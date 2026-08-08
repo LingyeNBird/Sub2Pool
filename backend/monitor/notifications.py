@@ -1,7 +1,6 @@
 """SMTP / Resend 通知发送与去重。"""
 from datetime import timedelta
 from email.message import EmailMessage
-import hashlib
 import smtplib
 import ssl
 
@@ -58,7 +57,7 @@ def _send_resend(
     recipient: str,
     subject: str,
     body: str,
-    dedupe_key: str,
+    delivery_event_id: int,
 ) -> None:
     api_key = decrypt_secret(config.resend_api_key_encrypted)
     if not api_key or not config.resend_from_email:
@@ -67,9 +66,10 @@ def _send_resend(
         "https://api.resend.com/emails",
         headers={
             "Authorization": f"Bearer {api_key}",
-            "Idempotency-Key": (
-                "pinche-" + hashlib.sha256(dedupe_key.encode()).hexdigest()
-            ),
+            # Resend 的幂等键标识一次具体 HTTP 投递，而不是业务冷却键。
+            # 同一业务提醒过了冷却期会创建新审计事件，因此必须使用新键；
+            # 若将 dedupe_key 复用于不同正文，Resend 会在 24 小时内返回 409。
+            "Idempotency-Key": f"pinche-notification-{delivery_event_id}",
         },
         json={
             "from": config.resend_from_email,
@@ -133,7 +133,7 @@ def send_notification(
 
     try:
         if config.email_provider == "resend":
-            _send_resend(config, recipient, subject, body, dedupe_key)
+            _send_resend(config, recipient, subject, body, event.pk)
         else:
             _send_smtp(config, recipient, subject, body)
     except (

@@ -2705,10 +2705,67 @@ def test_resend_provider_sends_with_encrypted_key(monkeypatch):
     assert NotificationEvent.objects.get(pk=event.pk).sent_at is not None
     assert captured["url"] == "https://api.resend.com/emails"
     assert captured["headers"]["Authorization"] == "Bearer re_secret"
-    assert captured["headers"]["Idempotency-Key"].startswith("pinche-")
+    assert (
+        captured["headers"]["Idempotency-Key"]
+        == f"pinche-notification-{event.pk}"
+    )
     assert captured["json"] == {
         "from": "拼车额度 <notice@example.com>",
         "to": ["owner@example.com"],
         "subject": "测试",
         "text": "正文",
+    }
+
+
+@pytest.mark.django_db
+def test_resend_uses_a_new_idempotency_key_for_each_delivery(monkeypatch):
+    config = AppSettings.load()
+    config.email_provider = "resend"
+    config.notification_email = "owner@example.com"
+    config.resend_from_email = "拼车额度 <notice@example.com>"
+    config.resend_api_key_encrypted = encrypt_secret("re_secret")
+    config.save()
+    requests_by_key = {}
+
+    def fake_post(_url, **kwargs):
+        key = kwargs["headers"]["Idempotency-Key"]
+        payload = kwargs["json"]
+        if key in requests_by_key and requests_by_key[key] != payload:
+            return httpx.Response(
+                409,
+                json={
+                    "message": (
+                        "This idempotency key has been used with a modified body"
+                    )
+                },
+            )
+        requests_by_key[key] = payload
+        return httpx.Response(
+            200,
+            json={"id": f"email_{len(requests_by_key)}"},
+        )
+
+    monkeypatch.setattr("monitor.notifications.httpx.post", fake_post)
+    first = send_notification(
+        config=config,
+        event_type="test",
+        dedupe_key="same-business-notification",
+        subject="测试",
+        body="第一次正文",
+        ignore_cooldown=True,
+    )
+    second = send_notification(
+        config=config,
+        event_type="test",
+        dedupe_key="same-business-notification",
+        subject="测试",
+        body="修改后的正文",
+        ignore_cooldown=True,
+    )
+
+    assert first is not None and first.status == "sent"
+    assert second is not None and second.status == "sent"
+    assert set(requests_by_key) == {
+        f"pinche-notification-{first.pk}",
+        f"pinche-notification-{second.pk}",
     }
