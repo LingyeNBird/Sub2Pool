@@ -108,6 +108,9 @@ const option = computed<ChartOption>(() => ({
             symbolSize: 6,
             lineStyle: { color: colors.value.primary, width: 2 },
             itemStyle: { color: colors.value.primary },
+            // 主题主色使用 OKLCH。ECharts 的默认强调色计算无法稳定解析该格式，
+            // 轴提示触发强调态时会把折线绘制成透明色，因此保留原始样式。
+            emphasis: { disabled: true },
           },
         ]
       : [
@@ -119,6 +122,8 @@ const option = computed<ChartOption>(() => ({
               color: colors.value.primary,
               borderRadius: [3, 3, 0, 0],
             },
+            // 柱子的定位已由纵向轴指示线表达，不再叠加默认强调态。
+            emphasis: { disabled: true },
           },
         ],
 }));
