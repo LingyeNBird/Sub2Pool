@@ -2,7 +2,7 @@
 import { computed } from "vue";
 
 import { useDateTime } from "@/composables/useDateTime";
-import type { StatisticsData } from "@/types";
+import type { CapacityPoint, StatisticsData } from "@/types";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 import StatisticsChart from "./StatisticsChart.vue";
@@ -14,6 +14,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   showBasis: [kind: "cycle" | "today"];
+  showClosingBasis: [point: CapacityPoint];
 }>();
 
 const capacityPeriod = defineModel<"day" | "month">("period", {
@@ -39,6 +40,13 @@ const capacityScale = computed(() => {
     max: maximum + padding,
   };
 });
+
+function showClosingBasis(index: number) {
+  const point = props.data?.capacity_series[index];
+  if (capacityPeriod.value === "day" && point?.basis) {
+    emit("showClosingBasis", point);
+  }
+}
 </script>
 
 <template>
@@ -160,7 +168,7 @@ const capacityScale = computed(() => {
       <div>
         <h3 class="font-semibold">本周期累计估算的每日收盘历史</h3>
         <p class="mt-1 text-sm opacity-60">
-          日视图取当天最后一次累计估算；月视图取每日收盘估算的平均值，不把日内每次探测当作独立结论。
+          日视图取当天最后一次累计估算，可点击折线点查看当日依据；月视图取每日收盘估算的平均值，不把日内每次探测当作独立结论。
         </p>
       </div>
       <div v-if="loading" class="flex justify-center py-16">
@@ -174,6 +182,8 @@ const capacityScale = computed(() => {
         :labels="capacityLabels"
         :min="capacityScale.min"
         :max="capacityScale.max"
+        :clickable="capacityPeriod === 'day'"
+        @point-click="showClosingBasis"
       />
       <div v-else class="py-16 text-center opacity-60">
         尚无累计口径观测，完成首次测算后才会形成周限总额度历史。

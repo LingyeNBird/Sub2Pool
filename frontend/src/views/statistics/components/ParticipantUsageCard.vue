@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 import type { StatisticsData, UsagePoint } from "@/types";
 import { formatCurrency } from "@/utils/formatters";
 
 import StatisticsChart from "./StatisticsChart.vue";
+import UsageHeatmap from "./UsageHeatmap.vue";
 
 const props = defineProps<{
   data: StatisticsData | null;
@@ -15,6 +16,8 @@ const usageDays = defineModel<number>("days", { required: true });
 const usagePrecision = defineModel<"raw" | "hour" | "day">("precision", {
   required: true,
 });
+
+const chartMode = ref<"bar" | "heatmap">("bar");
 
 function usageDeltas(points: UsagePoint[]) {
   return points.slice(1).flatMap((point, index) => {
@@ -52,7 +55,7 @@ const usageIntervalLabel = computed(
             <AppIcon name="chart-bar" class="size-5" />参与者账号用量
             <span
               class="responsive-help-tooltip tooltip tooltip-bottom"
-              :data-tip="`柱状图使用相邻累计值相减，展示所选时间粒度内的新增用量；首个数据点没有前序基线，累计值回落的跨周期区间也不会绘制。后台当前每 ${data?.sample_interval_minutes ?? '—'} 分钟探测一次。`"
+              :data-tip="`柱状图和热力图都使用相邻累计值相减，展示所选时间粒度内的新增用量；首个数据点没有前序基线，累计值回落的跨周期区间也不会绘制。热力图按当前范围内的最大增量动态划分主题色深浅。后台当前每 ${data?.sample_interval_minutes ?? '—'} 分钟探测一次。`"
             >
               <button
                 type="button"
@@ -80,6 +83,27 @@ const usageIntervalLabel = computed(
               <option value="hour">每小时末值</option>
               <option value="day">每天末值</option>
             </select>
+          </fieldset>
+          <fieldset class="fieldset">
+            <label class="label">展示方式</label>
+            <div class="join">
+              <button
+                type="button"
+                class="btn join-item btn-sm"
+                :class="{ 'btn-active': chartMode === 'bar' }"
+                @click="chartMode = 'bar'"
+              >
+                <AppIcon name="chart-bar" class="size-4" />柱状图
+              </button>
+              <button
+                type="button"
+                class="btn join-item btn-sm"
+                :class="{ 'btn-active': chartMode === 'heatmap' }"
+                @click="chartMode = 'heatmap'"
+              >
+                <AppIcon name="squares-2x2" class="size-4" />热力图
+              </button>
+            </div>
           </fieldset>
         </div>
       </div>
@@ -119,16 +143,28 @@ const usageIntervalLabel = computed(
           <p class="mt-4 text-xs font-medium opacity-60">
             {{ usageIntervalLabel }}
           </p>
-          <StatisticsChart
-            v-if="series.usagePoints.length"
-            class="mt-2 h-48 w-full"
-            kind="bar"
-            :values="series.usagePoints.map((item) => item.value)"
-            :labels="series.usagePoints.map((item) => item.label)"
-            :min="0"
-          />
-          <div v-else class="py-12 text-center text-sm opacity-60">
-            尚无可比较的相邻用量样本
+          <div class="mt-2 h-48 w-full">
+            <StatisticsChart
+              v-if="series.usagePoints.length && chartMode === 'bar'"
+              class="h-full w-full"
+              kind="bar"
+              :values="series.usagePoints.map((item) => item.value)"
+              :labels="series.usagePoints.map((item) => item.label)"
+              :min="0"
+            />
+            <UsageHeatmap
+              v-else-if="series.usagePoints.length"
+              class="h-full w-full"
+              :points="series.usagePoints"
+              :precision="usagePrecision"
+              :sample-interval-minutes="data?.sample_interval_minutes"
+            />
+            <div
+              v-else
+              class="flex h-full items-center justify-center text-sm opacity-60"
+            >
+              尚无可比较的相邻用量样本
+            </div>
           </div>
         </article>
       </div>

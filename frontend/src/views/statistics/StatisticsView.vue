@@ -3,14 +3,19 @@ import { onMounted, ref, watch } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api } from "@/services/api";
-import type { StatisticsData } from "@/types";
+import type { CapacityPoint, StatisticsData } from "@/types";
 
 import CapacityBasisDialog from "./components/CapacityBasisDialog.vue";
 import CapacityOverviewCard from "./components/CapacityOverviewCard.vue";
+import DailyClosingBasisDialog from "./components/DailyClosingBasisDialog.vue";
 import ParticipantUsageCard from "./components/ParticipantUsageCard.vue";
 
 interface BasisDialogHandle {
   open: (kind: "cycle" | "today") => void;
+}
+
+interface ClosingBasisDialogHandle {
+  open: (point: CapacityPoint) => void;
 }
 
 const data = ref<StatisticsData | null>(null);
@@ -21,6 +26,7 @@ const capacityDays = ref(90);
 const usageDays = ref(7);
 const usagePrecision = ref<"raw" | "hour" | "day">("hour");
 const basisDialog = ref<BasisDialogHandle | null>(null);
+const closingBasisDialog = ref<ClosingBasisDialogHandle | null>(null);
 
 async function load() {
   loading.value = true;
@@ -70,6 +76,7 @@ onMounted(load);
     :data="data"
     :loading="loading"
     @show-basis="basisDialog?.open($event)"
+    @show-closing-basis="closingBasisDialog?.open($event)"
   />
   <ParticipantUsageCard
     v-model:days="usageDays"
@@ -78,4 +85,5 @@ onMounted(load);
     :loading="loading"
   />
   <CapacityBasisDialog v-if="data" ref="basisDialog" :data="data" />
+  <DailyClosingBasisDialog ref="closingBasisDialog" />
 </template>

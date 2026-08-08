@@ -24,6 +24,12 @@ type ChartOption = ComposeOption<
   | TooltipComponentOption
 >;
 
+interface ChartClickParams {
+  componentType?: string;
+  seriesType?: string;
+  dataIndex?: number;
+}
+
 const props = withDefaults(
   defineProps<{
     kind: "line" | "bar";
@@ -31,12 +37,18 @@ const props = withDefaults(
     values: number[];
     min?: number | null;
     max?: number | null;
+    clickable?: boolean;
   }>(),
   {
     min: null,
     max: null,
+    clickable: false,
   },
 );
+
+const emit = defineEmits<{
+  pointClick: [index: number];
+}>();
 
 const theme = useThemeStore();
 const numberFormatter = new Intl.NumberFormat("zh-CN", {
@@ -54,6 +66,17 @@ const colors = computed(() => {
       (theme.current === "light" ? "#1f2937" : "#f3f4f6"),
   };
 });
+
+function handleClick(params: ChartClickParams) {
+  if (
+    props.clickable &&
+    params.componentType === "series" &&
+    params.seriesType === "line" &&
+    Number.isInteger(params.dataIndex)
+  ) {
+    emit("pointClick", params.dataIndex as number);
+  }
+}
 
 const option = computed<ChartOption>(() => ({
   animationDuration: 250,
@@ -104,8 +127,9 @@ const option = computed<ChartOption>(() => ({
           {
             type: "line",
             data: props.values,
-            showSymbol: props.values.length <= 30,
-            symbolSize: 6,
+            showSymbol: props.clickable || props.values.length <= 30,
+            symbolSize: props.clickable && props.values.length > 90 ? 4 : 6,
+            cursor: props.clickable ? "pointer" : "default",
             lineStyle: { color: colors.value.primary, width: 2 },
             itemStyle: { color: colors.value.primary },
             // 主题主色使用 OKLCH。ECharts 的默认强调色计算无法稳定解析该格式，
@@ -136,6 +160,7 @@ const option = computed<ChartOption>(() => ({
       :option="option"
       :init-options="{ renderer: 'svg' }"
       autoresize
+      @click="handleClick"
     />
   </div>
 </template>

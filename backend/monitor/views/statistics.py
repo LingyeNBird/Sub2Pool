@@ -22,6 +22,64 @@ def _money(value: Decimal) -> float:
     return float(value.quantize(Decimal("0.01")))
 
 
+def _closing_basis(
+    observation: Observation,
+    rate_rows: list[Observation],
+    config: AppSettings,
+) -> dict:
+    """给出某个每日收盘点当时可追溯的累计折算依据。"""
+    used_percent = observation.interval_used_percent
+    raw_estimate = (
+        observation.selected_total_cost * Decimal("100") / used_percent
+        if used_percent > 0
+        else None
+    )
+    percentile = int(
+        observation.raw_window.get(
+            "conservative_percentile",
+            config.conservative_percentile,
+        )
+    )
+    history_samples = int(
+        observation.raw_window.get(
+            "rate_history_samples",
+            config.rate_history_samples,
+        )
+    )
+    return {
+        "observed_at": iso(observation.observed_at),
+        "starts_at": iso(observation.attribution_started_at),
+        "start_cost_usd": 0.0,
+        "start_percent": 0.0,
+        "end_cost_usd": _money(observation.selected_total_cost),
+        "end_percent": float(used_percent),
+        "raw_estimate_usd": (
+            _money(raw_estimate) if raw_estimate is not None else None
+        ),
+        "estimate_usd": _money(
+            observation.effective_usd_per_percent * Decimal("100")
+        ),
+        "effective_usd_per_percent": float(
+            observation.effective_usd_per_percent
+        ),
+        "rate_source": str(observation.raw_window.get("rate_source", "")),
+        "sample_note": observation.sample_note,
+        "conservative_percentile": percentile,
+        "rate_history_samples": history_samples,
+        "rate_sample_count": len(rate_rows),
+        "rate_samples": [
+            {
+                "observed_at": iso(row.observed_at),
+                "cost_usd": _money(row.selected_total_cost),
+                "used_percent": float(row.interval_used_percent),
+                "usd_per_percent": float(row.sample_usd_per_percent),
+            }
+            for row in reversed(rate_rows)
+            if row.sample_usd_per_percent is not None
+        ],
+    }
+
+
 
 def _capacity_summary(
     config: AppSettings,
@@ -224,15 +282,47 @@ class StatisticsView(AuthenticatedAPIView):
 
         now = timezone.now()
         capacity_summary = _capacity_summary(config, location, now)
-        observation_rows = Observation.objects.filter(
-            account_id=config.openai_account_id,
-            excluded_at__isnull=True,
-            raw_window__rate_method=RATE_METHOD,
-            observed_at__gte=now - timedelta(days=capacity_days),
-        ).order_by("observed_at", "id")
+        capacity_start = now - timedelta(days=capacity_days)
+        # 每个上游窗口最长七天；多取七天只用于还原范围起点附近收盘值
+        # 当时可见的有效样本，不会把额外日期输出到图表。
+        observation_rows = list(
+            Observation.objects.filter(
+                account_id=config.openai_account_id,
+                excluded_at__isnull=True,
+                raw_window__rate_method=RATE_METHOD,
+                observed_at__gte=capacity_start - timedelta(days=7),
+            ).order_by("observed_at", "id")
+        )
         daily: dict[str, dict] = {}
+        rate_histories: dict[tuple[int, datetime | None], list[Observation]] = (
+            defaultdict(list)
+        )
         for observation in observation_rows:
-            period = observation.observed_at.astimezone(location).date().isoformat()
+            history_key = (
+                observation.account_id,
+                observation.attribution_started_at,
+            )
+            history = rate_histories[history_key]
+            history_samples = int(
+                observation.raw_window.get(
+                    "rate_history_samples",
+                    config.rate_history_samples,
+                )
+            )
+            previous_count = max(0, history_samples - 1)
+            rate_rows = history[-previous_count:]
+            if (
+                observation.valid_sample
+                and observation.sample_usd_per_percent is not None
+            ):
+                rate_rows = [*rate_rows, observation]
+                history.append(observation)
+
+            if observation.observed_at < capacity_start:
+                continue
+            period = (
+                observation.observed_at.astimezone(location).date().isoformat()
+            )
             total = observation.effective_usd_per_percent * Decimal("100")
             row = daily.setdefault(
                 period,
@@ -242,6 +332,8 @@ class StatisticsView(AuthenticatedAPIView):
                     "minimum_usd": total,
                     "maximum_usd": total,
                     "sample_count": 0,
+                    "_closing_observation": observation,
+                    "_rate_rows": rate_rows,
                 },
             )
             # 查询集按时间升序，覆盖后的值就是当天最后一次保守估算。
@@ -249,14 +341,21 @@ class StatisticsView(AuthenticatedAPIView):
             row["minimum_usd"] = min(row["minimum_usd"], total)
             row["maximum_usd"] = max(row["maximum_usd"], total)
             row["sample_count"] += 1
-
+            row["_closing_observation"] = observation
+            row["_rate_rows"] = rate_rows
         if capacity_period == "day":
             capacity_series = [
                 {
-                    **row,
+                    "period": row["period"],
                     "weekly_total_usd": _money(row["weekly_total_usd"]),
                     "minimum_usd": _money(row["minimum_usd"]),
                     "maximum_usd": _money(row["maximum_usd"]),
+                    "sample_count": row["sample_count"],
+                    "basis": _closing_basis(
+                        row["_closing_observation"],
+                        row["_rate_rows"],
+                        config,
+                    ),
                 }
                 for row in daily.values()
             ]
@@ -282,6 +381,8 @@ class StatisticsView(AuthenticatedAPIView):
                             max(row["maximum_usd"] for row in rows)
                         ),
                         "sample_count": len(rows),
+                        # 月值是多日收盘均值，不存在一个可追溯到单日端点的依据。
+                        "basis": None,
                     }
                 )
 

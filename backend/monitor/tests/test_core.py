@@ -2614,6 +2614,19 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
     assert result["capacity_summary"]["cycle"]["raw_estimate_usd"] == 2000.0
     assert result["capacity_summary"]["cycle"]["rate_calculated"] is True
     assert result["capacity_summary"]["cycle"]["rate_sample_count"] == 2
+    closing_basis = result["capacity_series"][-1]["basis"]
+    assert closing_basis["starts_at"] == attribution_started_at.isoformat()
+    assert closing_basis["observed_at"] == last_at.astimezone(
+        ZoneInfo("UTC")
+    ).isoformat()
+    assert closing_basis["end_cost_usd"] == 300.0
+    assert closing_basis["end_percent"] == 15.0
+    assert closing_basis["raw_estimate_usd"] == 2000.0
+    assert closing_basis["estimate_usd"] == 2000.0
+    assert closing_basis["rate_sample_count"] == 2
+    assert [
+        sample["cost_usd"] for sample in closing_basis["rate_samples"]
+    ] == [300.0, 200.0]
     assert result["capacity_summary"]["today"] == {
         "estimate_usd": 2000.0,
         "minimum_usd": 1666.67,

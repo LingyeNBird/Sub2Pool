@@ -211,12 +211,31 @@ export interface BlockedIPAddress {
   created_at: string;
 }
 
+export interface CapacityClosingBasis {
+  observed_at: string;
+  starts_at: string | null;
+  start_cost_usd: number;
+  start_percent: number;
+  end_cost_usd: number;
+  end_percent: number;
+  raw_estimate_usd: number | null;
+  estimate_usd: number;
+  effective_usd_per_percent: number;
+  rate_source: string;
+  sample_note: string;
+  conservative_percentile: number;
+  rate_history_samples: number;
+  rate_sample_count: number;
+  rate_samples: RateSample[];
+}
+
 export interface CapacityPoint {
   period: string;
   weekly_total_usd: number;
   minimum_usd: number;
   maximum_usd: number;
   sample_count: number;
+  basis: CapacityClosingBasis | null;
 }
 
 export interface CycleCapacityEstimate {
