@@ -104,43 +104,57 @@ function edit() {
                 </div>
               </div>
               <div
-                class="flex h-8 min-w-0 grow overflow-hidden rounded-box bg-base-300 text-xs font-semibold tabular-nums"
+                class="relative flex h-8 min-w-0 grow overflow-hidden rounded-box bg-base-300 text-xs font-semibold tabular-nums"
                 role="img"
                 :aria-label="`已归属 ${formatPercent(participant.snapshot?.charged_cycle_percent)}, 剩余 ${formatPercent(remainingShare())}`"
               >
-                <div
+                <div class="flex h-full w-full" aria-hidden="true">
+                  <div
+                    v-if="
+                      (participant.snapshot?.charged_cycle_percent ?? 0) > 0
+                    "
+                    class="h-full shrink-0 bg-warning"
+                    :style="{
+                      width: `${allocationSegmentWidth(participant.snapshot?.charged_cycle_percent ?? 0)}%`,
+                    }"
+                  ></div>
+                  <div
+                    v-if="remainingShare() > 0"
+                    class="h-full shrink-0 bg-primary"
+                    :style="{
+                      width: `${allocationSegmentWidth(remainingShare())}%`,
+                    }"
+                  ></div>
+                </div>
+                <span
                   v-if="(participant.snapshot?.charged_cycle_percent ?? 0) > 0"
-                  class="flex items-center justify-center overflow-hidden bg-warning px-1 text-warning-content"
+                  class="pointer-events-none absolute inset-y-0 left-0 z-10 flex max-w-full min-w-fit items-center justify-center px-1 text-[10px] whitespace-nowrap text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.8)] sm:text-xs"
                   :style="{
                     width: `${allocationSegmentWidth(participant.snapshot?.charged_cycle_percent ?? 0)}%`,
                   }"
                 >
-                  <span class="text-[10px] whitespace-nowrap sm:text-xs">
-                    已用
-                    {{
-                      formatCompactPercent(
-                        participant.snapshot?.charged_cycle_percent,
-                      )
-                    }}
-                  </span>
-                </div>
-                <div
+                  已用
+                  {{
+                    formatCompactPercent(
+                      participant.snapshot?.charged_cycle_percent,
+                    )
+                  }}
+                </span>
+                <span
                   v-if="remainingShare() > 0"
-                  class="flex items-center justify-center overflow-hidden bg-primary px-1 text-primary-content"
+                  class="pointer-events-none absolute inset-y-0 right-0 z-10 flex max-w-full min-w-fit items-center justify-center px-1 text-[10px] whitespace-nowrap text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.8)] sm:text-xs"
                   :style="{
                     width: `${allocationSegmentWidth(remainingShare())}%`,
                   }"
                 >
-                  <span class="text-[10px] whitespace-nowrap sm:text-xs">
-                    剩余 {{ formatCompactPercent(remainingShare()) }}
-                  </span>
-                </div>
+                  剩余 {{ formatCompactPercent(remainingShare()) }}
+                </span>
                 <div
                   v-if="
                     (participant.snapshot?.charged_cycle_percent ?? 0) <= 0 &&
                     remainingShare() <= 0
                   "
-                  class="flex grow items-center justify-center opacity-60"
+                  class="absolute inset-0 flex items-center justify-center opacity-60"
                 >
                   暂无可分配权益
                 </div>
