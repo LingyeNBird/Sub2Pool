@@ -16,7 +16,7 @@ export const appRoutes: RouteRecordRaw[] = [
   {
     path: "system-users",
     name: "system-users",
-    component: () => import("@/views/users/SystemUsersView.vue"),
+    component: () => import("@/views/users/system-users/SystemUsersView.vue"),
     meta: { title: "系统用户", adminOnly: true },
   },
   {
