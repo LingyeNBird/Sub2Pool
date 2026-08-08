@@ -48,7 +48,7 @@ function existingBlock(
         <span class="loading loading-lg loading-spinner"></span>
       </div>
       <div v-else class="overflow-x-auto">
-        <table class="table">
+        <table class="table min-w-[60rem]">
           <thead>
             <tr>
               <th>时间</th>

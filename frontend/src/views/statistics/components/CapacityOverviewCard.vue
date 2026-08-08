@@ -38,7 +38,7 @@ const capacityLabels = computed(
               class="size-5"
             />周限等效额度估算
             <span
-              class="tooltip tooltip-right"
+              class="responsive-help-tooltip tooltip tooltip-bottom"
               data-tip="本周期估算使用官方七天周期累计用量；今日估算只使用今天已覆盖观测区间的增量。"
             >
               <button

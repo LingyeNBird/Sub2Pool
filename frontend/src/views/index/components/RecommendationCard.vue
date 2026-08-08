@@ -15,7 +15,7 @@ defineEmits<{
 <template>
   <button
     type="button"
-    class="relative w-full rounded-box border border-base-300 bg-base-100 p-5 text-left"
+    class="relative w-full min-w-0 rounded-box border border-base-300 bg-base-100 p-5 text-left"
     :class="applied ? 'cursor-default' : 'cursor-pointer'"
     :disabled="applied"
     :aria-label="`处理参与者 ${participant.name} 的额度建议`"
@@ -28,11 +28,15 @@ defineEmits<{
     />
     <div :class="{ 'blur-sm': applied }">
       <div class="flex flex-wrap items-start justify-between gap-4">
-        <p class="text-lg leading-9 font-semibold sm:text-xl">
+        <p class="min-w-0 text-lg leading-9 font-semibold sm:text-xl">
           对于参与者
-          <strong class="text-xl sm:text-2xl">{{ participant.name }}</strong>
+          <strong class="text-xl break-words sm:text-2xl">{{
+            participant.name
+          }}</strong>
           （Sub2API 账号
-          <span class="font-bold">{{ participant.sub2api_identity }}</span
+          <span class="font-bold break-all">{{
+            participant.sub2api_identity
+          }}</span
           >），
           <template v-if="participant.snapshot">
             建议把 Sub2API 用户余额设置为

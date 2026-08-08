@@ -83,9 +83,12 @@ function edit() {
                   {{ participant.enabled ? "启用" : "停用" }}
                 </span>
               </div>
-              <p class="mt-1 text-sm opacity-60">
-                {{ participant.email || "未填写邮箱" }} · Sub2API 账号
-                <span class="font-medium">{{
+              <p class="mt-1 min-w-0 text-sm opacity-60">
+                <span class="break-all">{{
+                  participant.email || "未填写邮箱"
+                }}</span>
+                · Sub2API 账号
+                <span class="font-medium break-all">{{
                   participant.sub2api_identity
                 }}</span>
               </p>
@@ -171,7 +174,7 @@ function edit() {
             >
               <div v-if="participant.notes">
                 <div class="text-xs opacity-60">备注</div>
-                <p class="mt-1 text-sm whitespace-pre-wrap">
+                <p class="mt-1 text-sm break-words whitespace-pre-wrap">
                   {{ participant.notes }}
                 </p>
               </div>

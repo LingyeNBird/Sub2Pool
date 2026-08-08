@@ -113,7 +113,7 @@ defineExpose({ open, close });
 
 <template>
   <dialog ref="dialog" class="modal">
-    <div class="modal-box">
+    <div class="modal-box w-[calc(100vw-2rem)] max-w-lg overflow-x-hidden">
       <h2 class="text-lg font-bold">
         {{ editingParticipant ? "编辑参与者" : "添加参与者" }}
       </h2>
@@ -132,7 +132,7 @@ defineExpose({ open, close });
             <div class="grid min-w-0 gap-2 overflow-hidden">
               <select
                 v-model.number="form.sub2api_user_id"
-                class="select w-full min-w-0 truncate"
+                class="select w-full max-w-full min-w-0 truncate"
                 required
                 @change="applySelectedUser"
               >

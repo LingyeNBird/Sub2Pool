@@ -21,7 +21,7 @@ const usagePrecision = defineModel<"raw" | "hour" | "day">("precision", {
           <h2 class="card-title">
             <AppIcon name="chart-bar" class="size-5" />参与者账号用量
             <span
-              class="tooltip tooltip-right"
+              class="responsive-help-tooltip tooltip tooltip-bottom"
               :data-tip="`展示 Sub2API 用量日志中按所选 OpenAI 上游账号和参与者聚合的本周期累计用量。后台当前每 ${data?.sample_interval_minutes ?? '—'} 分钟探测一次。`"
             >
               <button

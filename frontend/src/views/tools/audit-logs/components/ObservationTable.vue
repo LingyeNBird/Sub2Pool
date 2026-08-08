@@ -51,7 +51,7 @@ function sourceLabel(value: string) {
       </div>
       <template v-else>
         <div class="overflow-x-auto">
-          <table class="table">
+          <table class="table min-w-[60rem]">
             <thead>
               <tr>
                 <th>

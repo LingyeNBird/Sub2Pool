@@ -32,7 +32,7 @@ const dateTime = useDateTime();
       </div>
       <template v-else>
         <div class="overflow-x-auto">
-          <table class="table">
+          <table class="table min-w-[48rem]">
             <thead>
               <tr>
                 <th>

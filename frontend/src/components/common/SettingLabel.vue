@@ -8,7 +8,11 @@ defineProps<{
 <template>
   <div class="label justify-start gap-1">
     <span>{{ label }}</span>
-    <span v-if="help" class="tooltip tooltip-right z-10" :data-tip="help">
+    <span
+      v-if="help"
+      class="responsive-help-tooltip tooltip tooltip-bottom z-10"
+      :data-tip="help"
+    >
       <button
         type="button"
         class="btn btn-circle cursor-help btn-ghost btn-xs"

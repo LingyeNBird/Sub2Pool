@@ -26,9 +26,9 @@ watch(
       aria-label="Toggle sidebar"
     />
     <main
-      class="drawer-content bg-base-100 lg:mt-2 lg:rounded-ss-4xl lg:border-s lg:border-t lg:border-base-300 lg:bg-[radial-gradient(ellipse_50rem_30rem_at_50%_0%,color-mix(oklch(96%_0.008_68)_3%,transparent)_0%,transparent_80%)] lg:[corner-start-start-shape:squircle]"
+      class="drawer-content min-w-0 bg-base-100 lg:mt-2 lg:rounded-ss-4xl lg:border-s lg:border-t lg:border-base-300 lg:bg-[radial-gradient(ellipse_50rem_30rem_at_50%_0%,color-mix(oklch(96%_0.008_68)_3%,transparent)_0%,transparent_80%)] lg:[corner-start-start-shape:squircle]"
     >
-      <div class="grid grid-cols-12 gap-6 p-4 lg:p-10">
+      <div class="grid min-w-0 grid-cols-12 gap-6 p-4 lg:p-10">
         <AppHeader />
         <RouterView />
       </div>

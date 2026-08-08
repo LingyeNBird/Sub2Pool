@@ -30,7 +30,7 @@ const dateTime = useDateTime("从未登录");
         <span class="loading loading-lg loading-spinner"></span>
       </div>
       <div v-else-if="users.length" class="overflow-x-auto">
-        <table class="table">
+        <table class="table min-w-[40rem]">
           <thead>
             <tr>
               <th>用户</th>
