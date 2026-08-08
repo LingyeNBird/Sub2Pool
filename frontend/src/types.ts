@@ -229,6 +229,22 @@ export interface CapacityClosingBasis {
   rate_samples: RateSample[];
 }
 
+export interface CapacityDailyClosingBasis {
+  observed_from: string;
+  observed_to: string;
+  start_cost_usd: number;
+  start_percent: number;
+  end_cost_usd: number;
+  end_percent: number;
+  cost_delta_usd: number;
+  percent_delta: number;
+  estimate_usd: number;
+  minimum_usd: number;
+  maximum_usd: number | null;
+  sample_count: number;
+  min_percent_span: number;
+}
+
 export interface CapacityPoint {
   period: string;
   weekly_total_usd: number;
@@ -236,6 +252,8 @@ export interface CapacityPoint {
   maximum_usd: number;
   sample_count: number;
   basis: CapacityClosingBasis | null;
+  daily_total_usd: number | null;
+  daily_basis: CapacityDailyClosingBasis | null;
 }
 
 export interface CycleCapacityEstimate {

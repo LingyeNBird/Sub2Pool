@@ -45,9 +45,9 @@ function intensity(value: number) {
 
 function cellClass(value: number) {
   return [
-    "size-3.5 rounded-[0.2rem] border border-base-content/5",
+    "size-3.5 rounded-[0.2rem] border border-base-content/25",
     [
-      "bg-base-300",
+      "bg-transparent",
       "bg-primary/20",
       "bg-primary/40",
       "bg-primary/65",
@@ -103,15 +103,6 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
           :aria-label="`${point.label}，新增用量 ${formatCurrency(point.value)}`"
           @mouseenter="hoveredPoint = point"
         ></span>
-      </div>
-      <div class="mt-2 flex min-h-4 items-center justify-end gap-1 text-xs">
-        <span class="mr-1 opacity-50">少</span>
-        <span class="size-3 rounded-[0.2rem] bg-base-300"></span>
-        <span class="size-3 rounded-[0.2rem] bg-primary/20"></span>
-        <span class="size-3 rounded-[0.2rem] bg-primary/40"></span>
-        <span class="size-3 rounded-[0.2rem] bg-primary/65"></span>
-        <span class="size-3 rounded-[0.2rem] bg-primary"></span>
-        <span class="ml-1 opacity-50">多</span>
       </div>
     </div>
   </div>

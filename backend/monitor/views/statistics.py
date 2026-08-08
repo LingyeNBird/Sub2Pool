@@ -80,6 +80,47 @@ def _closing_basis(
     }
 
 
+def _daily_closing_basis(
+    first: Observation,
+    last: Observation,
+    sample_count: int,
+    config: AppSettings,
+) -> dict | None:
+    """按某日同一归属区间的首末观测计算日内增量折算。"""
+    if sample_count < 2:
+        return None
+    cost_delta = last.selected_total_cost - first.selected_total_cost
+    percent_delta = last.interval_used_percent - first.interval_used_percent
+    if (
+        cost_delta <= 0
+        or percent_delta < config.daily_estimate_min_percent_span
+    ):
+        return None
+
+    estimate = cost_delta * Decimal("100") / percent_delta
+    minimum = cost_delta * Decimal("100") / (percent_delta + Decimal("1"))
+    maximum = (
+        cost_delta * Decimal("100") / (percent_delta - Decimal("1"))
+        if percent_delta > 1
+        else None
+    )
+    return {
+        "observed_from": iso(first.observed_at),
+        "observed_to": iso(last.observed_at),
+        "start_cost_usd": _money(first.selected_total_cost),
+        "start_percent": float(first.interval_used_percent),
+        "end_cost_usd": _money(last.selected_total_cost),
+        "end_percent": float(last.interval_used_percent),
+        "cost_delta_usd": _money(cost_delta),
+        "percent_delta": float(percent_delta),
+        "estimate_usd": _money(estimate),
+        "minimum_usd": _money(minimum),
+        "maximum_usd": _money(maximum) if maximum is not None else None,
+        "sample_count": sample_count,
+        "min_percent_span": float(config.daily_estimate_min_percent_span),
+    }
+
+
 
 def _capacity_summary(
     config: AppSettings,
@@ -282,7 +323,11 @@ class StatisticsView(AuthenticatedAPIView):
 
         now = timezone.now()
         capacity_summary = _capacity_summary(config, location, now)
-        capacity_start = now - timedelta(days=capacity_days)
+        capacity_start = datetime.combine(
+            (now - timedelta(days=capacity_days)).astimezone(location).date(),
+            time.min,
+            tzinfo=location,
+        )
         # 每个上游窗口最长七天；多取七天只用于还原范围起点附近收盘值
         # 当时可见的有效样本，不会把额外日期输出到图表。
         observation_rows = list(
@@ -334,6 +379,10 @@ class StatisticsView(AuthenticatedAPIView):
                     "sample_count": 0,
                     "_closing_observation": observation,
                     "_rate_rows": rate_rows,
+                    "_daily_segment_key": history_key,
+                    "_daily_first_observation": observation,
+                    "_daily_last_observation": observation,
+                    "_daily_sample_count": 0,
                 },
             )
             # 查询集按时间升序，覆盖后的值就是当天最后一次保守估算。
@@ -343,6 +392,19 @@ class StatisticsView(AuthenticatedAPIView):
             row["sample_count"] += 1
             row["_closing_observation"] = observation
             row["_rate_rows"] = rate_rows
+            if row["_daily_segment_key"] != history_key:
+                row["_daily_segment_key"] = history_key
+                row["_daily_first_observation"] = observation
+                row["_daily_sample_count"] = 0
+            row["_daily_last_observation"] = observation
+            row["_daily_sample_count"] += 1
+        for row in daily.values():
+            row["_daily_basis"] = _daily_closing_basis(
+                row["_daily_first_observation"],
+                row["_daily_last_observation"],
+                row["_daily_sample_count"],
+                config,
+            )
         if capacity_period == "day":
             capacity_series = [
                 {
@@ -356,6 +418,12 @@ class StatisticsView(AuthenticatedAPIView):
                         row["_rate_rows"],
                         config,
                     ),
+                    "daily_total_usd": (
+                        row["_daily_basis"]["estimate_usd"]
+                        if row["_daily_basis"] is not None
+                        else None
+                    ),
+                    "daily_basis": row["_daily_basis"],
                 }
                 for row in daily.values()
             ]
@@ -366,6 +434,11 @@ class StatisticsView(AuthenticatedAPIView):
             capacity_series = []
             for period, rows in monthly.items():
                 closing_values = [row["weekly_total_usd"] for row in rows]
+                daily_estimates = [
+                    row["_daily_basis"]["estimate_usd"]
+                    for row in rows
+                    if row["_daily_basis"] is not None
+                ]
                 capacity_series.append(
                     {
                         "period": period,
@@ -383,6 +456,18 @@ class StatisticsView(AuthenticatedAPIView):
                         "sample_count": len(rows),
                         # 月值是多日收盘均值，不存在一个可追溯到单日端点的依据。
                         "basis": None,
+                        "daily_total_usd": (
+                            _money(
+                                sum(
+                                    (Decimal(str(value)) for value in daily_estimates),
+                                    Decimal("0"),
+                                )
+                                / Decimal(len(daily_estimates))
+                            )
+                            if daily_estimates
+                            else None
+                        ),
+                        "daily_basis": None,
                     }
                 )
 

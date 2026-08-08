@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 import { useDateTime } from "@/composables/useDateTime";
 import type { CapacityPoint, StatisticsData } from "@/types";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 import StatisticsChart from "./StatisticsChart.vue";
+
+type HistoryEstimateMode = "cycle" | "daily";
+
+interface CapacityHistoryEntry {
+  point: CapacityPoint;
+  value: number;
+}
 
 const props = defineProps<{
   data: StatisticsData | null;
@@ -14,19 +21,29 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   showBasis: [kind: "cycle" | "today"];
-  showClosingBasis: [point: CapacityPoint];
+  showClosingBasis: [point: CapacityPoint, kind: HistoryEstimateMode];
 }>();
 
 const capacityPeriod = defineModel<"day" | "month">("period", {
   required: true,
 });
 const capacityDays = defineModel<number>("days", { required: true });
+const historyEstimateMode = ref<HistoryEstimateMode>("cycle");
 const dateTime = useDateTime();
-const capacityValues = computed(
-  () => props.data?.capacity_series.map((item) => item.weekly_total_usd) ?? [],
+const capacityHistory = computed<CapacityHistoryEntry[]>(() =>
+  (props.data?.capacity_series ?? []).flatMap((point) => {
+    const value =
+      historyEstimateMode.value === "cycle"
+        ? point.weekly_total_usd
+        : point.daily_total_usd;
+    return value === null ? [] : [{ point, value }];
+  }),
 );
-const capacityLabels = computed(
-  () => props.data?.capacity_series.map((item) => item.period) ?? [],
+const capacityValues = computed(() =>
+  capacityHistory.value.map((entry) => entry.value),
+);
+const capacityLabels = computed(() =>
+  capacityHistory.value.map((entry) => entry.point.period),
 );
 const capacityScale = computed(() => {
   if (!capacityValues.value.length) return { min: null, max: null };
@@ -41,10 +58,31 @@ const capacityScale = computed(() => {
   };
 });
 
+const historyTitle = computed(() =>
+  historyEstimateMode.value === "cycle"
+    ? "本周期累计折算的每日收盘历史"
+    : "日内增量折算的每日历史",
+);
+const historyDescription = computed(() =>
+  historyEstimateMode.value === "cycle"
+    ? "日视图取当天最后一次从周期起点累计得到的估算，可点击折线点查看当日依据；月视图取每日收盘估算的平均值。"
+    : "日视图使用同一天、同一归属区间内首末观测的增量估算，可点击折线点查看区间依据；月视图取有效日内估算的平均值。",
+);
+const historyEmptyMessage = computed(() =>
+  historyEstimateMode.value === "cycle"
+    ? "尚无累计口径观测，完成首次测算后才会形成周限总额度历史。"
+    : "当前范围内没有达到最小周限跨度的日内估算。",
+);
+
 function showClosingBasis(index: number) {
-  const point = props.data?.capacity_series[index];
-  if (capacityPeriod.value === "day" && point?.basis) {
-    emit("showClosingBasis", point);
+  const entry = capacityHistory.value[index];
+  if (!entry || capacityPeriod.value !== "day") return;
+  const hasBasis =
+    historyEstimateMode.value === "cycle"
+      ? entry.point.basis !== null
+      : entry.point.daily_basis !== null;
+  if (hasBasis) {
+    emit("showClosingBasis", entry.point, historyEstimateMode.value);
   }
 }
 </script>
@@ -165,11 +203,31 @@ function showClosingBasis(index: number) {
         </span>
       </div>
 
-      <div>
-        <h3 class="font-semibold">本周期累计估算的每日收盘历史</h3>
-        <p class="mt-1 text-sm opacity-60">
-          日视图取当天最后一次累计估算，可点击折线点查看当日依据；月视图取每日收盘估算的平均值，不把日内每次探测当作独立结论。
-        </p>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h3 class="font-semibold">{{ historyTitle }}</h3>
+          <p class="mt-1 text-sm opacity-60">
+            {{ historyDescription }}
+          </p>
+        </div>
+        <div class="join shrink-0">
+          <button
+            type="button"
+            class="btn join-item btn-sm"
+            :class="{ 'btn-active': historyEstimateMode === 'cycle' }"
+            @click="historyEstimateMode = 'cycle'"
+          >
+            累计收盘
+          </button>
+          <button
+            type="button"
+            class="btn join-item btn-sm"
+            :class="{ 'btn-active': historyEstimateMode === 'daily' }"
+            @click="historyEstimateMode = 'daily'"
+          >
+            日内折算
+          </button>
+        </div>
       </div>
       <div v-if="loading" class="flex justify-center py-16">
         <span class="loading loading-lg loading-spinner"></span>
@@ -186,7 +244,7 @@ function showClosingBasis(index: number) {
         @point-click="showClosingBasis"
       />
       <div v-else class="py-16 text-center opacity-60">
-        尚无累计口径观测，完成首次测算后才会形成周限总额度历史。
+        {{ historyEmptyMessage }}
       </div>
     </div>
   </section>

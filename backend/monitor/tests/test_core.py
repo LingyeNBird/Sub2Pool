@@ -2537,6 +2537,8 @@ def test_statistics_groups_capacity_and_participant_usage():
     assert daily["capacity_series"][-1]["weekly_total_usd"] == 1600.0
     assert daily["capacity_summary"]["cycle"]["estimate_usd"] == 1600.0
     assert daily["capacity_summary"]["today"]["sufficient"] is False
+    assert daily["capacity_series"][-1]["daily_total_usd"] is None
+    assert daily["capacity_series"][-1]["daily_basis"] is None
     assert len(daily["participant_series"][0]["points"]) == 1
     point = daily["participant_series"][0]["points"][0]
     assert point["account_cycle_usage_usd"] == 12.0
@@ -2554,6 +2556,8 @@ def test_statistics_groups_capacity_and_participant_usage():
     assert month["minimum_usd"] == 1000.0
     assert month["maximum_usd"] == 1400.0
     assert month["sample_count"] == 2
+    assert month["daily_total_usd"] is None
+    assert month["daily_basis"] is None
 
 
 @pytest.mark.django_db
@@ -2627,6 +2631,23 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
     assert [
         sample["cost_usd"] for sample in closing_basis["rate_samples"]
     ] == [300.0, 200.0]
+    daily_history = result["capacity_series"][-1]
+    assert daily_history["daily_total_usd"] == 2000.0
+    assert daily_history["daily_basis"] == {
+        "observed_from": first_at.astimezone(ZoneInfo("UTC")).isoformat(),
+        "observed_to": last_at.astimezone(ZoneInfo("UTC")).isoformat(),
+        "start_cost_usd": 200.0,
+        "start_percent": 10.0,
+        "end_cost_usd": 300.0,
+        "end_percent": 15.0,
+        "cost_delta_usd": 100.0,
+        "percent_delta": 5.0,
+        "estimate_usd": 2000.0,
+        "minimum_usd": 1666.67,
+        "maximum_usd": 2500.0,
+        "sample_count": 2,
+        "min_percent_span": 5.0,
+    }
     assert result["capacity_summary"]["today"] == {
         "estimate_usd": 2000.0,
         "minimum_usd": 1666.67,
@@ -2644,6 +2665,14 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
         "sufficient": True,
         "reason": "按今日已覆盖观测区间的成本增量与周限增量折算",
     }
+
+    monthly = client.get(
+        "/api/statistics?capacity_period=month",
+        **headers,
+    ).json()["data"]
+    month_history = monthly["capacity_series"][-1]
+    assert month_history["daily_total_usd"] == 2000.0
+    assert month_history["daily_basis"] is None
 
 
 @pytest.mark.django_db

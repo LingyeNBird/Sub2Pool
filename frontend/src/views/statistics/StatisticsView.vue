@@ -15,7 +15,7 @@ interface BasisDialogHandle {
 }
 
 interface ClosingBasisDialogHandle {
-  open: (point: CapacityPoint) => void;
+  open: (point: CapacityPoint, kind: "cycle" | "daily") => void;
 }
 
 const data = ref<StatisticsData | null>(null);
@@ -44,6 +44,10 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+function showClosingBasis(point: CapacityPoint, kind: "cycle" | "daily") {
+  closingBasisDialog.value?.open(point, kind);
 }
 
 watch([capacityPeriod, capacityDays, usageDays, usagePrecision], load);
@@ -76,7 +80,7 @@ onMounted(load);
     :data="data"
     :loading="loading"
     @show-basis="basisDialog?.open($event)"
-    @show-closing-basis="closingBasisDialog?.open($event)"
+    @show-closing-basis="showClosingBasis"
   />
   <ParticipantUsageCard
     v-model:days="usageDays"
