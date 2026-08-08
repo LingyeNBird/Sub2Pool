@@ -40,7 +40,7 @@ export const appRoutes: RouteRecordRaw[] = [
   {
     path: "login-records",
     name: "login-records",
-    component: () => import("@/views/LoginRecordsView.vue"),
+    component: () => import("@/views/login-records/LoginRecordsView.vue"),
     meta: { title: "登录记录", adminOnly: true },
   },
   {
