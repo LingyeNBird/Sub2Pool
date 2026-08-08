@@ -32,7 +32,13 @@ const dateTime = useDateTime();
     <div class="stat">
       <div class="flex h-full items-center justify-between gap-4">
         <div class="min-w-0">
-          <div class="stat-title">保守美元 / 1%</div>
+          <div class="stat-title">
+            {{
+              data.weekly_quota_model === "constant_average"
+                ? "平均美元 / 1%"
+                : "保守美元 / 1%"
+            }}
+          </div>
           <div class="flex items-baseline gap-2">
             <div class="stat-value text-xl font-semibold tabular-nums">
               {{ formatCurrency(data.cycle?.effective_usd_per_percent) }}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
 
-from ..models import AppSettings, Participant, ParticipantSnapshot
+from ..models import AppSettings, Observation, Participant, ParticipantSnapshot
 
 
 def iso(value):
@@ -14,6 +14,26 @@ def iso(value):
 ZERO = Decimal("0")
 CENT = Decimal("0.01")
 PCT_PRECISION = Decimal("0.00001")
+
+
+def display_cycle_rates(
+    observation: Observation,
+    config: AppSettings,
+) -> tuple[Decimal, Decimal | None]:
+    """返回展示模型采用的美元/1%，以及周期累计端点的原始美元/1%。"""
+    used_percent = observation.interval_used_percent
+    raw_rate = (
+        observation.selected_total_cost / used_percent
+        if used_percent > 0
+        else None
+    )
+    if (
+        config.weekly_quota_model == "constant_average"
+        and raw_rate is not None
+    ):
+        return raw_rate, raw_rate
+    return observation.effective_usd_per_percent, raw_rate
+
 
 def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
     return {
@@ -80,10 +100,9 @@ def _constant_average_values(
         ZERO,
         snapshot.participant.share_percent - charged,
     ).quantize(PCT_PRECISION, rounding=ROUND_HALF_UP)
+    display_rate, _raw_rate = display_cycle_rates(observation, config)
     recommended = (
-        remaining
-        * observation.effective_usd_per_percent
-        * config.safety_factor
+        remaining * display_rate * config.safety_factor
     ).quantize(CENT, rounding=ROUND_HALF_UP)
     balance = (
         snapshot.current_balance_usd

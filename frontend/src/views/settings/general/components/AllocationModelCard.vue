@@ -18,7 +18,7 @@ const emit = defineEmits<{ save: [] }>();
       <fieldset class="fieldset max-w-full min-w-0 grid-cols-[minmax(0,1fr)]">
         <SettingLabel
           label="周限额度模型"
-          help="只控制额度估算、参与者权益和余额建议的展示口径。平均恒定按区间起点至当前的每名用户累计成本一次性分摊；时变额度按每个采样区间分别归属。无论选择哪一种，后台都会继续保存并重放完整的时变归属账本。"
+          help="只控制额度估算、参与者权益和余额建议的展示口径。平均恒定用周期累计成本与已用百分比计算账号平均美元/1%，再按每名用户的周期累计成本一次性分摊；时变额度按每个采样区间分别归属并采用保守美元/1%。无论选择哪一种，后台都会继续保存并重放完整的时变归属账本。"
         />
         <select
           v-model="settings.weekly_quota_model"
@@ -58,7 +58,7 @@ const emit = defineEmits<{ save: [] }>();
         <fieldset class="fieldset min-w-0">
           <SettingLabel
             label="安全系数"
-            help="余额建议 = 剩余百分比权益 × 保守美元/1% × 安全系数。小于 1 会预留安全余量，降低超分配风险。"
+            help="余额建议 = 剩余百分比权益 × 当前展示模型采用的美元/1% × 安全系数。小于 1 会预留安全余量，降低超分配风险。"
           />
           <input
             v-model.number="settings.safety_factor"
@@ -72,7 +72,7 @@ const emit = defineEmits<{ save: [] }>();
         <fieldset class="fieldset min-w-0">
           <SettingLabel
             label="保守分位数"
-            help="对最近有效的美元/1% 样本按已用周限加权后取较低分位。数值越低越保守，用于最终的保守美元/1% 估值。"
+            help="仅用于时变额度模型：对最近有效的美元/1%样本按已用周限加权后取较低分位。数值越低越保守。"
           />
           <input
             v-model.number="settings.conservative_percentile"
@@ -85,7 +85,7 @@ const emit = defineEmits<{ save: [] }>();
         <fieldset class="fieldset min-w-0">
           <SettingLabel
             label="参与计算的历史样本数"
-            help="最多取最近多少个有效累计样本计算保守分位数。更多样本更稳定，但对额度变化的响应更慢。"
+            help="仅用于时变额度模型：最多取最近多少个有效累计样本计算保守分位数。更多样本更稳定，但对额度变化的响应更慢。"
           />
           <input
             v-model.number="settings.rate_history_samples"

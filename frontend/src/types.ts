@@ -84,9 +84,11 @@ export interface DashboardData {
   needs_manual_update_count: number;
   cycle: null | {
     id: number;
+    observed_at: string;
     starts_at: string;
     resets_at: string;
     upstream_used_percent: number | null;
+    interval_used_percent: number;
     effective_usd_per_percent: number | null;
     selected_total_cost: number | null;
     unattributed_used_percent: number | null;

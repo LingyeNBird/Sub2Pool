@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.utils import timezone
 
 from .base import AuthenticatedAPIView, ok
-from .presenters import bounded_query_int, iso
+from .presenters import bounded_query_int, display_cycle_rates, iso
 from ..models import (
     AppSettings,
     Observation,
@@ -22,25 +22,6 @@ def _money(value: Decimal) -> float:
     return float(value.quantize(Decimal("0.01")))
 
 
-def _display_cycle_rates(
-    observation: Observation,
-    config: AppSettings,
-) -> tuple[Decimal, Decimal | None]:
-    """返回当前展示模型采用的汇率，以及周期累计端点的原始汇率。"""
-    used_percent = observation.interval_used_percent
-    raw_rate = (
-        observation.selected_total_cost / used_percent
-        if used_percent > 0
-        else None
-    )
-    if (
-        config.weekly_quota_model == "constant_average"
-        and raw_rate is not None
-    ):
-        return raw_rate, raw_rate
-    return observation.effective_usd_per_percent, raw_rate
-
-
 def _closing_basis(
     observation: Observation,
     rate_rows: list[Observation],
@@ -48,7 +29,7 @@ def _closing_basis(
 ) -> dict:
     """给出某个每日收盘点当时可追溯的累计折算依据。"""
     used_percent = observation.interval_used_percent
-    display_rate, raw_rate = _display_cycle_rates(observation, config)
+    display_rate, raw_rate = display_cycle_rates(observation, config)
     raw_estimate = (
         raw_rate * Decimal("100") if raw_rate is not None else None
     )
@@ -182,7 +163,7 @@ def _capacity_summary(
     )
 
     used_percent = latest.interval_used_percent
-    display_cycle_rate, raw_cycle_rate = _display_cycle_rates(latest, config)
+    display_cycle_rate, raw_cycle_rate = display_cycle_rates(latest, config)
     raw_cycle_estimate = (
         raw_cycle_rate * Decimal("100")
         if raw_cycle_rate is not None
@@ -372,7 +353,7 @@ class StatisticsView(AuthenticatedAPIView):
                 )
             )
             previous_count = max(0, history_samples - 1)
-            rate_rows = history[-previous_count:]
+            rate_rows = history[-previous_count:] if previous_count else []
             if (
                 observation.valid_sample
                 and observation.sample_usd_per_percent is not None
@@ -385,7 +366,7 @@ class StatisticsView(AuthenticatedAPIView):
             period = (
                 observation.observed_at.astimezone(location).date().isoformat()
             )
-            display_rate, _ = _display_cycle_rates(observation, config)
+            display_rate, _ = display_cycle_rates(observation, config)
             total = display_rate * Decimal("100")
             row = daily.setdefault(
                 period,

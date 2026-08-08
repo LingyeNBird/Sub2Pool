@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from .base import AdminAPIView, error, ok
 from .presenters import (
+    display_cycle_rates,
     display_recommendation,
     iso,
     participant_data,
@@ -84,6 +85,11 @@ class DashboardView(AdminAPIView):
             if observation
             else []
         )
+        display_rate, raw_rate = (
+            display_cycle_rates(observation, config)
+            if observation
+            else (None, None)
+        )
         participant_rows = [
             participant_data(item, config)
             for item in Participant.objects.filter(enabled=True)
@@ -127,15 +133,17 @@ class DashboardView(AdminAPIView):
         if observation:
             data["cycle"] = {
                 "id": observation.id,
+                "observed_at": iso(observation.observed_at),
                 "starts_at": iso(observation.attribution_started_at),
                 "resets_at": iso(observation.upstream_resets_at),
                 "upstream_used_percent": (
                     float(observation.upstream_used_percent) if observation else None
                 ),
+                "interval_used_percent": float(
+                    observation.interval_used_percent
+                ),
                 "effective_usd_per_percent": (
-                    float(observation.effective_usd_per_percent)
-                    if observation
-                    else None
+                    float(display_rate) if display_rate is not None else None
                 ),
                 "selected_total_cost": (
                     float(observation.selected_total_cost) if observation else None
@@ -154,7 +162,11 @@ class DashboardView(AdminAPIView):
                 "snapshot_sampled_at": (
                     observation.raw_window.get("sampled_at") if observation else None
                 ),
-                "rate_calculated": bool(rate_rows),
+                "rate_calculated": (
+                    raw_rate is not None
+                    if config.weekly_quota_model == "constant_average"
+                    else bool(rate_rows)
+                ),
                 "conservative_percentile": basis_percentile,
                 "rate_history_samples": basis_history_samples,
                 "rate_sample_count": len(rate_rows),

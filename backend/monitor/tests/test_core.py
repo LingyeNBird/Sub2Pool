@@ -476,6 +476,7 @@ def test_constant_average_model_changes_only_presented_attribution():
     )
     config = AppSettings.load()
     config.weekly_quota_model = "constant_average"
+    config.openai_account_id = 7
     config.save()
     participant = Participant.objects.create(
         name="车友",
@@ -496,7 +497,7 @@ def test_constant_average_model_changes_only_presented_attribution():
         selected_total_cost=Decimal("400"),
         total_standard_cost=Decimal("400"),
         total_actual_cost=Decimal("400"),
-        effective_usd_per_percent=Decimal("20"),
+        effective_usd_per_percent=Decimal("15"),
     )
     stored = ParticipantSnapshot.objects.create(
         observation=observation,
@@ -518,6 +519,14 @@ def test_constant_average_model_changes_only_presented_attribution():
     assert constant["snapshot"]["charged_cycle_percent"] == 5.0
     assert constant["snapshot"]["remaining_share_percent"] == 45.0
     assert constant["snapshot"]["recommended_balance_usd"] == 855.0
+    dashboard = client.get("/api/dashboard", **headers).json()["data"]
+    assert dashboard["weekly_quota_model"] == "constant_average"
+    assert dashboard["cycle"]["effective_usd_per_percent"] == 20.0
+    assert dashboard["cycle"]["interval_used_percent"] == 20.0
+    assert dashboard["cycle"]["rate_calculated"] is True
+    assert dashboard["participants"][0]["snapshot"][
+        "recommended_balance_usd"
+    ] == 855.0
     stored.refresh_from_db()
     assert stored.charged_cycle_percent == Decimal("12")
     assert stored.recommended_balance_usd == Decimal("722")
@@ -530,6 +539,17 @@ def test_constant_average_model_changes_only_presented_attribution():
     ).json()["data"][0]
     assert time_varying["snapshot"]["allocation_model"] == "time_varying"
     assert time_varying["snapshot"]["charged_cycle_percent"] == 12.0
+    time_varying_dashboard = client.get(
+        "/api/dashboard",
+        **headers,
+    ).json()["data"]
+    assert (
+        time_varying_dashboard["cycle"]["effective_usd_per_percent"] == 15.0
+    )
+    assert time_varying_dashboard["cycle"]["rate_calculated"] is False
+    assert time_varying_dashboard["participants"][0]["snapshot"][
+        "recommended_balance_usd"
+    ] == 722.0
 
 @pytest.mark.django_db
 def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
@@ -758,6 +778,65 @@ def test_integer_percent_plateau_uses_cumulative_cost_for_capacity(monkeypatch):
     assert snapshot.charged_cycle_percent == Decimal("17")
     assert snapshot.remaining_share_percent == Decimal("33")
     assert snapshot.recommended_balance_usd == Decimal("808.52")
+
+
+@pytest.mark.django_db
+def test_single_rate_history_sample_uses_only_latest_valid_sample():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.rate_history_samples = 1
+    config.conservative_percentile = 25
+    config.save()
+
+    now = timezone.now()
+    reset_at = now + timedelta(days=4)
+    for index, (used_percent, cost) in enumerate(
+        (
+            (Decimal("10"), Decimal("100")),
+            (Decimal("20"), Decimal("600")),
+        )
+    ):
+        Observation.objects.create(
+            account_id=7,
+            source="manual",
+            observed_at=now + timedelta(minutes=index),
+            window_seconds=604800,
+            upstream_resets_at=reset_at,
+            upstream_used_percent=used_percent,
+            raw_selected_total_cost=cost,
+            selected_total_cost=cost,
+            total_standard_cost=cost,
+            total_actual_cost=cost,
+            effective_usd_per_percent=config.initial_usd_per_percent,
+        )
+
+    rebuild_account(7, config)
+
+    observations = list(Observation.objects.order_by("observed_at", "id"))
+    assert observations[0].sample_usd_per_percent == Decimal("10.000000")
+    assert observations[0].effective_usd_per_percent == Decimal("10.000000")
+    assert observations[1].sample_usd_per_percent == Decimal("30.000000")
+    assert observations[1].effective_usd_per_percent == Decimal("30.000000")
+
+    statistics = client.get("/api/statistics", **headers).json()["data"]
+    assert statistics["capacity_summary"]["cycle"]["rate_sample_count"] == 1
+    assert [
+        sample["usd_per_percent"]
+        for sample in statistics["capacity_summary"]["cycle"]["rate_samples"]
+    ] == [30.0]
+    closing_basis = statistics["capacity_series"][-1]["basis"]
+    assert closing_basis["rate_sample_count"] == 1
+    assert [
+        sample["usd_per_percent"]
+        for sample in closing_basis["rate_samples"]
+    ] == [30.0]
 
 
 @pytest.mark.django_db
