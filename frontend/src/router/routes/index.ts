@@ -28,7 +28,7 @@ export const appRoutes: RouteRecordRaw[] = [
   {
     path: "statistics",
     name: "statistics",
-    component: () => import("@/views/StatisticsView.vue"),
+    component: () => import("@/views/statistics/StatisticsView.vue"),
     meta: { title: "额度统计" },
   },
   {
