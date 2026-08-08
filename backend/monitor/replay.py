@@ -357,7 +357,8 @@ def _replay_segment(
             else None
         )
         previous_count = max(0, config.rate_history_samples - 1)
-        candidates = rate_history[-previous_count:] if previous_count else []
+        history_start = max(0, len(rate_history) - previous_count)
+        candidates = rate_history[history_start : len(rate_history)]
         if sample_rate is not None:
             candidates = [
                 *candidates,

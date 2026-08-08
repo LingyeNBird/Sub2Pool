@@ -353,7 +353,8 @@ class StatisticsView(AuthenticatedAPIView):
                 )
             )
             previous_count = max(0, history_samples - 1)
-            rate_rows = history[-previous_count:] if previous_count else []
+            history_start = max(0, len(history) - previous_count)
+            rate_rows = history[history_start : len(history)]
             if (
                 observation.valid_sample
                 and observation.sample_usd_per_percent is not None
