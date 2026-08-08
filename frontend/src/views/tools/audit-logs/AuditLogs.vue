@@ -48,6 +48,10 @@ const exclusionReason = ref("");
 const excludeDialog = ref<HTMLDialogElement | null>(null);
 const excluding = ref(false);
 const restoringId = ref<number | null>(null);
+const manualStartTarget = ref<Observation | null>(null);
+const manualStartReason = ref("");
+const manualStartDialog = ref<HTMLDialogElement | null>(null);
+const manualStartId = ref<number | null>(null);
 const schedule = ref<MonitorSchedule | null>(null);
 const clientNow = ref(Date.now());
 const serverOffsetMs = ref(0);
@@ -239,6 +243,46 @@ async function restore(row: Observation) {
       error instanceof ApiError ? error.message : "恢复观测记录失败";
   } finally {
     restoringId.value = null;
+  }
+}
+
+function promptManualStart(row: Observation) {
+  manualStartTarget.value = row;
+  manualStartReason.value = "";
+  manualStartDialog.value?.showModal();
+}
+
+async function confirmManualStart() {
+  if (!manualStartTarget.value) return;
+  manualStartId.value = manualStartTarget.value.id;
+  message.value = "";
+  try {
+    await api(`observations/${manualStartTarget.value.id}/manual-start`, {
+      method: "POST",
+      body: JSON.stringify({ reason: manualStartReason.value }),
+    });
+    manualStartDialog.value?.close();
+    manualStartTarget.value = null;
+    await load();
+  } catch (error) {
+    message.value =
+      error instanceof ApiError ? error.message : "设置区间起点失败";
+  } finally {
+    manualStartId.value = null;
+  }
+}
+
+async function clearManualStart(row: Observation) {
+  manualStartId.value = row.id;
+  message.value = "";
+  try {
+    await api(`observations/${row.id}/manual-start`, { method: "DELETE" });
+    await load();
+  } catch (error) {
+    message.value =
+      error instanceof ApiError ? error.message : "取消区间起点失败";
+  } finally {
+    manualStartId.value = null;
   }
 }
 
@@ -441,14 +485,25 @@ onUnmounted(() => window.clearInterval(clockTimer));
                   <div class="text-xs opacity-60">
                     快照 {{ dateTime(row.snapshot_sampled_at) }}
                   </div>
-                  <div v-if="row.excluded" class="mt-1 flex gap-1">
-                    <span class="badge badge-sm badge-warning">已排除</span>
-                    <span class="badge badge-ghost badge-sm">
-                      {{
-                        row.exclusion_source === "automatic"
-                          ? "自动判定"
-                          : "管理员"
-                      }}
+                  <div
+                    v-if="row.excluded || row.is_manual_start"
+                    class="mt-1 flex flex-wrap gap-1"
+                  >
+                    <template v-if="row.excluded">
+                      <span class="badge badge-sm badge-warning">已排除</span>
+                      <span class="badge badge-ghost badge-sm">
+                        {{
+                          row.exclusion_source === "automatic"
+                            ? "自动判定"
+                            : "管理员"
+                        }}
+                      </span>
+                    </template>
+                    <span
+                      v-if="row.is_manual_start"
+                      class="badge badge-sm badge-primary"
+                    >
+                      管理员起点
                     </span>
                   </div>
                 </td>
@@ -481,25 +536,55 @@ onUnmounted(() => window.clearInterval(clockTimer));
                     <button class="btn btn-ghost btn-xs" @click="show(row)">
                       详情
                     </button>
-                    <button
-                      v-if="!row.excluded"
-                      class="btn btn-ghost text-warning btn-xs"
-                      @click="promptExclude(row)"
-                    >
-                      排除
-                    </button>
-                    <button
-                      v-else
-                      class="btn btn-ghost text-success btn-xs"
-                      :disabled="restoringId === row.id"
-                      @click="restore(row)"
-                    >
-                      <span
-                        v-if="restoringId === row.id"
-                        class="loading loading-xs loading-spinner"
-                      ></span>
-                      恢复
-                    </button>
+                    <template v-if="row.excluded">
+                      <button
+                        v-if="row.exclusion_source === 'automatic'"
+                        class="btn btn-ghost text-primary btn-xs"
+                        :disabled="manualStartId === row.id"
+                        @click="promptManualStart(row)"
+                      >
+                        设为起点
+                      </button>
+                      <button
+                        v-else
+                        class="btn btn-ghost text-success btn-xs"
+                        :disabled="restoringId === row.id"
+                        @click="restore(row)"
+                      >
+                        <span
+                          v-if="restoringId === row.id"
+                          class="loading loading-xs loading-spinner"
+                        ></span>
+                        恢复
+                      </button>
+                    </template>
+                    <template v-else>
+                      <button
+                        v-if="row.is_manual_start"
+                        class="btn btn-ghost text-primary btn-xs"
+                        :disabled="manualStartId === row.id"
+                        @click="clearManualStart(row)"
+                      >
+                        <span
+                          v-if="manualStartId === row.id"
+                          class="loading loading-xs loading-spinner"
+                        ></span>
+                        取消起点
+                      </button>
+                      <button
+                        v-else
+                        class="btn btn-ghost text-primary btn-xs"
+                        @click="promptManualStart(row)"
+                      >
+                        设为起点
+                      </button>
+                      <button
+                        class="btn btn-ghost text-warning btn-xs"
+                        @click="promptExclude(row)"
+                      >
+                        排除
+                      </button>
+                    </template>
                   </div>
                 </td>
               </tr>
@@ -591,6 +676,14 @@ onUnmounted(() => window.clearInterval(clockTimer));
         <AppIcon name="exclamation-triangle" class="size-5" />
         <span> 此记录已排除，不参与计算。{{ selected.exclusion_reason }} </span>
       </div>
+      <div v-if="selected?.is_manual_start" class="mt-4 alert alert-info">
+        <AppIcon name="flag" class="size-5" />
+        <span>
+          此记录是管理员指定的区间起点。{{
+            selected.manual_start_reason || "未填写起点说明"
+          }}
+        </span>
+      </div>
       <div class="mt-4 overflow-x-auto">
         <table class="table table-sm">
           <thead>
@@ -629,7 +722,7 @@ onUnmounted(() => window.clearInterval(clockTimer));
     <div class="modal-box">
       <h2 class="text-lg font-bold">排除校准记录</h2>
       <p class="mt-3 text-sm opacity-70">
-        排除后，原始记录仍保留作审计，但每次全量重放都会直接忽略它；额度折算和参与者归属会立即从剩余原始采样重新计算。
+        原始记录会永久保留作审计。系统将忽略该点，并只从它所在的最早受影响区间起点向后重算；更早的稳定区间不会重复重放。
       </p>
       <div v-if="exclusionTarget" class="mt-4 rounded-box bg-base-300 p-4">
         <div class="font-medium">
@@ -669,6 +762,55 @@ onUnmounted(() => window.clearInterval(clockTimer));
             class="loading loading-xs loading-spinner"
           ></span>
           确认排除
+        </button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>关闭</button></form>
+  </dialog>
+  <dialog ref="manualStartDialog" class="modal">
+    <div class="modal-box">
+      <h2 class="text-lg font-bold">设置管理员区间起点</h2>
+      <p class="mt-3 text-sm leading-6 opacity-70">
+        管理员起点优先于上游重置时间。系统会把所选观测的累计成本和上游百分比作为零基线，只重算该点及其后续记录；请仅在确认这里发生了官方赠送刷新或其他真实边界时使用。
+      </p>
+      <div v-if="manualStartTarget" class="mt-4 rounded-box bg-base-300 p-4">
+        <div class="font-medium">
+          {{ dateTime(manualStartTarget.observed_at) }}
+        </div>
+        <div class="mt-1 text-sm opacity-70">
+          上游已用 {{ percent(manualStartTarget.upstream_used_percent) }} ·
+          原始累计成本 {{ currency(manualStartTarget.raw_selected_total_cost) }}
+        </div>
+      </div>
+      <fieldset class="mt-4 fieldset">
+        <label class="label">起点说明（可选）</label>
+        <input
+          v-model="manualStartReason"
+          class="input w-full"
+          maxlength="255"
+          placeholder="例如：管理员确认此处为官方赠送刷新"
+        />
+      </fieldset>
+      <div class="modal-action">
+        <button
+          type="button"
+          class="btn"
+          :disabled="manualStartId !== null"
+          @click="manualStartDialog?.close()"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          :disabled="manualStartId !== null"
+          @click="confirmManualStart"
+        >
+          <span
+            v-if="manualStartId !== null"
+            class="loading loading-xs loading-spinner"
+          ></span>
+          确认设为起点
         </button>
       </div>
     </div>

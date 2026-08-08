@@ -12,6 +12,7 @@ from .base import AdminAPIView, error, ok
 from .presenters import iso, latest_snapshot, participant_data
 from ..models import AppSettings, Observation, Participant
 from ..sub2api import Sub2APIClient, Sub2APIError
+from ..replay import RATE_METHOD
 
 
 def _admin_url(value: str) -> str:
@@ -83,7 +84,7 @@ class DashboardView(AdminAPIView):
                     excluded_at__isnull=True,
                     valid_sample=True,
                     sample_usd_per_percent__isnull=False,
-                    raw_window__rate_method="full_replay_v1",
+                    raw_window__rate_method=RATE_METHOD,
                 ).order_by("-observed_at", "-id")[:basis_history_samples]
             )
             if observation
@@ -137,7 +138,7 @@ class DashboardView(AdminAPIView):
                     float(
                         max(
                             Decimal("0"),
-                            observation.upstream_used_percent - total_charged,
+                            observation.interval_used_percent - total_charged,
                         )
                     )
                     if observation
@@ -155,7 +156,7 @@ class DashboardView(AdminAPIView):
                     {
                         "observed_at": iso(row.observed_at),
                         "cost_usd": float(row.selected_total_cost),
-                        "used_percent": float(row.upstream_used_percent),
+                        "used_percent": float(row.interval_used_percent),
                         "usd_per_percent": float(row.sample_usd_per_percent),
                     }
                     for row in rate_rows

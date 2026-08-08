@@ -107,6 +107,8 @@ export interface Observation {
   attribution_started_at: string | null;
   upstream_resets_at: string;
   upstream_used_percent: number;
+  interval_used_percent: number;
+  raw_selected_total_cost: number;
   selected_total_cost: number;
   delta_percent: number | null;
   delta_cost: number | null;
@@ -122,6 +124,9 @@ export interface Observation {
   excluded_at: string | null;
   exclusion_reason: string;
   exclusion_source: "" | "manual" | "automatic";
+  is_manual_start: boolean;
+  manual_start_reason: string;
+  manual_start_set_at: string | null;
 }
 
 export interface MonitorSchedule {

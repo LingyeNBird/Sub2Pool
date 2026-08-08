@@ -15,13 +15,12 @@ from ..models import (
     Participant,
     ParticipantUsageSample,
 )
+from ..replay import RATE_METHOD
 
 
 def _money(value: Decimal) -> float:
     return float(value.quantize(Decimal("0.01")))
 
-
-RATE_METHOD = "full_replay_v1"
 
 
 def _capacity_summary(
@@ -68,7 +67,7 @@ def _capacity_summary(
         excluded_at__isnull=True,
     )
 
-    used_percent = latest.upstream_used_percent
+    used_percent = latest.interval_used_percent
     raw_cycle_estimate = (
         latest.selected_total_cost * Decimal("100") / used_percent
         if used_percent > 0
@@ -125,7 +124,7 @@ def _capacity_summary(
             {
                 "observed_at": iso(row.observed_at),
                 "cost_usd": _money(row.selected_total_cost),
-                "used_percent": float(row.upstream_used_percent),
+                "used_percent": float(row.interval_used_percent),
                 "usd_per_percent": float(row.sample_usd_per_percent),
             }
             for row in valid_rate_rows
@@ -152,13 +151,13 @@ def _capacity_summary(
     first = today_rows[0]
     last = today_rows[-1]
     cost_delta = last.selected_total_cost - first.selected_total_cost
-    percent_delta = last.upstream_used_percent - first.upstream_used_percent
+    percent_delta = last.interval_used_percent - first.interval_used_percent
     today.update(
         {
             "start_cost_usd": _money(first.selected_total_cost),
-            "start_percent": float(first.upstream_used_percent),
+            "start_percent": float(first.interval_used_percent),
             "end_cost_usd": _money(last.selected_total_cost),
-            "end_percent": float(last.upstream_used_percent),
+            "end_percent": float(last.interval_used_percent),
             "cost_delta_usd": _money(cost_delta),
             "percent_delta": float(percent_delta),
             "observed_from": iso(first.observed_at),

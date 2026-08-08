@@ -1,8 +1,8 @@
 """从不可变原始采样重放额度折算、重置边界和参与者归属。
 
-这里没有需要维护的“周期”数据库实体。每次新增、排除或恢复观测后，系统都会按时间顺序
-重新读取该上游账号的全部原始采样：先识别可靠的官方重置或人工刷新边界，再重算所有派生字段。
-因此任何结果都能由当前原始数据复现，管理员排除一条错误记录后也不会留下旧周期状态。
+系统永久保留全部原始采样，但日常只从最早受影响的区间起点向后重放。官方
+``reset_at - window`` 是确定性边界；管理员指定的观测起点优先级更高。
+排除、恢复或新增记录都不会改写不可能受影响的更早区间。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import (
@@ -26,10 +27,9 @@ ZERO = Decimal("0")
 CENT = Decimal("0.01")
 PCT_PRECISION = Decimal("0.00001")
 RATE_PRECISION = Decimal("0.000001")
-RATE_METHOD = "full_replay_v1"
+RATE_METHOD = "boundary_suffix_replay_v2"
 RESET_ROLLBACK_TOLERANCE = Decimal("0.1")
 RESET_TIME_TOLERANCE = timedelta(minutes=5)
-INDEPENDENT_SAMPLE_GAP = timedelta(minutes=1)
 
 
 @dataclass
@@ -43,6 +43,7 @@ class ReplaySegment:
     reason: str
     total_baseline: Decimal
     participant_baselines: dict[int, Decimal]
+    percent_baseline: Decimal
 
 
 @dataclass(frozen=True)
@@ -69,24 +70,9 @@ def _same_official_reset(left: datetime, right: datetime) -> bool:
     return abs(left - right) <= RESET_TIME_TOLERANCE
 
 
-def _sample_key(observation: Observation) -> str | None:
-    sampled_at = observation.raw_window.get("sampled_at")
-    return str(sampled_at) if sampled_at else None
-
-
-def _is_independent(
-    observation: Observation,
-    accepted: list[Observation],
-) -> bool:
-    """优先按上游快照时间去重；旧数据无快照时间时要求至少间隔一分钟。"""
-
-    key = _sample_key(observation)
-    if key is not None:
-        return all(_sample_key(item) != key for item in accepted)
-    return all(
-        abs(observation.observed_at - item.observed_at)
-        >= INDEPENDENT_SAMPLE_GAP
-        for item in accepted
+def _official_start(observation: Observation) -> datetime:
+    return observation.upstream_resets_at - timedelta(
+        seconds=observation.window_seconds
     )
 
 
@@ -125,29 +111,30 @@ def _participant_raw_costs(observation: Observation) -> dict[int, Decimal]:
 
 
 def _official_segment(observation: Observation) -> ReplaySegment:
-    started_at = observation.upstream_resets_at - timedelta(
-        seconds=observation.window_seconds
-    )
     return ReplaySegment(
         observations=[],
-        started_at=started_at,
+        started_at=_official_start(observation),
         first_observed_at=observation.observed_at,
         resets_at=observation.upstream_resets_at,
         reason="official_window",
         total_baseline=ZERO,
         participant_baselines={},
+        percent_baseline=ZERO,
     )
 
 
-def _manual_refresh_segment(observation: Observation) -> ReplaySegment:
+def _manual_start_segment(observation: Observation) -> ReplaySegment:
+    """管理员起点以该观测的累计成本和百分比作为新的零基线。"""
+
     return ReplaySegment(
         observations=[],
         started_at=observation.observed_at,
         first_observed_at=observation.observed_at,
         resets_at=observation.upstream_resets_at,
-        reason="confirmed_manual_refresh",
+        reason="manual_override",
         total_baseline=observation.raw_selected_total_cost,
         participant_baselines=_participant_raw_costs(observation),
+        percent_baseline=observation.upstream_used_percent,
     )
 
 
@@ -162,6 +149,7 @@ def _mark_automatic_exclusion(
         observation.exclusion_reason = reason
         observation.attribution_started_at = None
         observation.selected_total_cost = observation.raw_selected_total_cost
+        observation.interval_used_percent = ZERO
         observation.delta_percent = None
         observation.delta_cost = None
         observation.sample_usd_per_percent = None
@@ -209,13 +197,11 @@ def _mark_automatic_exclusion(
 def _infer_segments(
     observations: list[Observation],
 ) -> tuple[list[ReplaySegment], list[Observation]]:
-    """识别官方窗口、已确认人工刷新和单点异常回退。
+    """按“管理员起点 > 官方窗口 > 异常检测”识别派生区间。
 
-    同一官方 reset_at 下的百分比回退不能凭单点直接判定刷新：
-    * 回退后只有一份独立快照：先自动排除，等待后续数据；
-    * 下一份快照恢复到回退前进度：确认是瞬时异常，继续排除低点；
-    * 两份独立快照持续位于回退后的低位：确认人工刷新并建立新的派生区间；
-    * 管理员恢复的回退点：人工判断优先，立即作为新的派生区间。
+    官方重置时间没有变化时，百分比回退与七天窗口证据矛盾，不能再凭
+    连续低点擅自建立新区间。此类低点保持自动排除，直到 reset_at
+    变化或管理员明确把某个观测设为起点。
     """
 
     segments: list[ReplaySegment] = []
@@ -225,6 +211,14 @@ def _infer_segments(
 
     while index < len(observations):
         observation = observations[index]
+        if observation.is_manual_start:
+            if current is not None and current.observations:
+                segments.append(current)
+            current = _manual_start_segment(observation)
+            current.observations.append(observation)
+            index += 1
+            continue
+
         if current is None or not _same_official_reset(
             observation.upstream_resets_at,
             current.resets_at,
@@ -246,22 +240,12 @@ def _infer_segments(
             index += 1
             continue
 
-        if observation.force_included:
-            if current.observations:
-                segments.append(current)
-            current = _manual_refresh_segment(observation)
-            current.observations.append(observation)
-            index += 1
-            continue
-
         low_run = [observation]
-        independent = [observation]
         scan = index + 1
         recovered = False
-        confirmed = False
         while scan < len(observations):
             candidate = observations[scan]
-            if not _same_official_reset(
+            if candidate.is_manual_start or not _same_official_reset(
                 candidate.upstream_resets_at,
                 current.resets_at,
             ):
@@ -272,26 +256,12 @@ def _infer_segments(
                 recovered = True
                 break
             low_run.append(candidate)
-            if candidate.force_included or _is_independent(candidate, independent):
-                independent.append(candidate)
-            if len(independent) >= 2 or candidate.force_included:
-                confirmed = True
-                scan += 1
-                break
             scan += 1
-
-        if confirmed:
-            if current.observations:
-                segments.append(current)
-            current = _manual_refresh_segment(low_run[0])
-            current.observations.extend(low_run)
-            index = scan
-            continue
 
         reason = (
             "后续快照恢复到回退前进度，判定为瞬时异常"
             if recovered
-            else "仅有一份独立快照显示百分比回退，等待后续采样确认"
+            else "百分比回退但官方重置时间未变化，等待官方窗口更新或管理员设置起点"
         )
         _mark_automatic_exclusion(low_run, reason)
         automatic.extend(low_run)
@@ -332,10 +302,20 @@ def _replay_segment(
     segment: ReplaySegment,
     config: AppSettings,
     fallback_rate: Decimal | None,
+    *,
+    previous_observation: Observation | None = None,
+    rate_history_seed: list[tuple[Decimal, Decimal]] | None = None,
 ) -> tuple[int, Decimal | None]:
-    previous: Observation | None = None
-    previous_snapshots: dict[int, ParticipantSnapshot] = {}
-    rate_history: list[tuple[Decimal, Decimal]] = []
+    previous = previous_observation
+    previous_snapshots = (
+        {
+            snapshot.participant_id: snapshot
+            for snapshot in previous.participant_snapshots.all()
+        }
+        if previous is not None
+        else {}
+    )
+    rate_history = list(rate_history_seed or [])
     latest_effective = fallback_rate
     has_valid_rate = False
 
@@ -344,8 +324,12 @@ def _replay_segment(
             ZERO,
             observation.raw_selected_total_cost - segment.total_baseline,
         )
+        interval_percent = max(
+            ZERO,
+            observation.upstream_used_percent - segment.percent_baseline,
+        )
         delta_percent = (
-            observation.upstream_used_percent - previous.upstream_used_percent
+            interval_percent - previous.interval_used_percent
             if previous is not None
             else None
         )
@@ -356,7 +340,7 @@ def _replay_segment(
         )
         valid_sample = bool(
             selected_total > 0
-            and observation.upstream_used_percent > 0
+            and interval_percent > 0
             and (
                 previous is None
                 or (
@@ -368,9 +352,7 @@ def _replay_segment(
             )
         )
         sample_rate = (
-            _quantize_rate(
-                selected_total / observation.upstream_used_percent
-            )
+            _quantize_rate(selected_total / interval_percent)
             if valid_sample
             else None
         )
@@ -378,7 +360,7 @@ def _replay_segment(
         if sample_rate is not None:
             candidates = [
                 *candidates,
-                (sample_rate, observation.upstream_used_percent),
+                (sample_rate, interval_percent),
             ]
         if candidates:
             effective_rate = _quantize_rate(
@@ -398,6 +380,7 @@ def _replay_segment(
 
         observation.attribution_started_at = segment.started_at
         observation.selected_total_cost = selected_total
+        observation.interval_used_percent = interval_percent
         observation.delta_percent = delta_percent
         observation.delta_cost = delta_cost
         observation.sample_usd_per_percent = sample_rate
@@ -428,6 +411,7 @@ def _replay_segment(
             update_fields=[
                 "attribution_started_at",
                 "selected_total_cost",
+                "interval_used_percent",
                 "delta_percent",
                 "delta_cost",
                 "sample_usd_per_percent",
@@ -439,9 +423,7 @@ def _replay_segment(
         )
         if sample_rate is not None:
             has_valid_rate = True
-            rate_history.append(
-                (sample_rate, observation.upstream_used_percent)
-            )
+            rate_history.append((sample_rate, interval_percent))
 
         snapshots = list(observation.participant_snapshots.all())
         participant_deltas: dict[int, Decimal] = {}
@@ -476,9 +458,7 @@ def _replay_segment(
             if denominator > 0:
                 if previous is None:
                     charged_delta = (
-                        observation.upstream_used_percent
-                        * positive_delta
-                        / denominator
+                        interval_percent * positive_delta / denominator
                     )
                 elif valid_sample and delta_percent is not None:
                     charged_delta = (
@@ -569,15 +549,14 @@ def _replay_segment(
 def _replay_usage_samples(
     account_id: int,
     segments: list[ReplaySegment],
+    replay_from: datetime | None,
 ) -> None:
     if not segments:
         return
-    samples = list(
-        ParticipantUsageSample.objects.filter(account_id=account_id).order_by(
-            "observed_at",
-            "id",
-        )
-    )
+    queryset = ParticipantUsageSample.objects.filter(account_id=account_id)
+    if replay_from is not None:
+        queryset = queryset.filter(observed_at__gte=replay_from)
+    samples = list(queryset.order_by("observed_at", "id"))
     for sample in samples:
         segment = segments[0]
         for candidate in segments:
@@ -598,10 +577,18 @@ def _replay_usage_samples(
         )
 
 
-def _update_participant_latest(segments: list[ReplaySegment]) -> None:
-    if not segments:
+def _update_participant_latest(account_id: int) -> None:
+    latest = (
+        Observation.objects.filter(
+            account_id=account_id,
+            excluded_at__isnull=True,
+        )
+        .prefetch_related("participant_snapshots__participant")
+        .order_by("-observed_at", "-id")
+        .first()
+    )
+    if latest is None:
         return
-    latest = segments[-1].observations[-1]
     snapshots = list(latest.participant_snapshots.all())
     for snapshot in snapshots:
         snapshot.participant.latest_selected_cost = snapshot.selected_cost
@@ -614,37 +601,112 @@ def _update_participant_latest(segments: list[ReplaySegment]) -> None:
         )
 
 
+def _previous_included(observation: Observation) -> Observation | None:
+    return (
+        Observation.objects.filter(
+            account_id=observation.account_id,
+            excluded_at__isnull=True,
+        )
+        .filter(
+            Q(observed_at__lt=observation.observed_at)
+            | Q(
+                observed_at=observation.observed_at,
+                id__lt=observation.id,
+            )
+        )
+        .prefetch_related("participant_snapshots__participant")
+        .order_by("-observed_at", "-id")
+        .first()
+    )
+
+def _replay_anchor(
+    observation: Observation,
+    *,
+    merge_previous: bool = False,
+) -> datetime:
+    """返回能覆盖本次变化、但不会多算更早稳定区间的最早时间。"""
+
+    previous = _previous_included(observation)
+    if merge_previous:
+        if previous is None:
+            return _official_start(observation)
+        return (
+            previous.attribution_started_at
+            or (
+                previous.observed_at
+                if previous.is_manual_start
+                else _official_start(previous)
+            )
+        )
+    if observation.is_manual_start:
+        return observation.observed_at
+    if observation.attribution_started_at is not None:
+        return observation.attribution_started_at
+    if previous is not None and _same_official_reset(
+        previous.upstream_resets_at,
+        observation.upstream_resets_at,
+    ):
+        return previous.attribution_started_at or _official_start(observation)
+    return _official_start(observation)
+
+
 @transaction.atomic
 def rebuild_account(
     account_id: int,
     config: AppSettings | None = None,
+    *,
+    replay_from: datetime | None = None,
 ) -> ReplayResult:
-    """锁定并重放一个上游账号的全部原始观测。"""
+    """从最早受影响的边界向后重放；``None`` 仅供升级或修复时全量重放。"""
 
     config = config or AppSettings.load()
+    queryset = Observation.objects.select_for_update().filter(
+        account_id=account_id
+    )
+    if replay_from is not None:
+        queryset = queryset.filter(observed_at__gte=replay_from)
     observations = list(
-        Observation.objects.select_for_update()
-        .filter(account_id=account_id)
-        .prefetch_related("participant_snapshots__participant")
-        .order_by("observed_at", "id")
+        queryset.prefetch_related(
+            "participant_snapshots__participant"
+        ).order_by("observed_at", "id")
     )
     if not observations:
-        return ReplayResult(0, 0, 0, None)
+        latest = (
+            Observation.objects.filter(
+                account_id=account_id,
+                excluded_at__isnull=True,
+            )
+            .order_by("-observed_at", "-id")
+            .first()
+        )
+        return ReplayResult(0, 0, 0, latest.pk if latest else None)
 
-    # 自动判定不是持久事实。每次先撤销旧自动判定，再用完整数据重新识别；
-    # 管理员手动排除则保持不变，恢复过的记录由 force_included 明确覆盖检测。
+    fallback_rate: Decimal | None = None
+    if replay_from is not None:
+        preceding = (
+            Observation.objects.filter(
+                account_id=account_id,
+                excluded_at__isnull=True,
+                observed_at__lt=observations[0].observed_at,
+            )
+            .order_by("-observed_at", "-id")
+            .first()
+        )
+        if preceding is not None:
+            fallback_rate = preceding.effective_usd_per_percent
+
+    reset_automatic: list[Observation] = []
     for observation in observations:
         if observation.exclusion_source == "automatic":
             observation.excluded_at = None
             observation.exclusion_source = ""
             observation.exclusion_reason = ""
-            observation.save(
-                update_fields=[
-                    "excluded_at",
-                    "exclusion_source",
-                    "exclusion_reason",
-                ]
-            )
+            reset_automatic.append(observation)
+    if reset_automatic:
+        Observation.objects.bulk_update(
+            reset_automatic,
+            ["excluded_at", "exclusion_source", "exclusion_reason"],
+        )
 
     candidates = [
         observation
@@ -661,6 +723,7 @@ def rebuild_account(
                 "exclusion_reason",
                 "attribution_started_at",
                 "selected_total_cost",
+                "interval_used_percent",
                 "delta_percent",
                 "delta_cost",
                 "sample_usd_per_percent",
@@ -671,7 +734,6 @@ def rebuild_account(
         )
 
     rebuilt = 0
-    fallback_rate: Decimal | None = None
     for segment in segments:
         count, fallback_rate = _replay_segment(
             segment,
@@ -680,16 +742,207 @@ def rebuild_account(
         )
         rebuilt += count
 
-    _replay_usage_samples(account_id, segments)
-    _update_participant_latest(segments)
-    latest_id = (
-        segments[-1].observations[-1].pk if segments else None
+    _replay_usage_samples(account_id, segments, replay_from)
+    _update_participant_latest(account_id)
+    latest = (
+        Observation.objects.filter(
+            account_id=account_id,
+            excluded_at__isnull=True,
+        )
+        .order_by("-observed_at", "-id")
+        .first()
     )
     return ReplayResult(
         rebuilt_observations=rebuilt,
         automatic_exclusions=len(automatic),
         inferred_intervals=len(segments),
-        latest_observation_id=latest_id,
+        latest_observation_id=latest.pk if latest else None,
+    )
+
+
+def _append_segment(
+    observation: Observation,
+    previous: Observation | None,
+) -> ReplaySegment:
+    """构造只含新增点的区间，同时复用既有区间的确定性基线。"""
+
+    if observation.is_manual_start:
+        segment = _manual_start_segment(observation)
+    elif (
+        previous is not None
+        and previous.attribution_started_at is not None
+        and _same_official_reset(
+            previous.upstream_resets_at,
+            observation.upstream_resets_at,
+        )
+    ):
+        manual_start = (
+            Observation.objects.filter(
+                account_id=observation.account_id,
+                observed_at=previous.attribution_started_at,
+                is_manual_start=True,
+                excluded_at__isnull=True,
+            )
+            .prefetch_related("participant_snapshots__participant")
+            .order_by("-id")
+            .first()
+        )
+        if manual_start is not None:
+            segment = _manual_start_segment(manual_start)
+        else:
+            segment = _official_segment(observation)
+            segment.started_at = previous.attribution_started_at
+    else:
+        segment = _official_segment(observation)
+    segment.observations = [observation]
+    segment.first_observed_at = observation.observed_at
+    return segment
+
+
+def _rate_history_before(
+    observation: Observation,
+    previous: Observation | None,
+    limit: int,
+) -> list[tuple[Decimal, Decimal]]:
+    if (
+        previous is None
+        or previous.attribution_started_at is None
+        or limit <= 0
+    ):
+        return []
+    rows = list(
+        Observation.objects.filter(
+            account_id=observation.account_id,
+            attribution_started_at=previous.attribution_started_at,
+            excluded_at__isnull=True,
+            valid_sample=True,
+            sample_usd_per_percent__isnull=False,
+        )
+        .filter(
+            Q(observed_at__lt=observation.observed_at)
+            | Q(
+                observed_at=observation.observed_at,
+                id__lt=observation.id,
+            )
+        )
+        .order_by("-observed_at", "-id")[:limit]
+    )
+    rows.reverse()
+    return [
+        (row.sample_usd_per_percent, row.interval_used_percent)
+        for row in rows
+    ]
+
+
+@transaction.atomic
+def rebuild_observation_suffix(
+    observation: Observation,
+    config: AppSettings | None = None,
+) -> ReplayResult:
+    """新增末尾观测只计算自身；非末尾插入才退回到受影响区间重放。"""
+
+    config = config or AppSettings.load()
+    observation = (
+        Observation.objects.select_for_update()
+        .prefetch_related("participant_snapshots__participant")
+        .get(pk=observation.pk)
+    )
+    later_exists = (
+        Observation.objects.filter(account_id=observation.account_id)
+        .filter(
+            Q(observed_at__gt=observation.observed_at)
+            | Q(
+                observed_at=observation.observed_at,
+                id__gt=observation.id,
+            )
+        )
+        .exists()
+    )
+    if later_exists:
+        return rebuild_account(
+            observation.account_id,
+            config,
+            replay_from=_replay_anchor(observation),
+        )
+
+    previous = _previous_included(observation)
+    same_official_window = bool(
+        previous is not None
+        and _same_official_reset(
+            previous.upstream_resets_at,
+            observation.upstream_resets_at,
+        )
+    )
+    rollback = bool(
+        same_official_window
+        and not observation.is_manual_start
+        and observation.upstream_used_percent + RESET_ROLLBACK_TOLERANCE
+        < previous.upstream_used_percent
+    )
+    if rollback:
+        _mark_automatic_exclusion(
+            [observation],
+            "百分比回退但官方重置时间未变化，等待官方窗口更新或管理员设置起点",
+        )
+        Observation.objects.bulk_update(
+            [observation],
+            [
+                "excluded_at",
+                "exclusion_source",
+                "exclusion_reason",
+                "attribution_started_at",
+                "selected_total_cost",
+                "interval_used_percent",
+                "delta_percent",
+                "delta_cost",
+                "sample_usd_per_percent",
+                "valid_sample",
+                "sample_note",
+                "raw_window",
+            ],
+        )
+        _update_participant_latest(observation.account_id)
+        return ReplayResult(
+            rebuilt_observations=0,
+            automatic_exclusions=1,
+            inferred_intervals=0,
+            latest_observation_id=previous.pk,
+        )
+
+    continues_segment = bool(
+        same_official_window
+        and previous is not None
+        and previous.attribution_started_at is not None
+        and not observation.is_manual_start
+    )
+    segment = _append_segment(observation, previous)
+    seed_previous = previous if continues_segment else None
+    fallback_rate = (
+        previous.effective_usd_per_percent if previous is not None else None
+    )
+    rate_history = _rate_history_before(
+        observation,
+        seed_previous,
+        max(0, config.rate_history_samples - 1),
+    )
+    rebuilt, _latest_rate = _replay_segment(
+        segment,
+        config,
+        fallback_rate,
+        previous_observation=seed_previous,
+        rate_history_seed=rate_history,
+    )
+    _replay_usage_samples(
+        observation.account_id,
+        [segment],
+        observation.observed_at,
+    )
+    _update_participant_latest(observation.account_id)
+    return ReplayResult(
+        rebuilt_observations=rebuilt,
+        automatic_exclusions=0,
+        inferred_intervals=1,
+        latest_observation_id=observation.pk,
     )
 
 
@@ -698,14 +951,17 @@ def exclude_observation(
     observation: Observation,
     reason: str = "管理员手动排除",
 ) -> dict[str, int | bool | None]:
-    """保留原始记录但从所有后续重放中忽略它。"""
+    """排除原始点，并从其原区间或被移除的手动边界之前重放。"""
 
     observation = Observation.objects.select_for_update().get(pk=observation.pk)
+    replay_from = _replay_anchor(
+        observation,
+        merge_previous=observation.is_manual_start,
+    )
     already_excluded = observation.exclusion_source == "manual"
     observation.excluded_at = timezone.now()
     observation.exclusion_source = "manual"
     observation.exclusion_reason = reason.strip()[:255] or "管理员手动排除"
-    observation.force_included = False
     observation.valid_sample = False
     observation.sample_usd_per_percent = None
     observation.sample_note = f"已排除：{observation.exclusion_reason}"
@@ -714,13 +970,15 @@ def exclude_observation(
             "excluded_at",
             "exclusion_source",
             "exclusion_reason",
-            "force_included",
             "valid_sample",
             "sample_usd_per_percent",
             "sample_note",
         ]
     )
-    replay = rebuild_account(observation.account_id)
+    replay = rebuild_account(
+        observation.account_id,
+        replay_from=replay_from,
+    )
     return {"already_excluded": already_excluded, **replay.as_dict()}
 
 
@@ -728,26 +986,107 @@ def exclude_observation(
 def restore_observation(
     observation: Observation,
 ) -> dict[str, int | bool | None]:
-    """恢复一条排除记录；若它本身回退，视为管理员确认的新边界。"""
+    """恢复排除记录；若恢复后形成同窗口回退，则由管理员确认它是新起点。"""
 
     observation = Observation.objects.select_for_update().get(pk=observation.pk)
     already_included = observation.excluded_at is None
+    previous = _previous_included(observation)
+    confirms_rollback = bool(
+        not already_included
+        and previous is not None
+        and _same_official_reset(
+            previous.upstream_resets_at,
+            observation.upstream_resets_at,
+        )
+        and observation.upstream_used_percent + RESET_ROLLBACK_TOLERANCE
+        < previous.upstream_used_percent
+    )
+    if confirms_rollback and not observation.is_manual_start:
+        observation.is_manual_start = True
+        observation.manual_start_reason = "管理员恢复同一官方窗口内的回退记录"
+        observation.manual_start_set_at = timezone.now()
+        replay_from = observation.observed_at
+    else:
+        replay_from = _replay_anchor(observation)
     observation.excluded_at = None
     observation.exclusion_source = ""
     observation.exclusion_reason = ""
-    observation.force_included = True
     observation.save(
         update_fields=[
             "excluded_at",
             "exclusion_source",
             "exclusion_reason",
-            "force_included",
+            "is_manual_start",
+            "manual_start_reason",
+            "manual_start_set_at",
         ]
     )
-    replay = rebuild_account(observation.account_id)
+    replay = rebuild_account(
+        observation.account_id,
+        replay_from=replay_from,
+    )
     observation.refresh_from_db()
     return {
         "already_included": already_included,
         "included": observation.excluded_at is None,
+        "manual_start": observation.is_manual_start,
         **replay.as_dict(),
     }
+
+
+@transaction.atomic
+def set_manual_start(
+    observation: Observation,
+    reason: str = "",
+) -> dict[str, int | bool | None]:
+    """把一个真实观测点设为最高优先级零基线，并重放其后缀。"""
+
+    observation = Observation.objects.select_for_update().get(pk=observation.pk)
+    already_set = observation.is_manual_start
+    observation.is_manual_start = True
+    observation.manual_start_reason = reason.strip()[:255]
+    observation.manual_start_set_at = timezone.now()
+    observation.excluded_at = None
+    observation.exclusion_source = ""
+    observation.exclusion_reason = ""
+    observation.save(
+        update_fields=[
+            "is_manual_start",
+            "manual_start_reason",
+            "manual_start_set_at",
+            "excluded_at",
+            "exclusion_source",
+            "exclusion_reason",
+        ]
+    )
+    replay = rebuild_account(
+        observation.account_id,
+        replay_from=observation.observed_at,
+    )
+    return {"already_set": already_set, **replay.as_dict()}
+
+
+@transaction.atomic
+def clear_manual_start(
+    observation: Observation,
+) -> dict[str, int | bool | None]:
+    """取消人工边界，并从它之前的有效区间重新连接后续数据。"""
+
+    observation = Observation.objects.select_for_update().get(pk=observation.pk)
+    replay_from = _replay_anchor(observation, merge_previous=True)
+    was_set = observation.is_manual_start
+    observation.is_manual_start = False
+    observation.manual_start_reason = ""
+    observation.manual_start_set_at = None
+    observation.save(
+        update_fields=[
+            "is_manual_start",
+            "manual_start_reason",
+            "manual_start_set_at",
+        ]
+    )
+    replay = rebuild_account(
+        observation.account_id,
+        replay_from=replay_from,
+    )
+    return {"was_set": was_set, **replay.as_dict()}

@@ -182,9 +182,16 @@ class Observation(models.Model):
     observed_at = models.DateTimeField()
     window_seconds = models.PositiveIntegerField(default=604800)
     upstream_resets_at = models.DateTimeField()
-    # 这是每次全量重放得出的边界，不是独立、可变的周期实体。
+    # 这是按原始采样推导的边界，不是独立、可变的周期实体。
     attribution_started_at = models.DateTimeField(null=True, blank=True)
     upstream_used_percent = models.DecimalField(max_digits=8, decimal_places=4, validators=PERCENT_VALIDATORS)
+    # 区间内有效进度是可重放派生值；官方窗口等于上游值，手动起点则扣除起点进度。
+    interval_used_percent = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        default=0,
+        validators=PERCENT_VALIDATORS,
+    )
     # raw_* 与两种成本字段是不可变采样事实；selected_total_cost 是重放后的区间累计值。
     raw_selected_total_cost = models.DecimalField(max_digits=18, decimal_places=6)
     selected_total_cost = models.DecimalField(max_digits=18, decimal_places=6)
@@ -204,9 +211,10 @@ class Observation(models.Model):
         blank=True,
         default="",
     )
-    # 管理员恢复一条自动排除的回退记录时，以人工判断覆盖自动异常检测。
-    # 若该记录本身构成百分比回退，重放器会把它作为人工确认的新边界。
-    force_included = models.BooleanField(default=False)
+    # 管理员可把一个真实观测点固定为最高优先级起点；该观测的成本和百分比均作为零基线。
+    is_manual_start = models.BooleanField(default=False)
+    manual_start_reason = models.CharField(max_length=255, blank=True)
+    manual_start_set_at = models.DateTimeField(null=True, blank=True)
     exclusion_reason = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

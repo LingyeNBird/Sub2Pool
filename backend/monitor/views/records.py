@@ -17,7 +17,12 @@ from ..models import (
     Participant,
 )
 from ..serializers import BlockedIPAddressSerializer
-from ..replay import exclude_observation, restore_observation
+from ..replay import (
+    clear_manual_start,
+    exclude_observation,
+    restore_observation,
+    set_manual_start,
+)
 
 
 def query_datetime(request, name: str):
@@ -130,6 +135,10 @@ class ObservationListView(AdminAPIView):
                     "attribution_started_at": iso(item.attribution_started_at),
                     "upstream_resets_at": iso(item.upstream_resets_at),
                     "upstream_used_percent": float(item.upstream_used_percent),
+                    "interval_used_percent": float(item.interval_used_percent),
+                    "raw_selected_total_cost": float(
+                        item.raw_selected_total_cost
+                    ),
                     "selected_total_cost": float(item.selected_total_cost),
                     "delta_percent": (
                         float(item.delta_percent)
@@ -161,6 +170,9 @@ class ObservationListView(AdminAPIView):
                     "excluded_at": iso(item.excluded_at),
                     "exclusion_reason": item.exclusion_reason,
                     "exclusion_source": item.exclusion_source,
+                    "is_manual_start": item.is_manual_start,
+                    "manual_start_reason": item.manual_start_reason,
+                    "manual_start_set_at": iso(item.manual_start_set_at),
                     "participants": [
                         snapshot_data(snapshot)
                         for snapshot in item.participant_snapshots.all()
@@ -182,7 +194,7 @@ class ObservationListView(AdminAPIView):
 
 
 class ObservationExclusionView(AdminAPIView):
-    """排除一条校准记录，并按剩余原始数据重放全部派生结果。"""
+    """排除一条校准记录，并从最早受影响区间向后重放。"""
 
     def post(self, request, observation_id: int):
         observation = get_object_or_404(Observation, pk=observation_id)
@@ -194,11 +206,26 @@ class ObservationExclusionView(AdminAPIView):
 
 
 class ObservationRestoreView(AdminAPIView):
-    """恢复一条排除记录，并立即重放该账号的全部原始观测。"""
+    """恢复一条排除记录，并从最早受影响区间向后重放。"""
 
     def post(self, _request, observation_id: int):
         observation = get_object_or_404(Observation, pk=observation_id)
         return ok(restore_observation(observation))
+
+
+class ObservationManualStartView(AdminAPIView):
+    """设置或取消最高优先级的管理员观测起点。"""
+
+    def post(self, request, observation_id: int):
+        observation = get_object_or_404(Observation, pk=observation_id)
+        reason = request.data.get("reason", "")
+        if not isinstance(reason, str):
+            return error("起点说明格式无效", 400)
+        return ok(set_manual_start(observation, reason))
+
+    def delete(self, _request, observation_id: int):
+        observation = get_object_or_404(Observation, pk=observation_id)
+        return ok(clear_manual_start(observation))
 
 
 class NotificationListView(AdminAPIView):

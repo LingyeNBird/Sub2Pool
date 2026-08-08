@@ -2,7 +2,7 @@
 
 后台高频部分只读取 Sub2API 本地用量；达到阈值、额度耗尽、最长间隔或重置临近时才读取
 上游百分比。采样只保存原始事实，所有区间识别、额度折算和参与者归属统一交给 replay
-模块从全部历史数据重算，避免一次误采样留下不可逆的周期状态。
+模块从最早受影响的边界向后重算。
 """
 
 from dataclasses import dataclass
@@ -26,7 +26,7 @@ from .replay import (
     RATE_METHOD,
     RESET_ROLLBACK_TOLERANCE,
     RESET_TIME_TOLERANCE,
-    rebuild_account,
+    rebuild_observation_suffix,
 )
 from .sub2api import (
     Sub2APIClient,
@@ -215,7 +215,6 @@ def _has_pending_rollback(account_id: int) -> bool:
     return Observation.objects.filter(
         account_id=account_id,
         exclusion_source="automatic",
-        exclusion_reason__contains="等待后续采样确认",
     ).exists()
 
 
@@ -253,7 +252,7 @@ def _create_raw_observation(
         total_standard_cost=local.total.total_cost,
         total_actual_cost=local.total.total_actual_cost,
         effective_usd_per_percent=config.initial_usd_per_percent,
-        sample_note="等待全量重放",
+        sample_note="等待派生计算",
         raw_window={
             "slot": window.slot,
             "window_seconds": window.window_seconds,
@@ -414,7 +413,7 @@ def _run_monitor_locked(
                 local=local,
                 source=requested_source,
             )
-            rebuild_account(account_id, config)
+            rebuild_observation_suffix(observation, config)
             observation.refresh_from_db()
             _finish_success(config, local.checked_at)
             if observation.excluded_at is None:
@@ -558,7 +557,7 @@ def _run_monitor_locked(
             local=local,
             source=source,
         )
-        rebuild_account(account_id, config)
+        rebuild_observation_suffix(observation, config)
         observation.refresh_from_db()
         _finish_success(config, local.checked_at)
 
@@ -570,10 +569,7 @@ def _run_monitor_locked(
             }
 
         _send_observation_notifications(config, observation, previous_rate)
-        segment_reason = observation.raw_window.get("replay_segment_reason")
-        if segment_reason == "confirmed_manual_refresh":
-            reason = "完整历史中已有两份独立快照确认官方手动刷新"
-        elif official_window_changed:
+        if official_window_changed:
             reason = "上游官方窗口已变化"
         else:
             reason = "达到进度触发条件"
