@@ -188,32 +188,18 @@ function sourceLabel(value: string) {
                     >
                       详情
                     </button>
-                    <template v-if="row.excluded">
-                      <button
-                        v-if="row.exclusion_source === 'automatic'"
-                        class="btn btn-ghost text-success btn-xs"
-                        :disabled="restoringId === row.id"
-                        @click="emit('restore', row)"
-                      >
-                        <span
-                          v-if="restoringId === row.id"
-                          class="loading loading-xs loading-spinner"
-                        ></span>
-                        恢复为起点
-                      </button>
-                      <button
-                        v-else
-                        class="btn btn-ghost text-success btn-xs"
-                        :disabled="restoringId === row.id"
-                        @click="emit('restore', row)"
-                      >
-                        <span
-                          v-if="restoringId === row.id"
-                          class="loading loading-xs loading-spinner"
-                        ></span>
-                        取消排除
-                      </button>
-                    </template>
+                    <button
+                      v-if="row.excluded"
+                      class="btn btn-ghost text-success btn-xs"
+                      :disabled="restoringId === row.id"
+                      @click="emit('restore', row)"
+                    >
+                      <span
+                        v-if="restoringId === row.id"
+                        class="loading loading-xs loading-spinner"
+                      ></span>
+                      恢复
+                    </button>
                     <template v-else>
                       <button
                         v-if="row.is_manual_start"

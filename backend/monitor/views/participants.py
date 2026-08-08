@@ -58,17 +58,23 @@ class ParticipantListView(AuthenticatedAPIView):
         return [permission() for permission in permission_classes]
 
     def get(self, request):
+        config = AppSettings.load()
         participants = Participant.objects.all()
         if not request.user.is_staff:
             participants = participants.filter(authorized_users=request.user)
-        return ok([participant_data(item) for item in participants])
+        return ok(
+            [participant_data(item, config) for item in participants]
+        )
 
     def post(self, request):
         serializer = ParticipantWriteSerializer(data=request.data)
         if not serializer.is_valid():
             return error("参与者校验失败", details=serializer.errors)
         participant = serializer.save()
-        return ok(participant_data(participant), status.HTTP_201_CREATED)
+        return ok(
+            participant_data(participant, AppSettings.load()),
+            status.HTTP_201_CREATED,
+        )
 
 
 class ParticipantDetailView(AdminAPIView):
@@ -90,7 +96,9 @@ class ParticipantDetailView(AdminAPIView):
         )
         if not serializer.is_valid():
             return error("参与者校验失败", details=serializer.errors)
-        return ok(participant_data(serializer.save()))
+        return ok(
+            participant_data(serializer.save(), AppSettings.load())
+        )
 
     def delete(self, _request, participant_id: int):
         participant = self._get_participant(participant_id)

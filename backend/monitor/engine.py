@@ -20,6 +20,7 @@ from .models import (
     Participant,
     ParticipantSnapshot,
     ParticipantUsageSample,
+    Sub2APIUserUsageSample,
 )
 from .notifications import notify_collection_error, send_notification
 from .replay import (
@@ -31,6 +32,7 @@ from .replay import (
 from .sub2api import (
     Sub2APIClient,
     Sub2APIError,
+    Sub2APIUserUsage,
     UsageStats,
     UserBalance,
     WeeklyWindow,
@@ -54,6 +56,7 @@ class LocalParticipantData:
 class LocalBundle:
     total: UsageStats
     participants: list[LocalParticipantData]
+    users: list[Sub2APIUserUsage]
     checked_at: datetime
 
 
@@ -106,29 +109,49 @@ def _fetch_local(
         reference.reset_at - timedelta(seconds=reference.window_seconds)
     ).astimezone(location).date()
     end_date = now.astimezone(location).date()
-    total = client.usage_stats(
-        account_id=reference.account_id,
-        start_date=start_date,
-        end_date=end_date,
-        timezone_name=config.timezone,
-    )
+    query = {
+        "account_id": reference.account_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "timezone_name": config.timezone,
+    }
+    total = client.usage_stats(**query)
+
+    # 正式客户端会一次性读取全部用户；保留回退分支，便于兼容只实现旧版
+    # usage_stats 接口的替代客户端，不会改变正式采样的全量行为。
+    fetch_all = getattr(client, "all_user_usage_stats", None)
+    all_users = fetch_all(**query) if callable(fetch_all) else []
+    usage_by_user = {item.user_id: item for item in all_users}
+
     rows: list[LocalParticipantData] = []
     for participant in participants:
-        stats = client.usage_stats(
-            account_id=reference.account_id,
-            user_id=participant.sub2api_user_id,
-            start_date=start_date,
-            end_date=end_date,
-            timezone_name=config.timezone,
-        )
+        user_usage = usage_by_user.get(participant.sub2api_user_id)
+        if user_usage is None:
+            stats = client.usage_stats(
+                **query,
+                user_id=participant.sub2api_user_id,
+            )
+            user_usage = Sub2APIUserUsage(
+                user_id=participant.sub2api_user_id,
+                email=participant.sub2api_email,
+                username=participant.sub2api_username,
+                stats=stats,
+            )
+            usage_by_user[user_usage.user_id] = user_usage
+            all_users.append(user_usage)
         rows.append(
             LocalParticipantData(
                 participant=participant,
-                stats=stats,
+                stats=user_usage.stats,
                 balance=client.user_balance(participant.sub2api_user_id),
             )
         )
-    return LocalBundle(total=total, participants=rows, checked_at=now)
+    return LocalBundle(
+        total=total,
+        participants=rows,
+        users=all_users,
+        checked_at=now,
+    )
 
 
 def _participant_baselines(
@@ -152,6 +175,26 @@ def _save_local_bundle(
     latest: Observation | None,
 ) -> None:
     """保存一次本地趋势点；raw 字段永远保留 Sub2API 返回的累计值。"""
+    window_started_at = reference.reset_at - timedelta(
+        seconds=reference.window_seconds
+    )
+    Sub2APIUserUsageSample.objects.bulk_create(
+        [
+            Sub2APIUserUsageSample(
+                account_id=reference.account_id,
+                sub2api_user_id=user.user_id,
+                username=user.username,
+                email=user.email,
+                observed_at=local.checked_at,
+                window_started_at=window_started_at,
+                window_resets_at=reference.reset_at,
+                total_standard_cost=user.stats.total_cost,
+                total_actual_cost=user.stats.total_actual_cost,
+            )
+            for user in local.users
+        ],
+        ignore_conflicts=True,
+    )
 
     baselines = _participant_baselines(latest)
     participants: list[Participant] = []

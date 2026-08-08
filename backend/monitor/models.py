@@ -51,6 +51,14 @@ class AppSettings(models.Model):
         choices=(("actual", "实际扣费"), ("standard", "标准计费")),
         default="actual",
     )
+    weekly_quota_model = models.CharField(
+        max_length=24,
+        choices=(
+            ("time_varying", "时变额度"),
+            ("constant_average", "平均恒定"),
+        ),
+        default="time_varying",
+    )
     initial_usd_per_percent = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("16"))
     safety_factor = models.DecimalField(
         max_digits=6, decimal_places=4, default=Decimal("0.95"),
@@ -297,6 +305,46 @@ class ParticipantUsageSample(models.Model):
                 name="participant_usage_time",
             )
         ]
+
+class Sub2APIUserUsageSample(models.Model):
+    """每次本地探测保存的全量 Sub2API 用户原始用量。
+
+    记录不依赖参与者配置；以后才绑定为参与者的用户，也能用这些不可变原始
+    事实补建历史账本。标准成本与实际成本同时保存，避免丢失采样时的计费口径。
+    """
+
+    account_id = models.BigIntegerField(db_index=True)
+    sub2api_user_id = models.BigIntegerField(db_index=True)
+    username = models.CharField(max_length=150, blank=True)
+    email = models.EmailField(blank=True)
+    observed_at = models.DateTimeField()
+    window_started_at = models.DateTimeField()
+    window_resets_at = models.DateTimeField()
+    total_standard_cost = models.DecimalField(max_digits=18, decimal_places=6)
+    total_actual_cost = models.DecimalField(max_digits=18, decimal_places=6)
+
+    def selected_cost(self, basis: str) -> Decimal:
+        return (
+            self.total_actual_cost
+            if basis == "actual"
+            else self.total_standard_cost
+        )
+
+    class Meta:
+        ordering = ["observed_at", "sub2api_user_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account_id", "sub2api_user_id", "observed_at"],
+                name="unique_sub2api_user_usage_sample",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["sub2api_user_id", "observed_at"],
+                name="sub2api_user_usage_time",
+            )
+        ]
+
 
 
 class NotificationEvent(models.Model):

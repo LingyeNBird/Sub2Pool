@@ -17,6 +17,19 @@ const emit = defineEmits<{ save: [] }>();
       </h2>
       <fieldset class="fieldset max-w-full min-w-0 grid-cols-[minmax(0,1fr)]">
         <SettingLabel
+          label="周限额度模型"
+          help="只控制额度估算、参与者权益和余额建议的展示口径。平均恒定按区间起点至当前的每名用户累计成本一次性分摊；时变额度按每个采样区间分别归属。无论选择哪一种，后台都会继续保存并重放完整的时变归属账本。"
+        />
+        <select
+          v-model="settings.weekly_quota_model"
+          class="select w-full max-w-full min-w-0"
+        >
+          <option value="time_varying">时变额度</option>
+          <option value="constant_average">平均恒定</option>
+        </select>
+      </fieldset>
+      <fieldset class="fieldset max-w-full min-w-0 grid-cols-[minmax(0,1fr)]">
+        <SettingLabel
           label="成本口径"
           help="实际扣费会应用 Sub2API 的计费倍率，并与用户余额真实扣减一致；标准计费只按模型标准单价计算。余额分配建议通常应选择实际扣费。"
         />

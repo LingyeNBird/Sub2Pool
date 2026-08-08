@@ -153,6 +153,7 @@ export function useSettingsPage() {
   function saveAllocation() {
     return saveSection("allocation", "分配模型设置", [
       "cost_basis",
+      "weekly_quota_model",
       "initial_usd_per_percent",
       "safety_factor",
       "conservative_percentile",

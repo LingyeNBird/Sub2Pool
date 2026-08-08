@@ -9,7 +9,11 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from .base import AdminAPIView, error, ok
-from .presenters import iso, latest_snapshot, participant_data
+from .presenters import (
+    display_recommendation,
+    iso,
+    participant_data,
+)
 from ..models import AppSettings, Observation, Participant
 from ..sub2api import Sub2APIClient, Sub2APIError
 from ..replay import RATE_METHOD
@@ -49,17 +53,7 @@ class DashboardView(AdminAPIView):
             if config.openai_account_id
             else None
         )
-        snapshots = (
-            list(
-                observation.participant_snapshots.select_related("participant")
-            )
-            if observation
-            else []
-        )
-        total_charged = sum(
-            (item.charged_cycle_percent for item in snapshots),
-            Decimal("0"),
-        )
+        total_charged = Decimal("0")
         basis_percentile = int(
             observation.raw_window.get(
                 "conservative_percentile",
@@ -91,9 +85,17 @@ class DashboardView(AdminAPIView):
             else []
         )
         participant_rows = [
-            participant_data(item)
+            participant_data(item, config)
             for item in Participant.objects.filter(enabled=True)
         ]
+        total_charged = sum(
+            (
+                Decimal(str(item["snapshot"]["charged_cycle_percent"]))
+                for item in participant_rows
+                if item["snapshot"]
+            ),
+            Decimal("0"),
+        )
         data = {
             "configured": bool(
                 config.sub2api_admin_token_encrypted and config.openai_account_id
@@ -106,6 +108,7 @@ class DashboardView(AdminAPIView):
             "last_error": config.last_error,
             "quota_query_mode": config.quota_query_mode,
             "sub2api_admin_url": _admin_url(config.sub2api_base_url),
+            "weekly_quota_model": config.weekly_quota_model,
             "cycle": None,
             "participants": [
                 item
@@ -115,7 +118,10 @@ class DashboardView(AdminAPIView):
                 and not item["snapshot"]["recommendation_applied"]
             ],
             "needs_manual_update_count": sum(
-                1 for item in snapshots if item.needs_manual_update
+                1
+                for item in participant_rows
+                if item["snapshot"]
+                and item["snapshot"]["needs_manual_update"]
             ),
         }
         if observation:
@@ -174,20 +180,18 @@ class ApplyParticipantRecommendationView(AdminAPIView):
             pk=participant_id,
             enabled=True,
         )
-        snapshot = latest_snapshot(participant)
-        if snapshot is None or snapshot.recommended_balance_usd is None:
+        config = AppSettings.load()
+        snapshot, recommended = display_recommendation(participant, config)
+        if snapshot is None or recommended is None:
             return error("该参与者尚无可应用的额度建议", 409)
         if snapshot.recommendation_applied:
             return error("该条额度建议已经应用", 409)
 
-        recommended = snapshot.recommended_balance_usd
         if recommended <= 0:
             return error(
                 "Sub2API 原生余额调整接口不允许把余额设为 0，请前往管理后台手动处理",
                 409,
             )
-
-        config = AppSettings.load()
         try:
             with Sub2APIClient(config) as client:
                 confirmed = client.set_user_balance_from_recommendation(

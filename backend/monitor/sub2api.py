@@ -41,6 +41,15 @@ class UsageStats:
 
 
 @dataclass(frozen=True)
+class Sub2APIUserUsage:
+    """一个 Sub2API 用户在指定上游账号与日期窗口内的累计成本。"""
+
+    user_id: int
+    email: str
+    username: str
+    stats: UsageStats
+
+@dataclass(frozen=True)
 class UserBalance:
     """Sub2API 用户的全局余额；该余额会被该用户的所有用量共同消耗。"""
 
@@ -214,6 +223,106 @@ class Sub2APIClient:
             if page > 100:
                 raise Sub2APIError("Sub2API 用户数量异常，已停止读取")
         return users
+
+    def all_user_usage_stats(
+        self,
+        *,
+        account_id: int,
+        start_date: date,
+        end_date: date,
+        timezone_name: str,
+    ) -> list[Sub2APIUserUsage]:
+        """只读获取指定上游账号下全部 Sub2API 用户的累计用量。
+
+        新版 Sub2API 的用户用量分解接口单次最多返回 200 名有用量的用户。
+        先用一次分解请求覆盖常见场景；用户数超过 200 时，再只为未返回的用户
+        逐个读取统计，避免静默漏掉低用量用户。旧版没有分解接口时则完整回退
+        到逐用户 GET 查询。全程不会调用任何上游官方额度接口或写接口。
+        """
+
+        users = self.list_users()
+        metadata = {
+            int(user["id"]): {
+                "email": str(user.get("email") or ""),
+                "username": str(user.get("username") or ""),
+            }
+            for user in users
+        }
+        stats_by_user: dict[int, UsageStats] = {}
+        breakdown_available = True
+        try:
+            data = self._get(
+                "api/v1/admin/dashboard/user-breakdown",
+                params={
+                    "account_id": account_id,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "timezone": timezone_name,
+                    "limit": 200,
+                    "nocache": "true",
+                },
+            )
+        except Sub2APIError:
+            breakdown_available = False
+            data = None
+
+        if breakdown_available:
+            if not isinstance(data, dict) or not isinstance(
+                data.get("users"),
+                list,
+            ):
+                raise Sub2APIError("用户用量分解响应结构错误")
+            for raw in data["users"]:
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    user_id = int(raw.get("user_id"))
+                except (TypeError, ValueError):
+                    continue
+                if user_id <= 0:
+                    continue
+                metadata.setdefault(
+                    user_id,
+                    {
+                        "email": str(raw.get("email") or ""),
+                        "username": "",
+                    },
+                )
+                stats_by_user[user_id] = UsageStats(
+                    total_cost=_decimal(raw.get("cost"), "users.cost"),
+                    total_actual_cost=_decimal(
+                        raw.get("actual_cost"),
+                        "users.actual_cost",
+                    ),
+                )
+
+        must_query_missing = not breakdown_available or len(metadata) > 200
+        for user_id in metadata:
+            if user_id in stats_by_user:
+                continue
+            if must_query_missing:
+                stats_by_user[user_id] = self.usage_stats(
+                    account_id=account_id,
+                    user_id=user_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    timezone_name=timezone_name,
+                )
+            else:
+                stats_by_user[user_id] = UsageStats(
+                    total_cost=Decimal("0"),
+                    total_actual_cost=Decimal("0"),
+                )
+
+        return [
+            Sub2APIUserUsage(
+                user_id=user_id,
+                email=metadata[user_id]["email"],
+                username=metadata[user_id]["username"],
+                stats=stats_by_user[user_id],
+            )
+            for user_id in sorted(metadata)
+        ]
 
     def query_weekly_window(self, account_id: int, mode: str = "passive") -> WeeklyWindow:
         """读取七天窗口。

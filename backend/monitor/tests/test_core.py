@@ -25,6 +25,7 @@ from monitor.models import (
     Participant,
     ParticipantSnapshot,
     ParticipantUsageSample,
+    Sub2APIUserUsageSample,
 )
 from monitor.notifications import send_notification
 from monitor.replay import (
@@ -37,6 +38,7 @@ from monitor.secrets import encrypt_secret
 from monitor.sub2api import (
     Sub2APIClient,
     Sub2APIError,
+    Sub2APIUserUsage,
     UsageStats,
     UserBalance,
     WeeklyWindow,
@@ -265,6 +267,83 @@ def test_sub2api_user_discovery_includes_admin_accounts():
         }
     ]
 
+@pytest.mark.django_db
+def test_all_user_usage_uses_read_only_breakdown_and_keeps_zero_users():
+    config = AppSettings.load()
+    config.sub2api_base_url = "https://sub2api.example/"
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.save()
+    requested_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
+        if request.url.path == "/api/v1/admin/users":
+            data = {
+                "items": [
+                    {
+                        "id": 51,
+                        "email": "used@example.com",
+                        "username": "used",
+                        "status": "active",
+                        "role": "user",
+                    },
+                    {
+                        "id": 52,
+                        "email": "zero@example.com",
+                        "username": "",
+                        "status": "active",
+                        "role": "user",
+                    },
+                ],
+                "total": 2,
+                "page": 1,
+                "page_size": 100,
+                "pages": 1,
+            }
+        else:
+            assert (
+                request.url.path
+                == "/api/v1/admin/dashboard/user-breakdown"
+            )
+            assert request.url.params["account_id"] == "7"
+            assert request.url.params["limit"] == "200"
+            data = {
+                "users": [
+                    {
+                        "user_id": 51,
+                        "email": "used@example.com",
+                        "cost": "120",
+                        "actual_cost": "96",
+                    }
+                ]
+            }
+        return httpx.Response(
+            200,
+            json={"code": 0, "message": "success", "data": data},
+        )
+
+    with Sub2APIClient(config) as client:
+        client.client.close()
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"x-api-key": "admin-secret"},
+        )
+        rows = client.all_user_usage_stats(
+            account_id=7,
+            start_date=timezone.localdate() - timedelta(days=2),
+            end_date=timezone.localdate(),
+            timezone_name="Asia/Shanghai",
+        )
+
+    assert requested_paths == [
+        "/api/v1/admin/users",
+        "/api/v1/admin/dashboard/user-breakdown",
+    ]
+    assert [(row.user_id, row.stats) for row in rows] == [
+        (51, UsageStats(Decimal("120"), Decimal("96"))),
+        (52, UsageStats(Decimal("0"), Decimal("0"))),
+    ]
+
 
 @pytest.mark.django_db
 def test_user_balance_reads_user_detail_without_platform_quota_endpoint():
@@ -387,6 +466,70 @@ def test_dashboard_only_lists_participants_that_need_manual_adjustment():
         item["id"] for item in dashboard.json()["data"]["participants"]
     ] == [actionable.id]
 
+
+@pytest.mark.django_db
+def test_constant_average_model_changes_only_presented_attribution():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.weekly_quota_model = "constant_average"
+    config.save()
+    participant = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=51,
+        share_percent=50,
+        latest_balance_usd=Decimal("80"),
+    )
+    now = timezone.now()
+    observation = Observation.objects.create(
+        account_id=7,
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=4),
+        attribution_started_at=now - timedelta(days=3),
+        upstream_used_percent=Decimal("20"),
+        interval_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("400"),
+        selected_total_cost=Decimal("400"),
+        total_standard_cost=Decimal("400"),
+        total_actual_cost=Decimal("400"),
+        effective_usd_per_percent=Decimal("20"),
+    )
+    stored = ParticipantSnapshot.objects.create(
+        observation=observation,
+        participant=participant,
+        raw_selected_cost=Decimal("100"),
+        selected_cost=Decimal("100"),
+        charged_cycle_percent=Decimal("12"),
+        remaining_share_percent=Decimal("38"),
+        current_balance_usd=Decimal("80"),
+        recommended_balance_usd=Decimal("722"),
+        needs_manual_update=True,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    constant = client.get("/api/participants", **headers).json()["data"][0]
+
+    assert constant["snapshot"]["allocation_model"] == "constant_average"
+    assert constant["snapshot"]["charged_cycle_percent"] == 5.0
+    assert constant["snapshot"]["remaining_share_percent"] == 45.0
+    assert constant["snapshot"]["recommended_balance_usd"] == 855.0
+    stored.refresh_from_db()
+    assert stored.charged_cycle_percent == Decimal("12")
+    assert stored.recommended_balance_usd == Decimal("722")
+
+    config.weekly_quota_model = "time_varying"
+    config.save(update_fields=["weekly_quota_model"])
+    time_varying = client.get(
+        "/api/participants",
+        **headers,
+    ).json()["data"][0]
+    assert time_varying["snapshot"]["allocation_model"] == "time_varying"
+    assert time_varying["snapshot"]["charged_cycle_percent"] == 12.0
 
 @pytest.mark.django_db
 def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
@@ -731,6 +874,120 @@ def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
     assert snapshots[rider.id].charged_cycle_percent == Decimal("0")
     assert snapshots[rider.id].remaining_share_percent == Decimal("50")
 
+
+@pytest.mark.django_db
+def test_unmapped_user_usage_is_saved_and_attributed_after_binding(
+    monkeypatch,
+):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.initial_usd_per_percent = Decimal("20")
+    config.save()
+    owner = Participant.objects.create(
+        name="车主",
+        sub2api_user_id=1,
+        share_percent=60,
+        is_owner=True,
+    )
+    reset_at = timezone.now() + timedelta(days=4)
+
+    class FakeClient:
+        balance_reads: list[int] = []
+
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def query_weekly_window(self, _account_id, _mode):
+            return WeeklyWindow(
+                Decimal("20"),
+                604800,
+                345600,
+                int(reset_at.timestamp()),
+                "passive_snapshot",
+            )
+
+        def usage_stats(self, *, user_id=None, **_kwargs):
+            assert user_id is None
+            return UsageStats(Decimal("400"), Decimal("400"))
+
+        def all_user_usage_stats(self, **_kwargs):
+            return [
+                Sub2APIUserUsage(
+                    1,
+                    "owner@example.com",
+                    "owner",
+                    UsageStats(Decimal("300"), Decimal("300")),
+                ),
+                Sub2APIUserUsage(
+                    2,
+                    "rider@example.com",
+                    "rider",
+                    UsageStats(Decimal("100"), Decimal("100")),
+                ),
+            ]
+
+        def user_balance(self, user_id):
+            type(self).balance_reads.append(user_id)
+            return UserBalance(Decimal("600"), Decimal("0"))
+
+    monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+    run_monitor(force_upstream=True, source="manual")
+
+    assert FakeClient.balance_reads == [1]
+    assert set(
+        Sub2APIUserUsageSample.objects.values_list(
+            "sub2api_user_id",
+            flat=True,
+        )
+    ) == {1, 2}
+    assert not ParticipantSnapshot.objects.filter(
+        participant__sub2api_user_id=2,
+    ).exists()
+
+    client = Client()
+    headers, _ = jwt_login(client)
+    response = client.post(
+        "/api/participants",
+        data=json.dumps(
+            {
+                "name": "车友",
+                "email": "rider@example.com",
+                "sub2api_user_id": 2,
+                "sub2api_username": "rider",
+                "sub2api_email": "rider@example.com",
+                "share_percent": 40,
+                "enabled": True,
+            }
+        ),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 201
+    rider = Participant.objects.get(sub2api_user_id=2)
+    latest = Observation.objects.get()
+    snapshots = {
+        row.participant_id: row
+        for row in latest.participant_snapshots.all()
+    }
+    assert snapshots[owner.id].charged_cycle_percent == Decimal("15")
+    assert snapshots[rider.id].charged_cycle_percent == Decimal("5")
+    assert snapshots[rider.id].selected_cost == Decimal("100")
+    assert ParticipantUsageSample.objects.filter(
+        participant=rider,
+        raw_selected_cost=Decimal("100"),
+    ).exists()
 
 @pytest.mark.django_db
 def test_adding_participant_midcycle_rebases_cumulative_attribution(

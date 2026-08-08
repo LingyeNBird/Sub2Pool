@@ -12,6 +12,7 @@ export interface Snapshot {
   needs_manual_update: boolean;
   recommendation_applied: boolean;
   reason: string;
+  allocation_model: "time_varying" | "constant_average";
 }
 
 export interface Participant {
@@ -79,6 +80,7 @@ export interface DashboardData {
   last_error: string;
   sub2api_admin_url: string;
   quota_query_mode: string;
+  weekly_quota_model: "time_varying" | "constant_average";
   needs_manual_update_count: number;
   cycle: null | {
     id: number;
@@ -350,6 +352,7 @@ export interface AppSettingsData {
   verify_tls: boolean;
   timezone: string;
   cost_basis: string;
+  weekly_quota_model: "time_varying" | "constant_average";
   initial_usd_per_percent: number;
   safety_factor: number;
   conservative_percentile: number;

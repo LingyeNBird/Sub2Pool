@@ -22,6 +22,7 @@ from .models import (
     Participant,
     validate_service_url,
 )
+from .participant_history import sync_participant_history
 
 from .secrets import encrypt_secret
 
@@ -137,6 +138,27 @@ class ParticipantWriteSerializer(serializers.ModelSerializer):
             )
         return attrs
 
+    @transaction.atomic
+    def create(self, validated_data):
+        participant = super().create(validated_data)
+        sync_participant_history(participant)
+        return participant
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        previous_user_id = instance.sub2api_user_id
+        needs_history_sync = any(
+            field in validated_data
+            for field in ("sub2api_user_id", "share_percent", "enabled")
+        )
+        participant = super().update(instance, validated_data)
+        if needs_history_sync:
+            sync_participant_history(
+                participant,
+                previous_user_id=previous_user_id,
+            )
+        return participant
+
 
 class SystemUserWriteSerializer(serializers.Serializer):
     """普通系统用户写入契约；管理员账号不通过该接口管理。"""
@@ -229,6 +251,7 @@ SETTINGS_FIELDS = (
     "verify_tls",
     "timezone",
     "cost_basis",
+    "weekly_quota_model",
     "initial_usd_per_percent",
     "safety_factor",
     "conservative_percentile",
