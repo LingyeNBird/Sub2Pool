@@ -16,10 +16,11 @@
   },
   "dependencies": {
     "@heroicons/vue": "^2.2.0",
-    "@weblogin/trendchart-elements": "^1.1.0",
+    "echarts": "^6.1.0",
     "pinia": "^4.0.2",
     "tslib": "^2.8.1",
     "vue": "^3.5.40",
+    "vue-echarts": "^8.1.0",
     "vue-router": "^5.2.0"
   },
   "devDependencies": {

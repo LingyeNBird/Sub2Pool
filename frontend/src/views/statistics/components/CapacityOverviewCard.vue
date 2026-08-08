@@ -5,6 +5,8 @@ import { useDateTime } from "@/composables/useDateTime";
 import type { StatisticsData } from "@/types";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
+import StatisticsChart from "./StatisticsChart.vue";
+
 const props = defineProps<{
   data: StatisticsData | null;
   loading: boolean;
@@ -25,6 +27,18 @@ const capacityValues = computed(
 const capacityLabels = computed(
   () => props.data?.capacity_series.map((item) => item.period) ?? [],
 );
+const capacityScale = computed(() => {
+  if (!capacityValues.value.length) return { min: null, max: null };
+  const minimum = Math.min(...capacityValues.value);
+  const maximum = Math.max(...capacityValues.value);
+  const span = maximum - minimum;
+  const padding =
+    span > 0 ? Math.max(span * 0.1, 1) : Math.max(Math.abs(minimum) * 0.05, 1);
+  return {
+    min: Math.max(0, minimum - padding),
+    max: maximum + padding,
+  };
+});
 </script>
 
 <template>
@@ -152,14 +166,15 @@ const capacityLabels = computed(
       <div v-if="loading" class="flex justify-center py-16">
         <span class="loading loading-lg loading-spinner"></span>
       </div>
-      <tc-line
+      <StatisticsChart
         v-else-if="capacityValues.length"
-        class="block h-64 w-full"
+        class="h-64 w-full"
+        kind="line"
         :values="capacityValues"
         :labels="capacityLabels"
-        :min="0"
-        tooltip="@L · $@V"
-      ></tc-line>
+        :min="capacityScale.min"
+        :max="capacityScale.max"
+      />
       <div v-else class="py-16 text-center opacity-60">
         尚无累计口径观测，完成首次测算后才会形成周限总额度历史。
       </div>

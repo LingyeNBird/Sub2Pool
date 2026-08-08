@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import type { StatisticsData } from "@/types";
+import { computed } from "vue";
+
+import type { StatisticsData, UsagePoint } from "@/types";
 import { formatCurrency } from "@/utils/formatters";
 
-defineProps<{
+import StatisticsChart from "./StatisticsChart.vue";
+
+const props = defineProps<{
   data: StatisticsData | null;
   loading: boolean;
 }>();
@@ -11,6 +15,32 @@ const usageDays = defineModel<number>("days", { required: true });
 const usagePrecision = defineModel<"raw" | "hour" | "day">("precision", {
   required: true,
 });
+
+function usageDeltas(points: UsagePoint[]) {
+  return points.slice(1).flatMap((point, index) => {
+    const previous = points[index];
+    const value =
+      point.account_cycle_usage_usd - previous.account_cycle_usage_usd;
+    // 累计值回落通常代表周期重置或数据校正，不能把跨界差值当作用量。
+    return value >= 0 ? [{ label: point.label, value }] : [];
+  });
+}
+
+const participantCharts = computed(() =>
+  (props.data?.participant_series ?? []).map((series) => ({
+    ...series,
+    usagePoints: usageDeltas(series.points),
+  })),
+);
+
+const usageIntervalLabel = computed(
+  () =>
+    ({
+      raw: "每次探测新增用量",
+      hour: "每小时新增用量",
+      day: "每天新增用量",
+    })[usagePrecision.value],
+);
 </script>
 
 <template>
@@ -22,7 +52,7 @@ const usagePrecision = defineModel<"raw" | "hour" | "day">("precision", {
             <AppIcon name="chart-bar" class="size-5" />参与者账号用量
             <span
               class="responsive-help-tooltip tooltip tooltip-bottom"
-              :data-tip="`展示 Sub2API 用量日志中按所选 OpenAI 上游账号和参与者聚合的本周期累计用量。后台当前每 ${data?.sample_interval_minutes ?? '—'} 分钟探测一次。`"
+              :data-tip="`柱状图使用相邻累计值相减，展示所选时间粒度内的新增用量；首个数据点没有前序基线，累计值回落的跨周期区间也不会绘制。后台当前每 ${data?.sample_interval_minutes ?? '—'} 分钟探测一次。`"
             >
               <button
                 type="button"
@@ -58,11 +88,11 @@ const usagePrecision = defineModel<"raw" | "hour" | "day">("precision", {
         <span class="loading loading-lg loading-spinner"></span>
       </div>
       <div
-        v-else-if="data?.participant_series.length"
+        v-else-if="participantCharts.length"
         class="grid gap-4 xl:grid-cols-2"
       >
         <article
-          v-for="series in data.participant_series"
+          v-for="series in participantCharts"
           :key="series.participant_id"
           class="rounded-box border border-base-300 bg-base-100 p-5"
         >
@@ -86,16 +116,19 @@ const usagePrecision = defineModel<"raw" | "hour" | "day">("precision", {
               </div>
             </div>
           </div>
-          <tc-line
-            v-if="series.points.length"
-            class="mt-4 block h-48 w-full"
-            :values="series.points.map((item) => item.account_cycle_usage_usd)"
-            :labels="series.points.map((item) => item.label)"
+          <p class="mt-4 text-xs font-medium opacity-60">
+            {{ usageIntervalLabel }}
+          </p>
+          <StatisticsChart
+            v-if="series.usagePoints.length"
+            class="mt-2 h-48 w-full"
+            kind="bar"
+            :values="series.usagePoints.map((item) => item.value)"
+            :labels="series.usagePoints.map((item) => item.label)"
             :min="0"
-            tooltip="@L · $@V"
-          ></tc-line>
+          />
           <div v-else class="py-12 text-center text-sm opacity-60">
-            尚无用量探测记录
+            尚无可比较的相邻用量样本
           </div>
         </article>
       </div>

@@ -1,6 +1,3 @@
-import "@weblogin/trendchart-elements/dist/tc-column.js";
-import "@weblogin/trendchart-elements/dist/tc-line.js";
-import "@weblogin/trendchart-elements/dist/tc-pie.js";
 import "@/assets/styles/tailwind.css";
 
 import { createPinia } from "pinia";
