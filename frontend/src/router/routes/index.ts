@@ -10,7 +10,7 @@ export const appRoutes: RouteRecordRaw[] = [
   {
     path: "participants",
     name: "participants",
-    component: () => import("@/views/users/Users.vue"),
+    component: () => import("@/views/users/participants/ParticipantsView.vue"),
     meta: { title: "参与者" },
   },
   {
