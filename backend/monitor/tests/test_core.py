@@ -733,6 +733,131 @@ def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
 
 
 @pytest.mark.django_db
+def test_adding_participant_midcycle_rebases_cumulative_attribution(
+    monkeypatch,
+):
+    """新参与者首次出现时，应按整周期累计用量重分已有百分比。"""
+
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.initial_usd_per_percent = Decimal("20")
+    config.save()
+    owner = Participant.objects.create(
+        name="车主",
+        sub2api_user_id=1,
+        share_percent=100,
+        is_owner=True,
+    )
+    reset_at = timezone.now() + timedelta(days=4)
+
+    class FakeClient:
+        run_count = 0
+
+        def __init__(self, _config):
+            self.step = type(self).run_count
+            type(self).run_count += 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def query_weekly_window(self, _account_id, _mode):
+            return WeeklyWindow(
+                Decimal("20"),
+                604800,
+                345600,
+                int(reset_at.timestamp()),
+                "passive_snapshot",
+            )
+
+        def usage_stats(self, *, user_id=None, **_kwargs):
+            costs = (
+                {None: Decimal("400"), 1: Decimal("400")}
+                if self.step == 0
+                else {
+                    None: Decimal("500"),
+                    1: Decimal("400"),
+                    2: Decimal("100"),
+                }
+            )
+            return UsageStats(costs[user_id], costs[user_id])
+
+        def user_balance(self, _user_id):
+            return UserBalance(Decimal("500"), Decimal("0"))
+
+    monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+    run_monitor(force_upstream=True, source="manual")
+
+    owner.share_percent = Decimal("60")
+    owner.save(update_fields=["share_percent"])
+    rider = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=2,
+        share_percent=40,
+    )
+    run_monitor(force_upstream=True, source="manual")
+
+    latest = Observation.objects.order_by("-observed_at", "-id").first()
+    assert latest is not None
+    snapshots = {
+        item.participant_id: item
+        for item in latest.participant_snapshots.all()
+    }
+    assert latest.delta_percent == Decimal("0")
+    assert latest.valid_sample is False
+    assert latest.raw_window["participant_rebased"] is True
+    assert snapshots[owner.id].delta_cost == Decimal("0")
+    assert snapshots[rider.id].delta_cost is None
+    assert snapshots[owner.id].charged_delta_percent == Decimal("-4")
+    assert snapshots[owner.id].charged_cycle_percent == Decimal("16")
+    assert snapshots[owner.id].remaining_share_percent == Decimal("44")
+    assert snapshots[rider.id].charged_delta_percent == Decimal("4")
+    assert snapshots[rider.id].charged_cycle_percent == Decimal("4")
+    assert snapshots[rider.id].remaining_share_percent == Decimal("36")
+    assert sum(
+        (item.charged_cycle_percent for item in snapshots.values()),
+        Decimal("0"),
+    ) == Decimal("20")
+
+    # 升级前已经落库的错误边界没有重分标记；下一次观测应只回放当前
+    # 受影响区间，并修复这类既有数据。
+    legacy_window = dict(latest.raw_window)
+    legacy_window.pop("participant_rebased", None)
+    legacy_window.pop("participant_rebase_reason", None)
+    legacy_window.pop("participant_roster_ids", None)
+    latest.raw_window = legacy_window
+    latest.save(update_fields=["raw_window"])
+    snapshots[owner.id].charged_delta_percent = Decimal("0")
+    snapshots[owner.id].charged_cycle_percent = Decimal("20")
+    snapshots[owner.id].remaining_share_percent = Decimal("40")
+    snapshots[rider.id].charged_delta_percent = Decimal("0")
+    snapshots[rider.id].charged_cycle_percent = Decimal("0")
+    snapshots[rider.id].remaining_share_percent = Decimal("40")
+    ParticipantSnapshot.objects.bulk_update(
+        snapshots.values(),
+        [
+            "charged_delta_percent",
+            "charged_cycle_percent",
+            "remaining_share_percent",
+        ],
+    )
+
+    run_monitor(force_upstream=True, source="manual")
+    newest = Observation.objects.order_by("-observed_at", "-id").first()
+    assert newest is not None
+    newest_snapshots = {
+        item.participant_id: item
+        for item in newest.participant_snapshots.all()
+    }
+    assert newest_snapshots[owner.id].charged_cycle_percent == Decimal("16")
+    assert newest_snapshots[rider.id].charged_cycle_percent == Decimal("4")
+    latest.refresh_from_db()
+    assert latest.raw_window["participant_rebased"] is True
+
+
+@pytest.mark.django_db
 def test_same_official_reset_rollbacks_wait_for_explicit_manual_start(
     monkeypatch,
 ):

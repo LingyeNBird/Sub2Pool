@@ -393,6 +393,15 @@ def _replay_segment(
             valid_sample,
             rate_source,
         )
+        snapshots = list(observation.participant_snapshots.all())
+        current_participant_ids = {
+            snapshot.participant_id for snapshot in snapshots
+        }
+        previous_participant_ids = set(previous_snapshots)
+        participant_roster_changed = bool(
+            previous is not None
+            and current_participant_ids != previous_participant_ids
+        )
         raw_window = dict(observation.raw_window)
         raw_window.pop("reset_candidate_status", None)
         raw_window.pop("previous_observation_id", None)
@@ -406,6 +415,17 @@ def _replay_segment(
                 "replay_decision": "included",
             }
         )
+        raw_window["participant_roster_ids"] = sorted(
+            current_participant_ids
+        )
+        if participant_roster_changed:
+            raw_window["participant_rebased"] = True
+            raw_window["participant_rebase_reason"] = (
+                "participant_snapshot_roster_changed"
+            )
+        else:
+            raw_window.pop("participant_rebased", None)
+            raw_window.pop("participant_rebase_reason", None)
         observation.raw_window = raw_window
         observation.save(
             update_fields=[
@@ -425,8 +445,7 @@ def _replay_segment(
             has_valid_rate = True
             rate_history.append((sample_rate, interval_percent))
 
-        snapshots = list(observation.participant_snapshots.all())
-        participant_deltas: dict[int, Decimal] = {}
+        participant_deltas: dict[int, Decimal | None] = {}
         for snapshot in snapshots:
             snapshot.selected_cost = max(
                 ZERO,
@@ -437,38 +456,67 @@ def _replay_segment(
             participant_deltas[snapshot.participant_id] = (
                 snapshot.selected_cost - old.selected_cost
                 if old is not None
-                else snapshot.selected_cost
+                else None
             )
-        positive_total = sum(
-            (max(ZERO, value) for value in participant_deltas.values()),
-            ZERO,
-        )
-        attribution_total = (
-            selected_total
-            if previous is None
-            else max(ZERO, delta_cost or ZERO)
-        )
+
+        if participant_roster_changed:
+            # 参与者中途加入或退出时，旧观测没有完整的逐用户快照，不能把
+            # 新参与者的整周期累计成本误当成“本次增量”。使用当前整周期
+            # 累计成本重新分摊当前已用百分比，之后再恢复逐观测增量归属。
+            participant_weights = {
+                snapshot.participant_id: max(ZERO, snapshot.selected_cost)
+                for snapshot in snapshots
+            }
+            attribution_total = selected_total
+        else:
+            participant_weights = {
+                snapshot.participant_id: max(
+                    ZERO,
+                    (
+                        snapshot.selected_cost
+                        if previous is None
+                        else (
+                            participant_deltas[snapshot.participant_id]
+                            or ZERO
+                        )
+                    ),
+                )
+                for snapshot in snapshots
+            }
+            attribution_total = (
+                selected_total
+                if previous is None
+                else max(ZERO, delta_cost or ZERO)
+            )
+        positive_total = sum(participant_weights.values(), ZERO)
         denominator = max(attribution_total, positive_total)
 
         for snapshot in snapshots:
             old = previous_snapshots.get(snapshot.participant_id)
             participant_delta = participant_deltas[snapshot.participant_id]
-            positive_delta = max(ZERO, participant_delta)
-            charged_delta = ZERO
-            if denominator > 0:
-                if previous is None:
-                    charged_delta = (
-                        interval_percent * positive_delta / denominator
-                    )
-                elif valid_sample and delta_percent is not None:
-                    charged_delta = (
-                        delta_percent * positive_delta / denominator
-                    )
-            charged = max(
-                ZERO,
-                (old.charged_cycle_percent if old is not None else ZERO)
-                + charged_delta,
+            positive_delta = participant_weights[snapshot.participant_id]
+            old_charged = (
+                old.charged_cycle_percent if old is not None else ZERO
             )
+            if participant_roster_changed:
+                charged = (
+                    interval_percent * positive_delta / denominator
+                    if denominator > 0
+                    else ZERO
+                )
+                charged_delta = charged - old_charged
+            else:
+                charged_delta = ZERO
+                if denominator > 0:
+                    if previous is None:
+                        charged_delta = (
+                            interval_percent * positive_delta / denominator
+                        )
+                    elif valid_sample and delta_percent is not None:
+                        charged_delta = (
+                            delta_percent * positive_delta / denominator
+                        )
+                charged = max(ZERO, old_charged + charged_delta)
             remaining = max(
                 ZERO,
                 snapshot.participant.share_percent - charged,
@@ -501,9 +549,7 @@ def _replay_segment(
             else:
                 reason = "当前用户余额无需调整"
 
-            snapshot.delta_cost = (
-                None if old is None else participant_delta
-            )
+            snapshot.delta_cost = participant_delta
             snapshot.charged_delta_percent = charged_delta.quantize(
                 PCT_PRECISION,
                 rounding=ROUND_HALF_UP,
@@ -618,6 +664,48 @@ def _previous_included(observation: Observation) -> Observation | None:
         .order_by("-observed_at", "-id")
         .first()
     )
+
+def _legacy_unrebased_roster_change(
+    previous: Observation | None,
+) -> Observation | None:
+    """定位升级前遗漏的参与者集合变化，仅需对旧数据扫描一次。"""
+
+    if (
+        previous is None
+        or previous.attribution_started_at is None
+        or "participant_roster_ids" in previous.raw_window
+    ):
+        return None
+    observations = list(
+        Observation.objects.filter(
+            account_id=previous.account_id,
+            attribution_started_at=previous.attribution_started_at,
+            excluded_at__isnull=True,
+        )
+        .filter(
+            Q(observed_at__lt=previous.observed_at)
+            | Q(
+                observed_at=previous.observed_at,
+                id__lte=previous.id,
+            )
+        )
+        .prefetch_related("participant_snapshots")
+        .order_by("observed_at", "id")
+    )
+    previous_ids: set[int] | None = None
+    for observation in observations:
+        current_ids = {
+            snapshot.participant_id
+            for snapshot in observation.participant_snapshots.all()
+        }
+        if (
+            previous_ids is not None
+            and current_ids != previous_ids
+            and not observation.raw_window.get("participant_rebased")
+        ):
+            return observation
+        previous_ids = current_ids
+    return None
 
 def _replay_anchor(
     observation: Observation,
@@ -866,6 +954,13 @@ def rebuild_observation_suffix(
         )
 
     previous = _previous_included(observation)
+    legacy_roster_change = _legacy_unrebased_roster_change(previous)
+    if legacy_roster_change is not None:
+        return rebuild_account(
+            observation.account_id,
+            config,
+            replay_from=_replay_anchor(legacy_roster_change),
+        )
     same_official_window = bool(
         previous is not None
         and _same_official_reset(

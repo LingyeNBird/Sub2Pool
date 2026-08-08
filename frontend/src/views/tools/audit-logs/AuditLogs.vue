@@ -43,6 +43,8 @@ const running = ref(false);
 const message = ref("");
 const selected = ref<Observation | null>(null);
 const dialog = ref<HTMLDialogElement | null>(null);
+const costDetail = ref<Observation | null>(null);
+const costDialog = ref<HTMLDialogElement | null>(null);
 const exclusionTarget = ref<Observation | null>(null);
 const exclusionReason = ref("");
 const excludeDialog = ref<HTMLDialogElement | null>(null);
@@ -82,6 +84,21 @@ const remainingLabel = computed(() => {
   const remainder = seconds % 60;
   if (hours) return `${hours} 小时 ${minutes} 分 ${remainder} 秒`;
   return `${minutes} 分 ${remainder} 秒`;
+});
+const participantDeltaTotal = computed(() =>
+  Number(
+    (
+      costDetail.value?.participants.reduce(
+        (total, item) => total + (item.delta_cost ?? 0),
+        0,
+      ) ?? 0
+    ).toFixed(6),
+  ),
+);
+const unmatchedCostDelta = computed(() => {
+  if (costDetail.value?.delta_cost == null) return null;
+  const difference = costDetail.value.delta_cost - participantDeltaTotal.value;
+  return Math.abs(difference) < 0.000001 ? 0 : Number(difference.toFixed(6));
 });
 
 function currency(value: number | null) {
@@ -204,6 +221,12 @@ async function run() {
 function show(row: Observation) {
   selected.value = row;
   dialog.value?.showModal();
+}
+
+function showCostDetail(row: Observation) {
+  if (row.delta_cost == null) return;
+  costDetail.value = row;
+  costDialog.value?.showModal();
 }
 
 function promptExclude(row: Observation) {
@@ -525,7 +548,17 @@ onUnmounted(() => window.clearInterval(clockTimer));
                   </span>
                 </td>
                 <td>{{ percent(row.upstream_used_percent) }}</td>
-                <td>{{ currency(row.delta_cost) }}</td>
+                <td>
+                  <button
+                    v-if="row.delta_cost !== null"
+                    type="button"
+                    class="link cursor-pointer font-medium tabular-nums link-hover"
+                    @click="showCostDetail(row)"
+                  >
+                    {{ currency(row.delta_cost) }}
+                  </button>
+                  <span v-else>—</span>
+                </td>
                 <td>{{ percent(row.delta_percent) }}</td>
                 <td>{{ currency(row.sample_usd_per_percent) }}</td>
                 <td class="font-semibold">
@@ -663,6 +696,84 @@ onUnmounted(() => window.clearInterval(clockTimer));
         <button type="button" class="btn btn-primary" @click="applyFilter">
           应用
         </button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>关闭</button></form>
+  </dialog>
+
+  <dialog ref="costDialog" class="modal">
+    <div class="modal-box max-w-3xl">
+      <h2 class="text-lg font-bold">成本增量明细</h2>
+      <p v-if="costDetail" class="mt-1 text-sm opacity-60">
+        {{ dateTime(costDetail.observed_at) }} 相对上一条有效观测
+      </p>
+      <div class="mt-4 overflow-x-auto">
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>参与者</th>
+              <th>上一点累计成本</th>
+              <th>当前累计成本</th>
+              <th>成本增量</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="item in costDetail?.participants"
+              :key="item.participant_id"
+            >
+              <td>{{ item.participant_name }}</td>
+              <td class="tabular-nums">
+                {{
+                  item.delta_cost === null
+                    ? "无上一观测快照"
+                    : currency(item.selected_cost - item.delta_cost)
+                }}
+              </td>
+              <td class="tabular-nums">{{ currency(item.selected_cost) }}</td>
+              <td class="font-medium tabular-nums">
+                {{ currency(item.delta_cost) }}
+              </td>
+            </tr>
+            <tr v-if="costDetail?.participants.length === 0">
+              <td colspan="4" class="py-6 text-center opacity-60">
+                此观测没有参与者快照
+              </td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <th colspan="3">已知参与者成本增量合计</th>
+              <th class="tabular-nums">
+                {{ currency(participantDeltaTotal) }}
+              </th>
+            </tr>
+            <tr>
+              <th colspan="3">账号总成本增量</th>
+              <th class="tabular-nums">
+                {{ currency(costDetail?.delta_cost ?? null) }}
+              </th>
+            </tr>
+            <tr v-if="unmatchedCostDelta !== null && unmatchedCostDelta !== 0">
+              <th colspan="3">未映射或无法逐用户还原</th>
+              <th class="tabular-nums">
+                {{ currency(unmatchedCostDelta) }}
+              </th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div
+        v-if="costDetail?.participants.some((item) => item.delta_cost === null)"
+        class="mt-4 alert text-sm alert-info"
+      >
+        <AppIcon name="information-circle" class="size-5" />
+        <span>
+          首次出现在观测中的参与者没有上一点快照；系统会保留其当前周期累计成本，但不会伪造该采样区间的个人增量。
+        </span>
+      </div>
+      <div class="modal-action">
+        <button class="btn" @click="costDialog?.close()">关闭</button>
       </div>
     </div>
     <form method="dialog" class="modal-backdrop"><button>关闭</button></form>
