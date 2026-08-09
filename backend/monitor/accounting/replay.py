@@ -25,7 +25,7 @@ from .boundaries import (
 )
 from .contracts import ReplayResult, ReplaySegment
 from .rates import sample_note as _sample_note, select_rate
-from ..fast_correction import FastCorrectionPrefix
+from ..fast_correction.prefix import FastCorrectionPrefix
 
 from ..models import (
     AppSettings,

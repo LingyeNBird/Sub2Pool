@@ -3,7 +3,7 @@
 from rest_framework import serializers
 
 from .base import AdminAPIView, error, ok
-from ..fast_correction import rebuild_fast_corrections
+from ..fast_correction.rebuild import rebuild_fast_corrections
 from ..models import AppSettings
 from ..integrations.sub2api import Sub2APIError
 

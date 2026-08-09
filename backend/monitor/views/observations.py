@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404
 from .base import AdminAPIView, error, ok
 from ..reporting import iso, snapshot_data
 from .record_helpers import paginated_rows, query_datetime
-from ..fast_correction import (
+from ..fast_correction.constants import (
     FAST_EXTRA_FACTOR,
     SUB2API_FAST_MULTIPLIER,
     UPSTREAM_FAST_MULTIPLIER,

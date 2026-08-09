@@ -2,7 +2,7 @@
 from django.conf import settings
 from django.db import models
 
-from . import PERCENT_VALIDATORS
+from .validators import PERCENT_VALIDATORS
 
 
 class Participant(models.Model):

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from ..fast_correction import missing_current_cycle_intervals
+from ..fast_correction.rebuild import missing_current_cycle_intervals
 from ..models import AppSettings, validate_service_url
 from ..secrets import encrypt_secret
 

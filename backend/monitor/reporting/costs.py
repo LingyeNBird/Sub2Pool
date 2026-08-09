@@ -2,7 +2,7 @@
 
 from decimal import Decimal, ROUND_HALF_UP
 
-from ..fast_correction import FastCorrectionPrefix
+from ..fast_correction.prefix import FastCorrectionPrefix
 from ..models import AppSettings, Observation
 
 

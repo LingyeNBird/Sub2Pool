@@ -179,8 +179,8 @@ def rebuild_fast_corrections(
                 batch_size=500,
             )
 
-    # 延迟导入避免 replay 在加载前缀类时形成模块循环。
-    from ..replay import rebuild_account
+    # 延迟导入避免 FAST 重建入口与账本重放器在模块加载期互相依赖。
+    from ..accounting.replay import rebuild_account
 
     replay = rebuild_account(account_id, config, replay_from=rebuild_start)
     correction = sum(

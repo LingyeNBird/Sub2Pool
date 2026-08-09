@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
-from . import validate_service_url
+from .validators import validate_service_url
 
 
 class AppSettings(models.Model):

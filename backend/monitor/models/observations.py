@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.db import models
 
-from . import PERCENT_VALIDATORS
+from .validators import PERCENT_VALIDATORS
 from .participants import Participant
 
 

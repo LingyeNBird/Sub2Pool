@@ -6,11 +6,9 @@ from django.db import transaction
 
 from .types import LocalBundle, WindowReference
 from ..accounting.boundaries import RATE_METHOD, same_official_reset
-from ..fast_correction import (
-    FastCorrectionInterval,
-    apply_fast_interval,
-    fetch_fast_interval,
-)
+from ..fast_correction.domain import FastCorrectionInterval
+from ..fast_correction.persistence import apply_fast_interval
+from ..fast_correction.service import fetch_fast_interval
 from ..integrations.sub2api import Sub2APIError, Sub2APIReader, WeeklyWindow
 from ..models import AppSettings, Observation, ParticipantSnapshot
 
