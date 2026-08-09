@@ -109,8 +109,8 @@ def test_integer_percent_plateau_uses_cumulative_cost_for_capacity(monkeypatch):
     assert observations[1].sample_usd_per_percent == Decimal("26.972384")
     assert observations[2].delta_cost == Decimal("6.873233")
     assert observations[2].sample_usd_per_percent == Decimal("25.790081")
-    assert Decimal("10") <= observations[2].effective_usd_per_percent <= Decimal(
-        "35"
+    assert Decimal("14") <= observations[2].effective_usd_per_percent <= Decimal(
+        "40"
     )
     assert abs(
         observations[2].effective_usd_per_percent
@@ -400,7 +400,7 @@ def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
             )
 
         def usage_stats(self, *, user_id=None, **_kwargs):
-            costs = {None: Decimal("100"), 1: Decimal("100"), 2: Decimal("0")}
+            costs = {None: Decimal("200"), 1: Decimal("200"), 2: Decimal("0")}
             return UsageStats(costs[user_id], costs[user_id])
 
         def user_balance(self, user_id):

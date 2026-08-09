@@ -8,17 +8,17 @@ import numpy as np
 
 from .dynamic_contracts import DynamicModelInput, ParticleFilterOutput
 
-V_MIN = 1000.0
-V_MAX = 3500.0
-V_MID = 2250.0
-V_HALF = 1250.0
+V_MIN = 1400.0
+V_MAX = 4000.0
+V_MID = 2700.0
+V_HALF = 1300.0
 QUANTIZER_NAMES = ("floor", "nearest", "ceil")
 
 
 @dataclass(frozen=True)
 class ParticleFilterConfig:
     particles: int = 480
-    latent_stationary_sd: float = 0.78
+    latent_stationary_sd: float = 0.60
     speed_taus_hours: tuple[float, ...] = (6.0, 24.0, 72.0)
     timing_dirichlet_alpha: float = 0.8
     observation_soft_sigma_pp: float = 0.05
