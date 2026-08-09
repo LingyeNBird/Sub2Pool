@@ -324,7 +324,7 @@ def test_fast_correction_rebuild_api_fills_missing_cycle_and_replays(monkeypatch
             ]
 
     monkeypatch.setattr(
-        "monitor.fast_correction.Sub2APIClient",
+        "monitor.fast_correction.rebuild.Sub2APIClient",
         FakeClient,
     )
     client = Client()
