@@ -17,7 +17,7 @@ from .presenters import (
     participant_data,
 )
 from ..models import AppSettings, Observation, Participant
-from ..sub2api import Sub2APIClient, Sub2APIError
+from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 from ..replay import RATE_METHOD
 
 

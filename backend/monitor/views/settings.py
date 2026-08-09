@@ -7,7 +7,7 @@ from .base import AdminAPIView, error, ok
 from ..models import AppSettings
 from ..notifications import send_notification
 from ..serializers import AppSettingsSerializer, Sub2APIConnectionSerializer
-from ..sub2api import Sub2APIClient, Sub2APIError
+from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 
 def _temporary_sub2api_client(
     config: AppSettings,

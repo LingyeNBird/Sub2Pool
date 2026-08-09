@@ -36,7 +36,7 @@ from monitor.replay import (
     rebuild_observation_suffix,
 )
 from monitor.secrets import encrypt_secret
-from monitor.sub2api import (
+from monitor.integrations.sub2api import (
     Sub2APIClient,
     Sub2APIError,
     Sub2APIUserUsage,

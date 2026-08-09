@@ -6,7 +6,7 @@ from .base import AdminAPIView, error, ok
 from .presenters import iso
 from ..engine import run_monitor
 from ..models import AppSettings
-from ..sub2api import Sub2APIError
+from ..integrations.sub2api import Sub2APIError
 
 
 class RunMonitorView(AdminAPIView):

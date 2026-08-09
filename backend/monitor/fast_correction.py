@@ -20,7 +20,7 @@ from .models import (
     Observation,
     ObservationFastCorrection,
 )
-from .sub2api import Sub2APIClient, Sub2APIUsageLog
+from .integrations.sub2api import Sub2APIClient, Sub2APIUsageLog
 
 ZERO = Decimal("0")
 COST_PRECISION = Decimal("0.000001")

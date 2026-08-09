@@ -30,7 +30,7 @@ from .replay import (
     RESET_TIME_TOLERANCE,
     rebuild_observation_suffix,
 )
-from .sub2api import (
+from .integrations.sub2api import (
     Sub2APIClient,
     Sub2APIError,
     Sub2APIUserUsage,

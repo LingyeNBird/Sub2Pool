@@ -7,7 +7,7 @@ from .base import AdminAPIView, AuthenticatedAPIView, error, ok
 from .presenters import participant_data
 from ..models import AppSettings, Participant
 from ..serializers import ParticipantWriteSerializer
-from ..sub2api import Sub2APIClient, Sub2APIError
+from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 
 
 class Sub2APIUserListView(AdminAPIView):
