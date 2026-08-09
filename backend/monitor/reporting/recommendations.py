@@ -1,15 +1,11 @@
-"""把 ORM 对象转换成前端现有的稳定 JSON 结构。"""
+"""额度模型、参与者归属与余额建议的统一读取投影。"""
 
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
 
+from .common import iso
 from ..models import AppSettings, Observation, Participant, ParticipantSnapshot
-from ..fast_correction import FastCorrectionPrefix
-
-
-def iso(value):
-    return value.isoformat() if value else None
 
 
 ZERO = Decimal("0")
@@ -17,49 +13,6 @@ CENT = Decimal("0.01")
 PCT_PRECISION = Decimal("0.00001")
 TRUNCATED_PERCENT_TAIL = Decimal("0.9")
 HUNDRED = Decimal("100")
-class FastCorrectionBreakdownPresenter:
-    """把重放后的累计成本拆成 Sub2API 原值与累计 FAST 修正。"""
-
-    def __init__(self, config: AppSettings, account_id: int | None):
-        self.enabled = bool(config.fast_correction_enabled)
-        self.prefix = (
-            FastCorrectionPrefix(account_id, config.cost_basis)
-            if self.enabled and account_id
-            else None
-        )
-
-    @staticmethod
-    def _money(value: Decimal) -> float:
-        return float(value.quantize(CENT, rounding=ROUND_HALF_UP))
-
-    def for_observation(self, observation: Observation) -> dict[str, float]:
-        total = max(ZERO, observation.selected_total_cost)
-        correction = (
-            self.prefix.total_between(
-                observation.attribution_started_at,
-                observation,
-            )
-            if self.prefix is not None
-            and observation.attribution_started_at is not None
-            else ZERO
-        )
-        # 重放保证修正包含在总成本中；上限保护让历史异常数据也保持 A + B = 总额。
-        correction = min(total, max(ZERO, correction))
-        return {
-            "sub2api_cost_usd": self._money(total - correction),
-            "fast_correction_usd": self._money(correction),
-            "total_cost_usd": self._money(total),
-        }
-
-    @staticmethod
-    def zero() -> dict[str, float]:
-        return {
-            "sub2api_cost_usd": 0.0,
-            "fast_correction_usd": 0.0,
-            "total_cost_usd": 0.0,
-        }
-
-
 
 
 def display_cycle_rates(
@@ -82,6 +35,7 @@ def display_cycle_rates(
 
 
 def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
+    """序列化持久化的时变归属结论。"""
     return {
         "participant_id": snapshot.participant_id,
         "participant_name": (
@@ -119,12 +73,14 @@ def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
 
 
 def latest_snapshot(participant: Participant) -> ParticipantSnapshot | None:
+    """读取未排除观测对应的最新参与者账本。"""
     return (
         participant.snapshots.select_related("observation")
         .filter(observation__excluded_at__isnull=True)
         .order_by("-observation__observed_at")
         .first()
     )
+
 
 def _constant_average_recommendation_bounds(
     snapshot: ParticipantSnapshot,
@@ -134,7 +90,6 @@ def _constant_average_recommendation_bounds(
     remaining_share_percent: Decimal,
 ) -> tuple[Decimal, Decimal]:
     """按截尾整数百分比反推容量区间，再换算参与者的剩余余额区间。"""
-
     observation = snapshot.observation
     used_percent_min = max(ZERO, observation.interval_used_percent)
     if used_percent_min <= 0:
@@ -170,7 +125,6 @@ def _constant_average_values(
     config: AppSettings,
 ) -> dict:
     """用起点至当前的累计成本比例生成只读展示值，不改写时变账本。"""
-
     observation = snapshot.observation
     selected_cost = max(ZERO, snapshot.selected_cost)
     denominator = max(
@@ -253,6 +207,7 @@ def display_snapshot_data(
     participant: Participant,
     config: AppSettings,
 ) -> dict | None:
+    """按当前展示模型读取参与者归属与余额建议。"""
     snapshot = latest_snapshot(participant)
     if snapshot is None:
         return None
@@ -301,7 +256,6 @@ def display_recommendation(
     config: AppSettings,
 ) -> tuple[ParticipantSnapshot | None, Decimal | None]:
     """返回当前展示模型对应的建议值，供显式一键设置使用。"""
-
     snapshot = latest_snapshot(participant)
     if snapshot is None:
         return None, None
@@ -315,6 +269,7 @@ def participant_data(
     participant: Participant,
     config: AppSettings | None = None,
 ) -> dict:
+    """生成参与者列表和首页共用的稳定读取结构。"""
     config = config or AppSettings.load()
     snapshot = display_snapshot_data(participant, config)
     return {
@@ -350,10 +305,3 @@ def participant_data(
         "last_checked_at": iso(participant.last_checked_at),
         "snapshot": snapshot,
     }
-
-
-def bounded_query_int(request, name: str, default: int, maximum: int) -> int:
-    try:
-        return min(max(int(request.query_params.get(name, default)), 1), maximum)
-    except (TypeError, ValueError):
-        return default

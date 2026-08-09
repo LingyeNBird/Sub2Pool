@@ -6,7 +6,7 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404
 
 from .base import AdminAPIView, error, ok
-from .presenters import iso, snapshot_data
+from ..reporting import iso, snapshot_data
 from .record_helpers import paginated_rows, query_datetime
 from ..fast_correction import (
     FAST_EXTRA_FACTOR,

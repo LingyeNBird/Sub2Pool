@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 
 from .base import AdminAPIView, AuthenticatedAPIView, error, ok
-from .presenters import participant_data
+from ..reporting import participant_data
 from ..models import AppSettings, Participant
 from ..serializers import ParticipantWriteSerializer
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError

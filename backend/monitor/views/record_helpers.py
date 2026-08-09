@@ -4,7 +4,7 @@ from django.core.paginator import Paginator
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .presenters import bounded_query_int
+from .query_params import bounded_query_int
 
 
 def query_datetime(request, name: str):

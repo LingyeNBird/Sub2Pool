@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from .base import AdminAPIView, error, ok
-from .presenters import (
+from ..reporting import (
     FastCorrectionBreakdownPresenter,
     display_cycle_rates,
     display_recommendation,

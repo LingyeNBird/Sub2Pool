@@ -7,11 +7,9 @@ from zoneinfo import ZoneInfo
 
 from ..models import AppSettings, Observation
 from ..replay import RATE_METHOD
-from ..views.presenters import (
-    FastCorrectionBreakdownPresenter,
-    display_cycle_rates,
-    iso,
-)
+from .common import iso
+from .costs import FastCorrectionBreakdownPresenter
+from .recommendations import display_cycle_rates
 
 
 def money(value: Decimal) -> float:
