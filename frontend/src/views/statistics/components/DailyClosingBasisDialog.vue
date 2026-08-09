@@ -28,24 +28,6 @@ const dailyBasis = computed(() =>
 );
 const dateTime = useDateTime();
 
-const rateSourceDescription = computed(() => {
-  if (!cycleBasis.value) return "";
-  if (cycleBasis.value.calculation_model === "constant_average") {
-    return "平均恒定模式直接采用周期起点至该收盘点的累计成本和已用百分比，不使用保守分位。";
-  }
-  return (
-    {
-      current_interval_samples: `取收盘时最近 ${cycleBasis.value.rate_sample_count} 个有效累计样本，按已用百分比加权后采用 ${cycleBasis.value.conservative_percentile}% 保守分位。`,
-      previous_interval_history:
-        "该周期在收盘时还没有有效样本，因此沿用上一个正常周期的有效估值。",
-      initial_fallback:
-        "收盘时没有当前或历史有效样本，因此采用设置中的无样本默认值。",
-    }[cycleBasis.value.rate_source] ||
-    cycleBasis.value.sample_note ||
-    "采用该收盘观测保存的美元/1%估值。"
-  );
-});
-
 function open(selected: CapacityPoint, kind: BasisKind) {
   const selectedBasis =
     kind === "cycle" ? selected.basis : selected.daily_basis;
@@ -77,11 +59,7 @@ defineExpose({ open, close });
       <template v-if="cycleBasis">
         <CalculationBasisHeader
           :title="`${point.period} 累计收盘依据`"
-          :help="
-            cycleBasis.calculation_model === 'constant_average'
-              ? '展示该日收盘时从周期起点累计得到的平均恒定估算。'
-              : '展示该日最后一次有效观测当时保存的周期累计成本、官方百分比和保守美元/1%样本，而不是使用今天的最新数据倒推。'
-          "
+          help="展示该日最后一次观测在当时可获得的周期累计端点折算；不使用时变归属模型，也不使用今天的最新数据回填历史。"
         />
         <CalculationBasisTimeline
           :start-time="
@@ -128,52 +106,8 @@ defineExpose({ open, close });
             收盘时官方已用百分比为 0，不能形成累计端点折算。
           </p>
           <p class="mt-3 text-sm opacity-70">
-            {{ rateSourceDescription }} 当时采用
-            <strong>{{
-              formatCurrency(cycleBasis.effective_usd_per_percent)
-            }}</strong>
-            / 1%，所以该日收盘估算为
-            <strong>{{ formatCurrency(cycleBasis.estimate_usd) }}</strong
-            >。
+            该日收盘值只由上面的累计成本与累计整数百分比确定。
           </p>
-        </div>
-
-        <div
-          v-if="
-            cycleBasis.calculation_model === 'time_varying' &&
-            cycleBasis.rate_samples.length
-          "
-          class="mt-3 overflow-x-auto"
-        >
-          <table class="table table-sm">
-            <thead>
-              <tr>
-                <th>样本时间</th>
-                <th>累计成本</th>
-                <th>已用周限</th>
-                <th>美元 / 1%</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="sample in cycleBasis.rate_samples"
-                :key="sample.observed_at"
-              >
-                <td>{{ dateTime(sample.observed_at) }}</td>
-                <td>
-                  {{
-                    formatCostBreakdown(
-                      sample.cost_usd,
-                      sample.cost_breakdown,
-                      fastCorrectionEnabled,
-                    )
-                  }}
-                </td>
-                <td>{{ formatPercent(sample.used_percent) }}</td>
-                <td>{{ formatCurrency(sample.usd_per_percent) }}</td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </template>
 

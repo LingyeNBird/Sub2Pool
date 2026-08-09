@@ -381,11 +381,7 @@ def test_fast_correction_rebuild_api_fills_missing_cycle_and_replays(monkeypatch
         "fast_correction_usd": 25.0,
         "total_cost_usd": 225.0,
     }
-    assert dashboard["cycle"]["rate_samples"][0]["cost_breakdown"] == {
-        "sub2api_cost_usd": 200.0,
-        "fast_correction_usd": 25.0,
-        "total_cost_usd": 225.0,
-    }
+    assert dashboard["cycle"]["model_diagnostics"]["algorithm"] == RATE_METHOD
 
     statistics = client.get("/api/statistics", **headers).json()["data"]
     assert statistics["fast_correction_enabled"] is True
@@ -393,14 +389,6 @@ def test_fast_correction_rebuild_api_fills_missing_cycle_and_replays(monkeypatch
         "sub2api_cost_usd": 200.0,
         "fast_correction_usd": 25.0,
         "total_cost_usd": 225.0,
-    }
-    # 首个区间尚未计算出 FAST 请求时按 0 展示，后续累计修正仍保持可追溯。
-    assert statistics["capacity_summary"]["cycle"]["rate_samples"][-1][
-        "cost_breakdown"
-    ] == {
-        "sub2api_cost_usd": 100.0,
-        "fast_correction_usd": 0.0,
-        "total_cost_usd": 100.0,
     }
 
     config.fast_correction_enabled = False

@@ -58,8 +58,36 @@ def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
             if snapshot.recommended_balance_usd is not None
             else None
         ),
-        "recommended_balance_min_usd": None,
-        "recommended_balance_max_usd": None,
+        "charged_percent_lower": (
+            float(snapshot.charged_percent_lower)
+            if snapshot.charged_percent_lower is not None
+            else None
+        ),
+        "charged_percent_upper": (
+            float(snapshot.charged_percent_upper)
+            if snapshot.charged_percent_upper is not None
+            else None
+        ),
+        "recommended_balance_min_usd": (
+            float(snapshot.recommended_balance_min_usd)
+            if snapshot.recommended_balance_min_usd is not None
+            else None
+        ),
+        "recommended_balance_max_usd": (
+            float(snapshot.recommended_balance_max_usd)
+            if snapshot.recommended_balance_max_usd is not None
+            else None
+        ),
+        "deterministic_balance_min_usd": (
+            float(snapshot.deterministic_balance_min_usd)
+            if snapshot.deterministic_balance_min_usd is not None
+            else None
+        ),
+        "deterministic_balance_max_usd": (
+            float(snapshot.deterministic_balance_max_usd)
+            if snapshot.deterministic_balance_max_usd is not None
+            else None
+        ),
         "balance_difference_usd": (
             float(snapshot.balance_difference_usd)
             if snapshot.balance_difference_usd is not None
@@ -222,6 +250,8 @@ def display_snapshot_data(
         "delta_cost": None,
         "charged_delta_percent": 0.0,
         "charged_cycle_percent": float(values["charged_cycle_percent"]),
+        "charged_percent_lower": None,
+        "charged_percent_upper": None,
         "remaining_share_percent": float(
             values["remaining_share_percent"]
         ),
@@ -239,6 +269,8 @@ def display_snapshot_data(
         "recommended_balance_max_usd": float(
             values["recommended_balance_max_usd"]
         ),
+        "deterministic_balance_min_usd": None,
+        "deterministic_balance_max_usd": None,
         "balance_difference_usd": (
             float(values["balance_difference_usd"])
             if values["balance_difference_usd"] is not None

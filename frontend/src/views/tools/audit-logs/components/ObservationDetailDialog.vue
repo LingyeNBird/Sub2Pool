@@ -2,7 +2,11 @@
 import { ref } from "vue";
 
 import type { Observation } from "@/types";
-import { formatCurrency, formatPercent } from "@/utils/formatters";
+import {
+  formatCurrency,
+  formatCurrencyRange,
+  formatPercent,
+} from "@/utils/formatters";
 
 import type { DialogController } from "../types";
 
@@ -60,9 +64,27 @@ defineExpose<DialogController<[Observation]>>({ open, close });
               <td>{{ item.participant_name }}</td>
               <td>{{ formatCurrency(item.delta_cost) }}</td>
               <td>{{ formatPercent(item.charged_delta_percent) }}</td>
-              <td>{{ formatPercent(item.charged_cycle_percent) }}</td>
+              <td>
+                <div>{{ formatPercent(item.charged_cycle_percent) }}</div>
+                <div
+                  v-if="item.charged_percent_lower !== null"
+                  class="text-xs opacity-50"
+                >
+                  90%：
+                  {{ formatPercent(item.charged_percent_lower) }} –
+                  {{ formatPercent(item.charged_percent_upper) }}
+                </div>
+              </td>
               <td>{{ formatPercent(item.remaining_share_percent) }}</td>
-              <td>{{ formatCurrency(item.recommended_balance_usd) }}</td>
+              <td>
+                {{
+                  formatCurrencyRange(
+                    item.recommended_balance_min_usd,
+                    item.recommended_balance_max_usd,
+                    item.recommended_balance_usd,
+                  )
+                }}
+              </td>
             </tr>
           </tbody>
         </table>

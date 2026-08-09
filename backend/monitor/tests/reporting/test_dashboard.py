@@ -364,7 +364,7 @@ def test_apply_recommendation_failure_keeps_snapshot_actionable(monkeypatch):
     assert snapshot.needs_manual_update is True
 
 @pytest.mark.django_db
-def test_initial_observation_conserves_percent_and_builds_manual_recommendations(monkeypatch):
+def test_initial_observation_respects_capacity_bounds_and_builds_recommendations(monkeypatch):
     config = AppSettings.load()
     config.openai_account_id = 7
     config.quota_query_mode = "passive"
@@ -402,10 +402,26 @@ def test_initial_observation_conserves_percent_and_builds_manual_recommendations
     result = run_monitor(force_upstream=True, source="manual")
 
     assert result["status"] == "calibrated"
-    snapshots = {item.participant_id: item for item in ParticipantSnapshot.objects.all()}
-    assert snapshots[owner.id].charged_cycle_percent == Decimal("30")
-    assert snapshots[rider.id].charged_cycle_percent == Decimal("10")
-    assert sum((item.charged_cycle_percent for item in snapshots.values()), Decimal("0")) == Decimal("40")
-    assert snapshots[owner.id].recommended_balance_usd == Decimal("190.00")
-    assert snapshots[rider.id].recommended_balance_usd == Decimal("380.00")
+    snapshots = {
+        item.participant_id: item for item in ParticipantSnapshot.objects.all()
+    }
+    owner_snapshot = snapshots[owner.id]
+    rider_snapshot = snapshots[rider.id]
+    assert owner_snapshot.charged_cycle_percent > rider_snapshot.charged_cycle_percent
+    assert float(owner_snapshot.charged_cycle_percent) == pytest.approx(
+        float(rider_snapshot.charged_cycle_percent) * 3,
+        rel=0.08,
+    )
+    assert (
+        owner_snapshot.charged_percent_lower
+        <= owner_snapshot.charged_cycle_percent
+        <= owner_snapshot.charged_percent_upper
+    )
+    assert (
+        rider_snapshot.charged_percent_lower
+        <= rider_snapshot.charged_cycle_percent
+        <= rider_snapshot.charged_percent_upper
+    )
+    assert owner_snapshot.recommended_balance_usd is not None
+    assert rider_snapshot.recommended_balance_usd is not None
     assert ParticipantUsageSample.objects.count() == 2

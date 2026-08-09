@@ -5,11 +5,15 @@ export interface Snapshot {
   delta_cost: number | null;
   charged_delta_percent: number;
   charged_cycle_percent: number;
+  charged_percent_lower: number | null;
+  charged_percent_upper: number | null;
   remaining_share_percent: number;
   current_balance_usd: number | null;
   recommended_balance_usd: number | null;
   recommended_balance_min_usd: number | null;
   recommended_balance_max_usd: number | null;
+  deterministic_balance_min_usd: number | null;
+  deterministic_balance_max_usd: number | null;
   balance_difference_usd: number | null;
   needs_manual_update: boolean;
   recommendation_applied: boolean;
@@ -71,12 +75,20 @@ export interface CostBreakdown {
   total_cost_usd: number;
 }
 
-export interface RateSample {
-  observed_at: string;
-  cost_usd: number;
-  cost_breakdown: CostBreakdown;
-  used_percent: number;
-  usd_per_percent: number;
+export interface ModelDiagnostics {
+  algorithm: string;
+  seed: number;
+  particles: number;
+  quantizer_probabilities: Record<string, number>;
+  speed_probabilities: Record<string, number>;
+  ess_fraction: number;
+  resampled: boolean;
+  progress_probability_interval: [number, number];
+  progress_deterministic_bounds: [number, number];
+  deterministic_repairs: number;
+  residual_cost_usd: number;
+  aggregate_cost_difference_usd: number;
+  prior_capacity_usd: number | null;
 }
 export interface DashboardData {
   configured: boolean;
@@ -106,10 +118,10 @@ export interface DashboardData {
     sample_note: string;
     snapshot_sampled_at: string | null;
     rate_calculated: boolean;
-    conservative_percentile: number;
-    rate_history_samples: number;
-    rate_sample_count: number;
-    rate_samples: RateSample[];
+    estimated_used_percent: number;
+    capacity_lower_usd: number | null;
+    capacity_upper_usd: number | null;
+    model_diagnostics: ModelDiagnostics | Record<string, never>;
   };
   participants: Participant[];
 }
@@ -129,6 +141,10 @@ export interface Observation {
   delta_cost: number | null;
   sample_usd_per_percent: number | null;
   effective_usd_per_percent: number;
+  estimated_used_percent: number;
+  capacity_lower_usd: number | null;
+  capacity_upper_usd: number | null;
+  model_diagnostics: ModelDiagnostics | Record<string, never>;
   fast_correction_usd: number | null;
   fast_correction_calculated: boolean;
   valid_sample: boolean;
@@ -287,18 +303,14 @@ export interface CapacityClosingBasis {
   start_percent: number;
   start_cost_breakdown: CostBreakdown;
   end_cost_usd: number;
-  end_percent: number;
   end_cost_breakdown: CostBreakdown;
+  end_percent: number;
   raw_estimate_usd: number | null;
-  estimate_usd: number;
-  effective_usd_per_percent: number;
-  calculation_model: "time_varying" | "constant_average";
+  estimate_usd: number | null;
+  effective_usd_per_percent: number | null;
+  calculation_model: "endpoint_ratio";
   rate_source: string;
   sample_note: string;
-  conservative_percentile: number;
-  rate_history_samples: number;
-  rate_sample_count: number;
-  rate_samples: RateSample[];
 }
 
 export interface CapacityDailyClosingBasis {
@@ -331,7 +343,7 @@ export interface CapacityPoint {
 }
 
 export interface CycleCapacityEstimate {
-  estimate_usd: number;
+  estimate_usd: number | null;
   raw_estimate_usd: number | null;
   start_cost_usd: number;
   start_cost_breakdown: CostBreakdown;
@@ -341,13 +353,9 @@ export interface CycleCapacityEstimate {
   end_percent: number;
   cost_usd: number;
   used_percent: number;
-  effective_usd_per_percent: number;
-  calculation_model: "time_varying" | "constant_average";
+  effective_usd_per_percent: number | null;
+  calculation_model: "endpoint_ratio";
   rate_calculated: boolean;
-  conservative_percentile: number;
-  rate_history_samples: number;
-  rate_sample_count: number;
-  rate_samples: RateSample[];
   confidence: "低" | "中" | "高";
   observed_at: string;
   starts_at: string;
@@ -428,8 +436,6 @@ export interface AppSettingsData {
   fast_correction_missing_intervals: number;
   initial_usd_per_percent: number;
   safety_factor: number;
-  conservative_percentile: number;
-  rate_history_samples: number;
   daily_estimate_min_percent_span: number;
   local_poll_minutes: number;
   progress_threshold_percent: number;

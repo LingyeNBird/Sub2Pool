@@ -48,7 +48,7 @@ def _raw_observation(
 
 
 @pytest.mark.django_db
-def test_replay_is_idempotent_conserves_percent_and_preserves_raw_facts():
+def test_replay_is_idempotent_preserves_raw_facts_and_model_intervals():
     config = AppSettings.load()
     config.openai_account_id = 7
     config.save(update_fields=["openai_account_id"])
@@ -104,16 +104,23 @@ def test_replay_is_idempotent_conserves_percent_and_preserves_raw_facts():
 
     first_state = derived_state()
     for observation in (first, second):
-        charged = sum(
-            observation.participant_snapshots.values_list(
-                "charged_cycle_percent",
-                flat=True,
-            ),
-            Decimal("0"),
-        )
         observation.refresh_from_db()
-        assert charged == observation.interval_used_percent
-
+        snapshots = list(observation.participant_snapshots.all())
+        assert observation.raw_window["rate_method"] == "particle_filter_v1"
+        assert observation.model_diagnostics["algorithm"] == "particle_filter_v1"
+        assert observation.capacity_lower_usd <= (
+            observation.effective_usd_per_percent * Decimal("100")
+        )
+        assert (
+            observation.effective_usd_per_percent * Decimal("100")
+            <= observation.capacity_upper_usd
+        )
+        assert all(
+            snapshot.charged_percent_lower
+            <= snapshot.charged_cycle_percent
+            <= snapshot.charged_percent_upper
+            for snapshot in snapshots
+        )
     rebuild_account(7, config)
 
     assert derived_state() == first_state
@@ -123,6 +130,63 @@ def test_replay_is_idempotent_conserves_percent_and_preserves_raw_facts():
             flat=True,
         )
     ) == raw_before
+
+
+@pytest.mark.django_db
+def test_new_cycle_uses_previous_cycle_capacity_as_soft_prior():
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save(update_fields=["openai_account_id"])
+    owner = Participant.objects.create(
+        name="车主",
+        sub2api_user_id=1,
+        share_percent=100,
+        is_owner=True,
+    )
+    now = timezone.now().replace(microsecond=0)
+    first_reset = now - timedelta(days=6)
+    second_reset = now + timedelta(days=6)
+    first_cycle = [
+        _raw_observation(
+            participant_costs={owner: Decimal("0")},
+            observed_at=now - timedelta(days=13),
+            reset_at=first_reset,
+            used_percent=Decimal("0"),
+            total_cost=Decimal("0"),
+        ),
+        _raw_observation(
+            participant_costs={owner: Decimal("360")},
+            observed_at=now - timedelta(days=7),
+            reset_at=first_reset,
+            used_percent=Decimal("20"),
+            total_cost=Decimal("360"),
+        ),
+    ]
+    second_cycle = [
+        _raw_observation(
+            participant_costs={owner: Decimal("0")},
+            observed_at=now - timedelta(days=1),
+            reset_at=second_reset,
+            used_percent=Decimal("0"),
+            total_cost=Decimal("0"),
+        ),
+        _raw_observation(
+            participant_costs={owner: Decimal("180")},
+            observed_at=now,
+            reset_at=second_reset,
+            used_percent=Decimal("10"),
+            total_cost=Decimal("180"),
+        ),
+    ]
+
+    rebuild_account(7, config)
+
+    first_cycle[-1].refresh_from_db()
+    for observation in second_cycle:
+        observation.refresh_from_db()
+        assert observation.model_diagnostics["prior_capacity_usd"] == pytest.approx(
+            float(first_cycle[-1].effective_usd_per_percent * Decimal("100"))
+        )
 
 
 @pytest.mark.django_db

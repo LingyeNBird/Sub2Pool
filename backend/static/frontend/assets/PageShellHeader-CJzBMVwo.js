@@ -1,0 +1,1 @@
+import{C as e,E as t,c as n,ft as r,p as i}from"./runtime-core.esm-bundler-C_dQGJ6B.js";var a=i({__name:`PageShellHeader`,props:{compact:{type:Boolean,default:!1}},setup(i){return(a,o)=>(e(),n(`header`,{class:r([`col-span-12 flex flex-col lg:flex-row lg:items-end`,i.compact?`gap-3`:`gap-4`])},[t(a.$slots,`default`)],2))}});export{a as t};

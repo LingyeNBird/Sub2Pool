@@ -163,8 +163,6 @@ export function useSettingsPage() {
       "weekly_quota_model",
       "initial_usd_per_percent",
       "safety_factor",
-      "conservative_percentile",
-      "rate_history_samples",
       "daily_estimate_min_percent_span",
       "recommendation_change_usd",
       "limit_warning_usd",

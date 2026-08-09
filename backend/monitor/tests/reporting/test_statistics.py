@@ -123,8 +123,8 @@ def test_statistics_groups_capacity_and_participant_usage():
         "&usage_days=7&usage_precision=hour",
         **headers,
     ).json()["data"]
-    assert daily["capacity_series"][-1]["weekly_total_usd"] == 1600.0
-    assert daily["capacity_summary"]["cycle"]["estimate_usd"] == 1600.0
+    assert daily["capacity_series"][-1]["weekly_total_usd"] == 1000.0
+    assert daily["capacity_summary"]["cycle"]["estimate_usd"] == 1000.0
     assert daily["capacity_summary"]["today"]["sufficient"] is False
     assert daily["capacity_series"][-1]["daily_total_usd"] is None
     assert daily["capacity_series"][-1]["daily_basis"] is None
@@ -141,9 +141,9 @@ def test_statistics_groups_capacity_and_participant_usage():
     month = next(
         item for item in monthly["capacity_series"] if item["period"] == base_month
     )
-    assert month["weekly_total_usd"] == 1300.0
+    assert month["weekly_total_usd"] == 1000.0
     assert month["minimum_usd"] == 1000.0
-    assert month["maximum_usd"] == 1400.0
+    assert month["maximum_usd"] == 1000.0
     assert month["sample_count"] == 2
     assert month["daily_total_usd"] is None
     assert month["daily_basis"] is None
@@ -205,7 +205,6 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
     assert result["capacity_summary"]["cycle"]["end_percent"] == 15.0
     assert result["capacity_summary"]["cycle"]["raw_estimate_usd"] == 2000.0
     assert result["capacity_summary"]["cycle"]["rate_calculated"] is True
-    assert result["capacity_summary"]["cycle"]["rate_sample_count"] == 2
     closing_basis = result["capacity_series"][-1]["basis"]
     assert closing_basis["starts_at"] == attribution_started_at.isoformat()
     assert closing_basis["observed_at"] == last_at.astimezone(
@@ -215,10 +214,6 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
     assert closing_basis["end_percent"] == 15.0
     assert closing_basis["raw_estimate_usd"] == 2000.0
     assert closing_basis["estimate_usd"] == 2000.0
-    assert closing_basis["rate_sample_count"] == 2
-    assert [
-        sample["cost_usd"] for sample in closing_basis["rate_samples"]
-    ] == [300.0, 200.0]
     daily_history = result["capacity_series"][-1]
     assert daily_history["daily_total_usd"] == 2000.0
     assert daily_history["daily_basis"] == {
@@ -283,7 +278,7 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
     assert month_history["daily_basis"] is None
 
 @pytest.mark.django_db
-def test_statistics_constant_average_uses_cycle_endpoint_estimate():
+def test_statistics_endpoint_formula_is_independent_of_quota_model():
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
@@ -319,7 +314,7 @@ def test_statistics_constant_average_uses_cycle_endpoint_estimate():
     constant = client.get("/api/statistics", **headers).json()["data"]
 
     assert constant["capacity_summary"]["cycle"]["calculation_model"] == (
-        "constant_average"
+        "endpoint_ratio"
     )
     assert constant["capacity_summary"]["cycle"]["raw_estimate_usd"] == 3000.0
     assert constant["capacity_summary"]["cycle"]["estimate_usd"] == 3000.0
@@ -330,7 +325,7 @@ def test_statistics_constant_average_uses_cycle_endpoint_estimate():
     assert constant["capacity_series"][-1]["weekly_total_usd"] == 3000.0
     assert (
         constant["capacity_series"][-1]["basis"]["calculation_model"]
-        == "constant_average"
+        == "endpoint_ratio"
     )
     assert constant["capacity_series"][-1]["basis"]["estimate_usd"] == 3000.0
 
@@ -339,7 +334,7 @@ def test_statistics_constant_average_uses_cycle_endpoint_estimate():
     time_varying = client.get("/api/statistics", **headers).json()["data"]
 
     assert time_varying["capacity_summary"]["cycle"]["calculation_model"] == (
-        "time_varying"
+        "endpoint_ratio"
     )
-    assert time_varying["capacity_summary"]["cycle"]["estimate_usd"] == 2500.0
-    assert time_varying["capacity_series"][-1]["weekly_total_usd"] == 2500.0
+    assert time_varying["capacity_summary"]["cycle"]["estimate_usd"] == 3000.0
+    assert time_varying["capacity_series"][-1]["weekly_total_usd"] == 3000.0

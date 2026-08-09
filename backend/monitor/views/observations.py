@@ -103,6 +103,20 @@ class ObservationListView(AdminAPIView):
                     "effective_usd_per_percent": float(
                         item.effective_usd_per_percent
                     ),
+                    "estimated_used_percent": float(
+                        item.estimated_used_percent
+                    ),
+                    "capacity_lower_usd": (
+                        float(item.capacity_lower_usd)
+                        if item.capacity_lower_usd is not None
+                        else None
+                    ),
+                    "capacity_upper_usd": (
+                        float(item.capacity_upper_usd)
+                        if item.capacity_upper_usd is not None
+                        else None
+                    ),
+                    "model_diagnostics": item.model_diagnostics,
                     "fast_correction_usd": (
                         float(
                             item.fast_correction_actual_cost

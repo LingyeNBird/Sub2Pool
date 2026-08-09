@@ -13,9 +13,14 @@ defineProps<{
       <h2 class="card-title">
         <AppIcon name="information-circle" class="size-5" />账本说明
       </h2>
-      <p class="text-sm leading-6 opacity-70">
-        每次有效观测把上游百分比增量按参与者同期美元用量占账号总用量的比例归属。美元限额只是一条手动调整建议；
-        百分比权益账本才是最终依据，因此参与者可以在任意时间集中使用自己的全部权益。
+      <p
+        v-if="data.weekly_quota_model === 'time_varying'"
+        class="text-sm leading-6 opacity-70"
+      >
+        时变模型结合完整成本轨迹、上游整数进度和连续容量路径，估计各参与者本周期已经使用的权益。合同份额只用于计算剩余权益，不参与消费归属。
+      </p>
+      <p v-else class="text-sm leading-6 opacity-70">
+        平均恒定模型按本周期累计成本比例分配上游整数进度，并据此计算各参与者剩余权益。美元余额只是一条人工调整建议。
       </p>
       <div class="divider my-1"></div>
       <p class="text-sm">

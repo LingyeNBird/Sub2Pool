@@ -52,8 +52,6 @@ SETTINGS_FIELDS = (
     "fast_correction_enabled",
     "initial_usd_per_percent",
     "safety_factor",
-    "conservative_percentile",
-    "rate_history_samples",
     "daily_estimate_min_percent_span",
     "local_poll_minutes",
     "progress_threshold_percent",

@@ -90,7 +90,7 @@ def send_observation_notifications(
                 subject="[拼车额度] 美元/百分比估算发生明显变化",
                 body=(
                     f"原估算：${previous_rate}/%\n"
-                    f"新保守估算：${effective_rate}/%\n"
+                    f"新模型估算：${effective_rate}/%\n"
                     f"变化：{change.quantize(CENT)}%"
                 ),
             )

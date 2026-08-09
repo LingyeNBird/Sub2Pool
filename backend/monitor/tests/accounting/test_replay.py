@@ -103,25 +103,33 @@ def test_integer_percent_plateau_uses_cumulative_cost_for_capacity(monkeypatch):
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
     for _ in range(3):
         run_monitor(force_upstream=True, source="manual")
-
     observations = list(Observation.objects.order_by("observed_at"))
+
     assert observations[0].sample_usd_per_percent == Decimal("26.213123")
-    assert observations[1].sample_usd_per_percent is None
+    assert observations[1].sample_usd_per_percent == Decimal("26.972384")
     assert observations[2].delta_cost == Decimal("6.873233")
     assert observations[2].sample_usd_per_percent == Decimal("25.790081")
-    assert observations[2].effective_usd_per_percent == Decimal("25.790081")
+    assert Decimal("14") <= observations[2].effective_usd_per_percent <= Decimal(
+        "21"
+    )
+    assert observations[2].selected_total_cost == cost_values[-1]
     assert observations[2].raw_window["rate_method"] == RATE_METHOD
 
     snapshot = ParticipantSnapshot.objects.get(
         observation=observations[2],
         participant=owner,
     )
-    assert snapshot.charged_cycle_percent == Decimal("17")
-    assert snapshot.remaining_share_percent == Decimal("33")
-    assert snapshot.recommended_balance_usd == Decimal("808.52")
+    assert (
+        snapshot.charged_percent_lower
+        <= snapshot.charged_cycle_percent
+        <= snapshot.charged_percent_upper
+    )
+    assert snapshot.remaining_share_percent == (
+        owner.share_percent - snapshot.charged_cycle_percent
+    )
 
 @pytest.mark.django_db
-def test_single_rate_history_sample_uses_only_latest_valid_sample():
+def test_statistics_use_endpoint_ratio_independent_of_particle_filter():
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
@@ -131,8 +139,6 @@ def test_single_rate_history_sample_uses_only_latest_valid_sample():
     headers, _ = jwt_login(client)
     config = AppSettings.load()
     config.openai_account_id = 7
-    config.rate_history_samples = 1
-    config.conservative_percentile = 25
     config.save()
 
     now = timezone.now()
@@ -161,22 +167,16 @@ def test_single_rate_history_sample_uses_only_latest_valid_sample():
 
     observations = list(Observation.objects.order_by("observed_at", "id"))
     assert observations[0].sample_usd_per_percent == Decimal("10.000000")
-    assert observations[0].effective_usd_per_percent == Decimal("10.000000")
     assert observations[1].sample_usd_per_percent == Decimal("30.000000")
-    assert observations[1].effective_usd_per_percent == Decimal("30.000000")
+    assert all(item.model_diagnostics for item in observations)
 
     statistics = client.get("/api/statistics", **headers).json()["data"]
-    assert statistics["capacity_summary"]["cycle"]["rate_sample_count"] == 1
-    assert [
-        sample["usd_per_percent"]
-        for sample in statistics["capacity_summary"]["cycle"]["rate_samples"]
-    ] == [30.0]
+    cycle = statistics["capacity_summary"]["cycle"]
+    assert cycle["calculation_model"] == "endpoint_ratio"
+    assert cycle["estimate_usd"] == 3000.0
     closing_basis = statistics["capacity_series"][-1]["basis"]
-    assert closing_basis["rate_sample_count"] == 1
-    assert [
-        sample["usd_per_percent"]
-        for sample in closing_basis["rate_samples"]
-    ] == [30.0]
+    assert closing_basis["calculation_model"] == "endpoint_ratio"
+    assert closing_basis["estimate_usd"] == 3000.0
 
 @pytest.mark.django_db
 def test_passive_reset_timestamp_drift_keeps_the_same_cycle(monkeypatch):
@@ -348,7 +348,7 @@ def test_official_zero_observation_rebases_natural_day_usage_costs():
     )
     result = rebuild_observation_suffix(appended, config)
     appended.refresh_from_db()
-    assert result.rebuilt_observations == 1
+    assert result.rebuilt_observations == 4
     assert appended.attribution_started_at == zero.observed_at
     assert appended.selected_total_cost == Decimal("124.689434")
     assert appended.raw_window["replay_segment_reason"] == (
@@ -409,10 +409,21 @@ def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
     snapshots = {
         item.participant_id: item for item in ParticipantSnapshot.objects.all()
     }
-    assert snapshots[owner.id].charged_cycle_percent == Decimal("10")
-    assert snapshots[owner.id].remaining_share_percent == Decimal("40")
-    assert snapshots[rider.id].charged_cycle_percent == Decimal("0")
-    assert snapshots[rider.id].remaining_share_percent == Decimal("50")
+    owner_snapshot = snapshots[owner.id]
+    rider_snapshot = snapshots[rider.id]
+    assert Decimal("4.75") <= owner_snapshot.charged_cycle_percent <= Decimal(
+        "7.15"
+    )
+    assert (
+        owner_snapshot.charged_percent_lower
+        <= owner_snapshot.charged_cycle_percent
+        <= owner_snapshot.charged_percent_upper
+    )
+    assert owner_snapshot.remaining_share_percent == (
+        owner.share_percent - owner_snapshot.charged_cycle_percent
+    )
+    assert rider_snapshot.charged_cycle_percent == Decimal("0")
+    assert rider_snapshot.remaining_share_percent == Decimal("50")
 
 @pytest.mark.django_db
 def test_unmapped_user_usage_is_saved_and_attributed_after_binding(
@@ -520,8 +531,16 @@ def test_unmapped_user_usage_is_saved_and_attributed_after_binding(
         row.participant_id: row
         for row in latest.participant_snapshots.all()
     }
-    assert snapshots[owner.id].charged_cycle_percent == Decimal("15")
-    assert snapshots[rider.id].charged_cycle_percent == Decimal("5")
+    owner_snapshot = snapshots[owner.id]
+    rider_snapshot = snapshots[rider.id]
+    assert owner_snapshot.charged_percent_lower <= owner_snapshot.charged_cycle_percent
+    assert owner_snapshot.charged_cycle_percent <= owner_snapshot.charged_percent_upper
+    assert rider_snapshot.charged_percent_lower <= rider_snapshot.charged_cycle_percent
+    assert rider_snapshot.charged_cycle_percent <= rider_snapshot.charged_percent_upper
+    assert float(owner_snapshot.charged_cycle_percent) == pytest.approx(
+        float(rider_snapshot.charged_cycle_percent) * 3,
+        rel=0.08,
+    )
     assert snapshots[rider.id].selected_cost == Decimal("100")
     assert ParticipantUsageSample.objects.filter(
         participant=rider,
@@ -529,14 +548,9 @@ def test_unmapped_user_usage_is_saved_and_attributed_after_binding(
     ).exists()
 
 @pytest.mark.django_db
-def test_adding_participant_midcycle_rebases_cumulative_attribution(
-    monkeypatch,
-):
-    """新参与者首次出现时，应按整周期累计用量重分已有百分比。"""
-
+def test_adding_participant_midcycle_replays_the_complete_segment(monkeypatch):
     config = AppSettings.load()
     config.openai_account_id = 7
-    config.initial_usd_per_percent = Decimal("20")
     config.save()
     owner = Participant.objects.create(
         name="车主",
@@ -585,6 +599,9 @@ def test_adding_participant_midcycle_rebases_cumulative_attribution(
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
     run_monitor(force_upstream=True, source="manual")
+    first_observation = Observation.objects.get()
+    first_observation.sample_note = "必须由完整区间重放覆盖"
+    first_observation.save(update_fields=["sample_note"])
 
     owner.share_percent = Decimal("60")
     owner.save(update_fields=["share_percent"])
@@ -595,62 +612,21 @@ def test_adding_participant_midcycle_rebases_cumulative_attribution(
     )
     run_monitor(force_upstream=True, source="manual")
 
+    first_observation.refresh_from_db()
+    assert first_observation.sample_note != "必须由完整区间重放覆盖"
+    assert Observation.objects.count() == 2
     latest = Observation.objects.order_by("-observed_at", "-id").first()
     assert latest is not None
     snapshots = {
         item.participant_id: item
         for item in latest.participant_snapshots.all()
     }
-    assert latest.delta_percent == Decimal("0")
-    assert latest.valid_sample is False
-    assert latest.raw_window["participant_rebased"] is True
-    assert snapshots[owner.id].delta_cost == Decimal("0")
-    assert snapshots[rider.id].delta_cost is None
-    assert snapshots[owner.id].charged_delta_percent == Decimal("-4")
-    assert snapshots[owner.id].charged_cycle_percent == Decimal("16")
-    assert snapshots[owner.id].remaining_share_percent == Decimal("44")
-    assert snapshots[rider.id].charged_delta_percent == Decimal("4")
-    assert snapshots[rider.id].charged_cycle_percent == Decimal("4")
-    assert snapshots[rider.id].remaining_share_percent == Decimal("36")
-    assert sum(
-        (item.charged_cycle_percent for item in snapshots.values()),
-        Decimal("0"),
-    ) == Decimal("20")
-
-    # 升级前已经落库的错误边界没有重分标记；下一次观测应只回放当前
-    # 受影响区间，并修复这类既有数据。
-    legacy_window = dict(latest.raw_window)
-    legacy_window.pop("participant_rebased", None)
-    legacy_window.pop("participant_rebase_reason", None)
-    legacy_window.pop("participant_roster_ids", None)
-    latest.raw_window = legacy_window
-    latest.save(update_fields=["raw_window"])
-    snapshots[owner.id].charged_delta_percent = Decimal("0")
-    snapshots[owner.id].charged_cycle_percent = Decimal("20")
-    snapshots[owner.id].remaining_share_percent = Decimal("40")
-    snapshots[rider.id].charged_delta_percent = Decimal("0")
-    snapshots[rider.id].charged_cycle_percent = Decimal("0")
-    snapshots[rider.id].remaining_share_percent = Decimal("40")
-    ParticipantSnapshot.objects.bulk_update(
-        snapshots.values(),
-        [
-            "charged_delta_percent",
-            "charged_cycle_percent",
-            "remaining_share_percent",
-        ],
-    )
-
-    run_monitor(force_upstream=True, source="manual")
-    newest = Observation.objects.order_by("-observed_at", "-id").first()
-    assert newest is not None
-    newest_snapshots = {
-        item.participant_id: item
-        for item in newest.participant_snapshots.all()
-    }
-    assert newest_snapshots[owner.id].charged_cycle_percent == Decimal("16")
-    assert newest_snapshots[rider.id].charged_cycle_percent == Decimal("4")
-    latest.refresh_from_db()
-    assert latest.raw_window["participant_rebased"] is True
+    assert snapshots[owner.id].selected_cost == Decimal("400.000000")
+    assert snapshots[rider.id].selected_cost == Decimal("100.000000")
+    assert snapshots[owner.id].charged_cycle_percent > snapshots[
+        rider.id
+    ].charged_cycle_percent
+    assert latest.model_diagnostics["algorithm"] == RATE_METHOD
 
 @pytest.mark.django_db
 def test_same_official_reset_rollbacks_wait_for_explicit_manual_start(
@@ -827,7 +803,7 @@ def test_single_false_rollback_is_excluded_without_rewriting_prior_points(
     assert candidate.excluded_at is not None
     assert candidate.exclusion_source == "automatic"
     assert candidate.raw_window["replay_decision"] == "automatic_exclusion"
-    assert "官方重置时间未变化" in candidate.exclusion_reason
+    assert "瞬时异常" in candidate.exclusion_reason
     assert included[-1].delta_percent == Decimal("2")
     assert included[-1].delta_cost == Decimal("40")
     assert (
@@ -838,11 +814,15 @@ def test_single_false_rollback_is_excluded_without_rewriting_prior_points(
         observation=included[-1],
         participant=owner,
     )
-    assert snapshot.charged_cycle_percent == Decimal("49")
+    assert (
+        snapshot.charged_percent_lower
+        <= snapshot.charged_cycle_percent
+        <= snapshot.charged_percent_upper
+    )
 
 @pytest.mark.django_db
-def test_append_and_exclusion_only_replay_the_affected_official_interval():
-    """新增点只计算自身；历史修改只重放所在官方区间的后缀。"""
+def test_append_and_exclusion_replay_the_affected_official_interval():
+    """粒子状态依赖完整区间，但更早官方区间不得被改写。"""
 
     config = AppSettings.load()
     config.openai_account_id = 7
@@ -918,7 +898,7 @@ def test_append_and_exclusion_only_replay_the_affected_official_interval():
         Decimal("300"),
     )
     appended = rebuild_observation_suffix(current_latest, config)
-    assert appended.rebuilt_observations == 1
+    assert appended.rebuilt_observations == 3
     old_first.refresh_from_db()
     current_latest.refresh_from_db()
     assert old_first.sample_note == "旧周期哨兵"
@@ -1061,7 +1041,11 @@ def test_exclusion_restore_and_manual_start_cancellation_replay_affected_suffix(
         observation=included[-1],
         participant=participant,
     )
-    assert latest_snapshot.charged_cycle_percent == Decimal("50")
+    assert (
+        latest_snapshot.charged_percent_lower
+        <= latest_snapshot.charged_cycle_percent
+        <= latest_snapshot.charged_percent_upper
+    )
 
     listed = client.get("/api/observations", **headers).json()["data"]
     assert listed["summary"]["excluded_count"] == 1
@@ -1091,7 +1075,11 @@ def test_exclusion_restore_and_manual_start_cancellation_replay_affected_suffix(
         observation=latest,
         participant=participant,
     )
-    assert latest_snapshot.charged_cycle_percent == Decimal("32")
+    assert (
+        latest_snapshot.charged_percent_lower
+        <= latest_snapshot.charged_cycle_percent
+        <= latest_snapshot.charged_percent_upper
+    )
 
     cleared = client.delete(
         f"/api/observations/{false_reset.id}/manual-start",

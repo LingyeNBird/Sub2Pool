@@ -18,7 +18,7 @@ const emit = defineEmits<{ save: [] }>();
       <fieldset class="fieldset max-w-full min-w-0 grid-cols-[minmax(0,1fr)]">
         <SettingLabel
           label="周限额度模型"
-          help="只控制额度估算、参与者权益和余额建议的展示口径。平均恒定用周期累计成本与官方已用百分比计算账号平均容量；官方整数 p% 按截尾值 [p%, p+0.9%] 处理，因此参与者余额显示为区间，一键设置采用区间中间值。时变额度按每个采样区间分别归属并展示单一建议值。额度统计的本周期累计折算始终保留单一数值；后台也会继续保存并重放完整的时变归属账本。"
+          help="只控制参与者归属和余额建议的展示口径。时变额度使用整数百分比、全用户成本与连续容量模型生成概率估计，并用确定性边界限制建议；平均恒定使用周期累计成本与官方已用百分比计算。额度统计中的累计折算和日内折算始终采用简单端点公式，不受这里切换影响。"
         />
         <select
           v-model="settings.weekly_quota_model"
@@ -45,7 +45,7 @@ const emit = defineEmits<{ save: [] }>();
         <fieldset class="fieldset min-w-0">
           <SettingLabel
             label="无样本时美元 / 1%"
-            help="该 OpenAI 账号从未形成有效历史样本时使用的兜底估值，参与进度触发成本和余额建议。正常进入新周期时会沿用上一周期最终有效估值，而不是重新使用此值。"
+            help="账号尚无模型历史时，用该数值估算自动采样的成本触发阈值；形成正式观测后，时变归属与余额建议由观测数据计算。"
           />
           <input
             v-model.number="settings.initial_usd_per_percent"
@@ -66,32 +66,6 @@ const emit = defineEmits<{ save: [] }>();
             min="0.1"
             max="1"
             step="0.01"
-            class="input w-full"
-          />
-        </fieldset>
-        <fieldset class="fieldset min-w-0">
-          <SettingLabel
-            label="保守分位数"
-            help="仅用于时变额度模型：对最近有效的美元/1%样本按已用周限加权后取较低分位。数值越低越保守。"
-          />
-          <input
-            v-model.number="settings.conservative_percentile"
-            type="number"
-            min="1"
-            max="50"
-            class="input w-full"
-          />
-        </fieldset>
-        <fieldset class="fieldset min-w-0">
-          <SettingLabel
-            label="参与计算的历史样本数"
-            help="仅用于时变额度模型：最多取最近多少个有效累计样本计算保守分位数。更多样本更稳定，但对额度变化的响应更慢。"
-          />
-          <input
-            v-model.number="settings.rate_history_samples"
-            type="number"
-            min="1"
-            max="100"
             class="input w-full"
           />
         </fieldset>

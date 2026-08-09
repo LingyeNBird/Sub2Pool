@@ -6,10 +6,8 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from ..models import AppSettings, Observation
-from ..replay import RATE_METHOD
 from .common import iso
 from .costs import FastCorrectionBreakdownPresenter
-from .recommendations import display_cycle_rates
 
 
 def money(value: Decimal) -> float:
@@ -24,22 +22,15 @@ def closing_basis(
 ) -> dict:
     """给出某个每日收盘点当时可追溯的累计折算依据。"""
     used_percent = observation.interval_used_percent
-    display_rate, raw_rate = display_cycle_rates(observation, config)
+    raw_rate = (
+        observation.selected_total_cost / used_percent
+        if used_percent > 0
+        else None
+    )
     raw_estimate = (
         raw_rate * Decimal("100") if raw_rate is not None else None
     )
-    percentile = int(
-        observation.raw_window.get(
-            "conservative_percentile",
-            config.conservative_percentile,
-        )
-    )
-    history_samples = int(
-        observation.raw_window.get(
-            "rate_history_samples",
-            config.rate_history_samples,
-        )
-    )
+    del rate_rows, config
     end_cost_breakdown = cost_breakdowns.for_observation(observation)
     return {
         "observed_at": iso(observation.observed_at),
@@ -53,25 +44,15 @@ def closing_basis(
         "raw_estimate_usd": (
             money(raw_estimate) if raw_estimate is not None else None
         ),
-        "estimate_usd": money(display_rate * Decimal("100")),
-        "effective_usd_per_percent": float(display_rate),
-        "calculation_model": config.weekly_quota_model,
-        "rate_source": str(observation.raw_window.get("rate_source", "")),
-        "sample_note": observation.sample_note,
-        "conservative_percentile": percentile,
-        "rate_history_samples": history_samples,
-        "rate_sample_count": len(rate_rows),
-        "rate_samples": [
-            {
-                "observed_at": iso(row.observed_at),
-                "cost_usd": money(row.selected_total_cost),
-                "cost_breakdown": cost_breakdowns.for_observation(row),
-                "used_percent": float(row.interval_used_percent),
-                "usd_per_percent": float(row.sample_usd_per_percent),
-            }
-            for row in reversed(rate_rows)
-            if row.sample_usd_per_percent is not None
-        ],
+        "estimate_usd": (
+            money(raw_estimate) if raw_estimate is not None else None
+        ),
+        "effective_usd_per_percent": (
+            float(raw_rate) if raw_rate is not None else None
+        ),
+        "calculation_model": "endpoint_ratio",
+        "rate_source": "cumulative_endpoint_ratio",
+        "sample_note": "按当前区间累计成本 ÷ 累计整数百分比直接折算",
     }
 
 
@@ -166,30 +147,15 @@ def capacity_summary(
         excluded_at__isnull=True,
     )
     used_percent = latest.interval_used_percent
-    display_cycle_rate, raw_cycle_rate = display_cycle_rates(latest, config)
+    raw_cycle_rate = (
+        latest.selected_total_cost / used_percent
+        if used_percent > 0
+        else None
+    )
     raw_cycle_estimate = (
         raw_cycle_rate * Decimal("100")
         if raw_cycle_rate is not None
         else None
-    )
-    basis_percentile = int(
-        latest.raw_window.get(
-            "conservative_percentile",
-            config.conservative_percentile,
-        )
-    )
-    basis_history_samples = int(
-        latest.raw_window.get(
-            "rate_history_samples",
-            config.rate_history_samples,
-        )
-    )
-    valid_rate_rows = list(
-        observations.filter(
-            valid_sample=True,
-            sample_usd_per_percent__isnull=False,
-            raw_window__rate_method=RATE_METHOD,
-        ).order_by("-observed_at", "-id")[:basis_history_samples]
     )
     if used_percent >= 50:
         confidence = "高"
@@ -198,7 +164,11 @@ def capacity_summary(
     else:
         confidence = "低"
     cycle = {
-        "estimate_usd": money(display_cycle_rate * Decimal("100")),
+        "estimate_usd": (
+            money(raw_cycle_estimate)
+            if raw_cycle_estimate is not None
+            else None
+        ),
         "raw_estimate_usd": (
             money(raw_cycle_estimate)
             if raw_cycle_estimate is not None
@@ -212,26 +182,11 @@ def capacity_summary(
         "end_percent": float(used_percent),
         "cost_usd": money(latest.selected_total_cost),
         "used_percent": float(used_percent),
-        "effective_usd_per_percent": float(display_cycle_rate),
-        "calculation_model": config.weekly_quota_model,
-        "rate_calculated": (
-            raw_cycle_estimate is not None
-            if config.weekly_quota_model == "constant_average"
-            else bool(valid_rate_rows)
+        "effective_usd_per_percent": (
+            float(raw_cycle_rate) if raw_cycle_rate is not None else None
         ),
-        "conservative_percentile": basis_percentile,
-        "rate_history_samples": basis_history_samples,
-        "rate_sample_count": len(valid_rate_rows),
-        "rate_samples": [
-            {
-                "observed_at": iso(row.observed_at),
-                "cost_usd": money(row.selected_total_cost),
-                "cost_breakdown": cost_breakdowns.for_observation(row),
-                "used_percent": float(row.interval_used_percent),
-                "usd_per_percent": float(row.sample_usd_per_percent),
-            }
-            for row in valid_rate_rows
-        ],
+        "calculation_model": "endpoint_ratio",
+        "rate_calculated": raw_cycle_rate is not None,
         "confidence": confidence,
         "observed_at": iso(latest.observed_at),
         "starts_at": iso(latest.attribution_started_at),
@@ -311,51 +266,35 @@ def capacity_series(
     capacity_period: str,
     cost_breakdowns: FastCorrectionBreakdownPresenter,
 ) -> list[dict]:
+    """按每日收盘累计端点比值生成历史，不读取时变归属模型。"""
+
     capacity_start = datetime.combine(
         (now - timedelta(days=capacity_days)).astimezone(location).date(),
         time.min,
         tzinfo=location,
     )
-    # 多取七天只用于还原范围起点附近收盘值当时可见的有效样本。
     observation_rows = list(
         Observation.objects.filter(
             account_id=config.openai_account_id,
             excluded_at__isnull=True,
-            raw_window__rate_method=RATE_METHOD,
-            observed_at__gte=capacity_start - timedelta(days=7),
+            observed_at__gte=capacity_start,
         ).order_by("observed_at", "id")
     )
     daily: dict[str, dict] = {}
-    rate_histories: dict[tuple[int, datetime | None], list[Observation]] = (
-        defaultdict(list)
-    )
     for observation in observation_rows:
-        history_key = (
+        used_percent = observation.interval_used_percent
+        if used_percent <= 0:
+            continue
+        total = (
+            observation.selected_total_cost
+            * Decimal("100")
+            / used_percent
+        )
+        segment_key = (
             observation.account_id,
             observation.attribution_started_at,
         )
-        history = rate_histories[history_key]
-        history_samples = int(
-            observation.raw_window.get(
-                "rate_history_samples",
-                config.rate_history_samples,
-            )
-        )
-        previous_count = max(0, history_samples - 1)
-        history_start = max(0, len(history) - previous_count)
-        rate_rows = history[history_start : len(history)]
-        if (
-            observation.valid_sample
-            and observation.sample_usd_per_percent is not None
-        ):
-            rate_rows = [*rate_rows, observation]
-            history.append(observation)
-
-        if observation.observed_at < capacity_start:
-            continue
         period = observation.observed_at.astimezone(location).date().isoformat()
-        display_rate, _ = display_cycle_rates(observation, config)
-        total = display_rate * Decimal("100")
         row = daily.setdefault(
             period,
             {
@@ -365,8 +304,7 @@ def capacity_series(
                 "maximum_usd": total,
                 "sample_count": 0,
                 "_closing_observation": observation,
-                "_rate_rows": rate_rows,
-                "_daily_segment_key": history_key,
+                "_daily_segment_key": segment_key,
                 "_daily_first_observation": observation,
                 "_daily_last_observation": observation,
                 "_daily_sample_count": 0,
@@ -377,9 +315,8 @@ def capacity_series(
         row["maximum_usd"] = max(row["maximum_usd"], total)
         row["sample_count"] += 1
         row["_closing_observation"] = observation
-        row["_rate_rows"] = rate_rows
-        if row["_daily_segment_key"] != history_key:
-            row["_daily_segment_key"] = history_key
+        if row["_daily_segment_key"] != segment_key:
+            row["_daily_segment_key"] = segment_key
             row["_daily_first_observation"] = observation
             row["_daily_sample_count"] = 0
         row["_daily_last_observation"] = observation
@@ -402,7 +339,7 @@ def capacity_series(
                 "sample_count": row["sample_count"],
                 "basis": closing_basis(
                     row["_closing_observation"],
-                    row["_rate_rows"],
+                    [],
                     config,
                     cost_breakdowns,
                 ),

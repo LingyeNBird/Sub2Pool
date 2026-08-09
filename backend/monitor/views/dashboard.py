@@ -60,36 +60,6 @@ class DashboardView(AdminAPIView):
             else None
         )
         total_charged = Decimal("0")
-        basis_percentile = int(
-            observation.raw_window.get(
-                "conservative_percentile",
-                config.conservative_percentile,
-            )
-            if observation
-            else config.conservative_percentile
-        )
-        basis_history_samples = int(
-            observation.raw_window.get(
-                "rate_history_samples",
-                config.rate_history_samples,
-            )
-            if observation
-            else config.rate_history_samples
-        )
-        rate_rows = (
-            list(
-                Observation.objects.filter(
-                    account_id=observation.account_id,
-                    attribution_started_at=observation.attribution_started_at,
-                    excluded_at__isnull=True,
-                    valid_sample=True,
-                    sample_usd_per_percent__isnull=False,
-                    raw_window__rate_method=RATE_METHOD,
-                ).order_by("-observed_at", "-id")[:basis_history_samples]
-            )
-            if observation
-            else []
-        )
         display_rate, raw_rate = (
             display_cycle_rates(observation, config)
             if observation
@@ -158,15 +128,11 @@ class DashboardView(AdminAPIView):
                     cost_breakdowns.for_observation(observation)
                 ),
                 "start_cost_breakdown": cost_breakdowns.zero(),
-                "unattributed_used_percent": (
-                    float(
-                        max(
-                            Decimal("0"),
-                            observation.interval_used_percent - total_charged,
-                        )
+                "unattributed_used_percent": float(
+                    max(
+                        Decimal("0"),
+                        observation.estimated_used_percent - total_charged,
                     )
-                    if observation
-                    else None
                 ),
                 "sample_note": observation.sample_note if observation else "",
                 "snapshot_sampled_at": (
@@ -175,21 +141,22 @@ class DashboardView(AdminAPIView):
                 "rate_calculated": (
                     raw_rate is not None
                     if config.weekly_quota_model == "constant_average"
-                    else bool(rate_rows)
+                    else bool(observation.model_diagnostics)
                 ),
-                "conservative_percentile": basis_percentile,
-                "rate_history_samples": basis_history_samples,
-                "rate_sample_count": len(rate_rows),
-                "rate_samples": [
-                    {
-                        "observed_at": iso(row.observed_at),
-                        "cost_usd": float(row.selected_total_cost),
-                        "cost_breakdown": cost_breakdowns.for_observation(row),
-                        "used_percent": float(row.interval_used_percent),
-                        "usd_per_percent": float(row.sample_usd_per_percent),
-                    }
-                    for row in rate_rows
-                ],
+                "estimated_used_percent": float(
+                    observation.estimated_used_percent
+                ),
+                "capacity_lower_usd": (
+                    float(observation.capacity_lower_usd)
+                    if observation.capacity_lower_usd is not None
+                    else None
+                ),
+                "capacity_upper_usd": (
+                    float(observation.capacity_upper_usd)
+                    if observation.capacity_upper_usd is not None
+                    else None
+                ),
+                "model_diagnostics": observation.model_diagnostics,
             }
         return ok(data)
 

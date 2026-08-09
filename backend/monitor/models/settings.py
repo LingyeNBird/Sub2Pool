@@ -52,8 +52,6 @@ class AppSettings(models.Model):
         max_digits=6, decimal_places=4, default=Decimal("0.95"),
         validators=[MinValueValidator(Decimal("0.1")), MaxValueValidator(Decimal("1"))],
     )
-    conservative_percentile = models.PositiveSmallIntegerField(default=25, validators=[MinValueValidator(1), MaxValueValidator(50)])
-    rate_history_samples = models.PositiveSmallIntegerField(default=8, validators=[MinValueValidator(1), MaxValueValidator(100)])
     daily_estimate_min_percent_span = models.DecimalField(
         max_digits=6,
         decimal_places=3,

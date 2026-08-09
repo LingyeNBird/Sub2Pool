@@ -60,6 +60,26 @@ class Observation(models.Model):
     delta_cost = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     sample_usd_per_percent = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     effective_usd_per_percent = models.DecimalField(max_digits=18, decimal_places=6)
+    # 时变模型的潜在真实进度、容量区间与诊断均由确定性重放生成。
+    estimated_used_percent = models.DecimalField(
+        max_digits=10,
+        decimal_places=5,
+        default=0,
+        validators=PERCENT_VALIDATORS,
+    )
+    capacity_lower_usd = models.DecimalField(
+        max_digits=18,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    capacity_upper_usd = models.DecimalField(
+        max_digits=18,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    model_diagnostics = models.JSONField(default=dict, blank=True)
     valid_sample = models.BooleanField(default=False)
     sample_note = models.CharField(max_length=255, blank=True)
     raw_window = models.JSONField(default=dict, blank=True)
@@ -108,6 +128,42 @@ class ParticipantSnapshot(models.Model):
     )
     recommended_balance_usd = models.DecimalField(
         max_digits=18, decimal_places=4, null=True, blank=True
+    )
+    charged_percent_lower = models.DecimalField(
+        max_digits=10,
+        decimal_places=5,
+        null=True,
+        blank=True,
+    )
+    charged_percent_upper = models.DecimalField(
+        max_digits=10,
+        decimal_places=5,
+        null=True,
+        blank=True,
+    )
+    recommended_balance_min_usd = models.DecimalField(
+        max_digits=18,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    recommended_balance_max_usd = models.DecimalField(
+        max_digits=18,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    deterministic_balance_min_usd = models.DecimalField(
+        max_digits=18,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    deterministic_balance_max_usd = models.DecimalField(
+        max_digits=18,
+        decimal_places=4,
+        null=True,
+        blank=True,
     )
     balance_difference_usd = models.DecimalField(
         max_digits=18, decimal_places=4, null=True, blank=True

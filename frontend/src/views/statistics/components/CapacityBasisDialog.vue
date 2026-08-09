@@ -51,11 +51,7 @@ defineExpose({ open, close });
       >
         <CalculationBasisHeader
           title="本周期累计折算依据"
-          :help="
-            data.capacity_summary.cycle.calculation_model === 'constant_average'
-              ? '平均恒定模式直接采用周期起点至当前观测的累计成本和已用百分比。'
-              : '先用本周期累计成本与官方已用百分比形成样本，再按设置的保守分位采用结果。'
-          "
+          help="该指标只使用当前归属区间起点与最新观测的累计成本、累计整数百分比直接折算，不读取时变粒子滤波或平均恒定建议模型。"
         />
         <CalculationBasisTimeline
           :start-time="dateTime(data.capacity_summary.cycle.starts_at)"
@@ -73,12 +69,7 @@ defineExpose({ open, close });
         />
         <div class="mt-3 rounded-box border border-base-300 p-4">
           <div class="text-center text-sm font-semibold opacity-60">
-            {{
-              data.capacity_summary.cycle.calculation_model ===
-              "constant_average"
-                ? "周期累计公式"
-                : "累计样本公式"
-            }}
+            周期累计端点公式
           </div>
           <p
             class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
@@ -102,77 +93,6 @@ defineExpose({ open, close });
             100 =
             {{ formatCurrency(data.capacity_summary.cycle.raw_estimate_usd) }}
           </p>
-          <p
-            v-if="
-              data.capacity_summary.cycle.calculation_model ===
-              'constant_average'
-            "
-            class="mt-2 text-sm opacity-70"
-          >
-            平均恒定模式直接采用起点至终点的累计折算值；采用
-            <strong>{{
-              formatCurrency(
-                data.capacity_summary.cycle.effective_usd_per_percent,
-              )
-            }}</strong>
-            / 1%，最终为
-            <strong>{{
-              formatCurrency(data.capacity_summary.cycle.estimate_usd)
-            }}</strong>
-            。
-          </p>
-          <p v-else class="mt-2 text-sm opacity-70">
-            最近 {{ data.capacity_summary.cycle.rate_sample_count }}
-            个有效累计样本按已用百分比加权，取
-            {{ data.capacity_summary.cycle.conservative_percentile }}%
-            保守分位；采用
-            {{
-              formatCurrency(
-                data.capacity_summary.cycle.effective_usd_per_percent,
-              )
-            }}
-            / 1%，最终为
-            <strong>{{
-              formatCurrency(data.capacity_summary.cycle.estimate_usd)
-            }}</strong>
-            。
-          </p>
-        </div>
-        <div
-          v-if="
-            data.capacity_summary.cycle.calculation_model === 'time_varying'
-          "
-          class="mt-3 overflow-x-auto"
-        >
-          <table class="table table-sm">
-            <thead>
-              <tr>
-                <th>样本时间</th>
-                <th>累计成本</th>
-                <th>已用周限</th>
-                <th>美元 / 1%</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="sample in data.capacity_summary.cycle.rate_samples"
-                :key="sample.observed_at"
-              >
-                <td>{{ dateTime(sample.observed_at) }}</td>
-                <td>
-                  {{
-                    formatCostBreakdown(
-                      sample.cost_usd,
-                      sample.cost_breakdown,
-                      data.fast_correction_enabled,
-                    )
-                  }}
-                </td>
-                <td>{{ formatPercent(sample.used_percent) }}</td>
-                <td>{{ formatCurrency(sample.usd_per_percent) }}</td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </template>
 

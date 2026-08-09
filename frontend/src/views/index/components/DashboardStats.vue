@@ -36,7 +36,7 @@ const dateTime = useDateTime();
             {{
               data.weekly_quota_model === "constant_average"
                 ? "平均美元 / 1%"
-                : "保守美元 / 1%"
+                : "模型美元 / 1%"
             }}
           </div>
           <div class="flex items-baseline gap-2">

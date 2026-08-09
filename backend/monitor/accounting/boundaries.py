@@ -5,11 +5,11 @@ from decimal import Decimal
 
 from django.utils import timezone
 
-from .contracts import ReplaySegment
+from .contracts import ALGORITHM_VERSION, ReplaySegment
 from ..models import Observation, ParticipantSnapshot
 
 ZERO = Decimal("0")
-RATE_METHOD = "boundary_suffix_replay_v3"
+RATE_METHOD = ALGORITHM_VERSION
 RESET_ROLLBACK_TOLERANCE = Decimal("0.1")
 RESET_TIME_TOLERANCE = timedelta(minutes=5)
 
@@ -103,6 +103,10 @@ def mark_automatic_exclusion(
         observation.delta_percent = None
         observation.delta_cost = None
         observation.sample_usd_per_percent = None
+        observation.estimated_used_percent = ZERO
+        observation.capacity_lower_usd = None
+        observation.capacity_upper_usd = None
+        observation.model_diagnostics = {}
         observation.valid_sample = False
         observation.sample_note = f"已自动排除：{reason}"
         raw_window = dict(observation.raw_window)
@@ -124,6 +128,12 @@ def mark_automatic_exclusion(
             snapshot.charged_cycle_percent = ZERO
             snapshot.remaining_share_percent = snapshot.participant.share_percent
             snapshot.recommended_balance_usd = None
+            snapshot.charged_percent_lower = None
+            snapshot.charged_percent_upper = None
+            snapshot.recommended_balance_min_usd = None
+            snapshot.recommended_balance_max_usd = None
+            snapshot.deterministic_balance_min_usd = None
+            snapshot.deterministic_balance_max_usd = None
             snapshot.balance_difference_usd = None
             snapshot.needs_manual_update = False
             snapshot.reason = "该观测已排除，不参与归属计算"
@@ -137,6 +147,12 @@ def mark_automatic_exclusion(
                     "charged_cycle_percent",
                     "remaining_share_percent",
                     "recommended_balance_usd",
+                    "charged_percent_lower",
+                    "charged_percent_upper",
+                    "recommended_balance_min_usd",
+                    "recommended_balance_max_usd",
+                    "deterministic_balance_min_usd",
+                    "deterministic_balance_max_usd",
                     "balance_difference_usd",
                     "needs_manual_update",
                     "reason",

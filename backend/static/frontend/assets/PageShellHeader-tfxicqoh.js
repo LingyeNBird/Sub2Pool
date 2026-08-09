@@ -1,1 +1,0 @@
-import{D as e,F as t,S as n,T as r,v as i}from"./index-BHvXVN2i.js";var a=n({__name:`PageShellHeader`,props:{compact:{type:Boolean,default:!1}},setup(n){return(a,o)=>(r(),i(`header`,{class:t([`col-span-12 flex flex-col lg:flex-row lg:items-end`,n.compact?`gap-3`:`gap-4`])},[e(a.$slots,`default`)],2))}});export{a as t};
