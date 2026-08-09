@@ -1,30 +1,23 @@
-"""观测、通知和登录审计只读 API。"""
+"""观测记录查询、FAST 明细与人工重放控制接口。"""
 
 from decimal import Decimal
 
-from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
-from django.utils import timezone
-from django.utils.dateparse import parse_datetime
 
 from .base import AdminAPIView, error, ok
-from .presenters import bounded_query_int, iso, snapshot_data
-from ..login_audit import request_addresses
-from ..models import (
-    AppSettings,
-    BlockedIPAddress,
-    LoginEvent,
-    NotificationEvent,
-    Observation,
-    Participant,
-    Sub2APIUserUsageSample,
-)
-from ..serializers import BlockedIPAddressSerializer
+from .presenters import iso, snapshot_data
+from .record_helpers import paginated_rows, query_datetime
 from ..fast_correction import (
     FAST_EXTRA_FACTOR,
     SUB2API_FAST_MULTIPLIER,
     UPSTREAM_FAST_MULTIPLIER,
+)
+from ..models import (
+    AppSettings,
+    Observation,
+    Participant,
+    Sub2APIUserUsageSample,
 )
 from ..replay import (
     clear_manual_start,
@@ -33,65 +26,6 @@ from ..replay import (
     restore_observation,
     set_manual_start,
 )
-
-
-def query_datetime(request, name: str):
-    """读取 ISO 日期时间查询参数；无时区值按 Django 当前时区解释。"""
-    value = request.query_params.get(name)
-    if not value:
-        return None
-    parsed = parse_datetime(value)
-    if parsed is None:
-        raise ValueError(f"{name} 不是有效的日期时间")
-    if timezone.is_naive(parsed):
-        parsed = timezone.make_aware(parsed)
-    return parsed
-
-
-def paginated_rows(request, queryset, default_size: int = 20) -> tuple[list, dict]:
-    """统一记录接口的分页结构，防止审计表随数据库增长而一次性加载。"""
-    page_size = bounded_query_int(request, "page_size", default_size, 100)
-    paginator = Paginator(queryset, page_size)
-    page = paginator.get_page(request.query_params.get("page", 1))
-    return list(page.object_list), {
-        "page": page.number,
-        "page_size": page_size,
-        "total": paginator.count,
-        "total_pages": paginator.num_pages,
-    }
-
-
-class BlockedIPAddressListView(AdminAPIView):
-    """列出封禁项，并允许管理员从登录审计记录创建封禁。"""
-
-    def get(self, _request):
-        rows = BlockedIPAddress.objects.select_related("login_event")
-        return ok(BlockedIPAddressSerializer(rows, many=True).data)
-
-    def post(self, request):
-        serializer = BlockedIPAddressSerializer(data=request.data)
-        if not serializer.is_valid():
-            return error("封禁参数无效", details=serializer.errors)
-
-        address = str(serializer.validated_data["address"])
-        source_type = serializer.validated_data["source_type"]
-        request_ip, remote_ip = request_addresses(request._request)
-        if source_type == "request" and address == request_ip:
-            return error("不能封禁当前会话的服务器来源 IP")
-        if source_type == "remote" and address == remote_ip:
-            return error("不能封禁当前会话的直连地址")
-
-        blocked = serializer.save()
-        return ok(BlockedIPAddressSerializer(blocked).data, 201)
-
-
-class BlockedIPAddressDetailView(AdminAPIView):
-    """解除一个持久化 IP 封禁。"""
-
-    def delete(self, _request, block_id: int):
-        blocked = get_object_or_404(BlockedIPAddress, pk=block_id)
-        blocked.delete()
-        return ok()
 
 
 class ObservationListView(AdminAPIView):
@@ -397,129 +331,3 @@ class ObservationManualStartView(AdminAPIView):
     def delete(self, _request, observation_id: int):
         observation = get_object_or_404(Observation, pk=observation_id)
         return ok(clear_manual_start(observation))
-
-
-class NotificationListView(AdminAPIView):
-    def get(self, request):
-        queryset = NotificationEvent.objects.select_related("participant")
-        try:
-            created_from = query_datetime(request, "from")
-            created_to = query_datetime(request, "to")
-        except ValueError as exc:
-            return error(str(exc), 400)
-        if created_from:
-            queryset = queryset.filter(created_at__gte=created_from)
-        if created_to:
-            queryset = queryset.filter(created_at__lte=created_to)
-
-        event_type = request.query_params.get("event_type")
-        valid_types = {value for value, _label in NotificationEvent.TYPE_CHOICES}
-        if event_type:
-            if event_type not in valid_types:
-                return error("通知类型筛选值无效", 400)
-            queryset = queryset.filter(event_type=event_type)
-
-        participant = request.query_params.get("participant")
-        if participant:
-            if participant == "system":
-                queryset = queryset.filter(participant__isnull=True)
-            else:
-                try:
-                    participant_id = int(participant)
-                except ValueError:
-                    return error("参与者筛选值无效", 400)
-                queryset = queryset.filter(participant_id=participant_id)
-
-        subject = request.query_params.get("subject", "").strip()
-        if subject:
-            queryset = queryset.filter(subject__icontains=subject)
-
-        event_status = request.query_params.get("status")
-        valid_statuses = {
-            value for value, _label in NotificationEvent.STATUS_CHOICES
-        }
-        if event_status:
-            if event_status not in valid_statuses:
-                return error("通知状态筛选值无效", 400)
-            queryset = queryset.filter(status=event_status)
-
-        total = queryset.count()
-        sent_count = queryset.filter(status="sent").count()
-        failed_count = queryset.filter(status="failed").count()
-        rows, pagination = paginated_rows(request, queryset)
-        return ok(
-            {
-                "items": [
-                    {
-                        "id": item.id,
-                        "event_type": item.event_type,
-                        "event_type_label": item.get_event_type_display(),
-                        "severity": item.severity,
-                        "participant_name": (
-                            item.participant.name if item.participant else None
-                        ),
-                        "recipient": item.recipient,
-                        "subject": item.subject,
-                        "body": item.body,
-                        "status": item.status,
-                        "status_label": item.get_status_display(),
-                        "error": item.error,
-                        "created_at": iso(item.created_at),
-                        "sent_at": iso(item.sent_at),
-                    }
-                    for item in rows
-                ],
-                "pagination": pagination,
-                "summary": {
-                    "total": total,
-                    "sent_count": sent_count,
-                    "failed_count": failed_count,
-                },
-                "filter_options": {
-                    "types": [
-                        {"value": value, "label": label}
-                        for value, label in NotificationEvent.TYPE_CHOICES
-                    ],
-                    "participants": [
-                        {"id": item.id, "name": item.name}
-                        for item in Participant.objects.all()
-                    ],
-                    "statuses": [
-                        {"value": value, "label": label}
-                        for value, label in NotificationEvent.STATUS_CHOICES
-                    ],
-                },
-            }
-        )
-
-
-class LoginEventListView(AdminAPIView):
-    def get(self, request):
-        queryset = LoginEvent.objects.all()
-        rows, pagination = paginated_rows(request, queryset)
-        return ok(
-            {
-                "success_count": queryset.filter(success=True).count(),
-                "failure_count": queryset.filter(success=False).count(),
-                "unique_request_ips": queryset.exclude(request_ip__isnull=True)
-                .values("request_ip")
-                .distinct()
-                .count(),
-                "items": [
-                    {
-                        "id": item.id,
-                        "username": item.username,
-                        "success": item.success,
-                        "request_ip": item.request_ip,
-                        "remote_ip": item.remote_ip,
-                        "webrtc_supported": item.webrtc_supported,
-                        "webrtc_ips": item.webrtc_ips,
-                        "user_agent": item.user_agent,
-                        "failure_reason": item.failure_reason,
-                        "created_at": iso(item.created_at),
-                    }
-                    for item in rows
-                ],
-                "pagination": pagination,
-            }
-        )

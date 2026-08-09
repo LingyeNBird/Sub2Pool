@@ -21,17 +21,19 @@ from .views.participants import (
     Sub2APIUserListView,
 )
 from .views.public import AuthClientConfigView, HealthView
-from .views.records import (
+from .views.notifications import NotificationListView
+from .views.observations import (
+    ObservationExclusionView,
+    ObservationFastCorrectionDetailView,
+    ObservationListView,
+    ObservationManualStartView,
+    ObservationRebuildView,
+    ObservationRestoreView,
+)
+from .views.security import (
     BlockedIPAddressDetailView,
     BlockedIPAddressListView,
     LoginEventListView,
-    NotificationListView,
-    ObservationListView,
-    ObservationFastCorrectionDetailView,
-    ObservationRebuildView,
-    ObservationManualStartView,
-    ObservationExclusionView,
-    ObservationRestoreView,
 )
 from .views.settings import (
     OpenAIAccountListView,
