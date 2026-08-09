@@ -37,7 +37,7 @@ class DynamicModelInput:
         if np.any(np.diff(self.times_hours) <= 0):
             raise ValueError("观测时间必须严格递增")
         if np.any(self.costs_usd < -1e-9) or np.any(
-            np.diff(self.costs_usd, axis=0) < -0.011
+            np.diff(self.costs_usd, axis=0) < -1e-9
         ):
             raise ValueError("累计成本必须非负且单调")
         if np.any(self.displayed_percent < 0) or np.any(

@@ -3,7 +3,10 @@ import pytest
 
 from monitor.accounting.deterministic_bounds import run_deterministic_bounds
 from monitor.accounting.dynamic_contracts import DynamicModelInput
-from monitor.accounting.particle_filter import run_particle_filter
+from monitor.accounting.particle_filter import (
+    ParticleFilterConfig,
+    run_particle_filter,
+)
 
 
 def _constant_capacity_input() -> DynamicModelInput:
@@ -99,3 +102,21 @@ def test_dynamic_input_rejects_non_monotone_costs():
 
     with pytest.raises(ValueError, match="累计成本"):
         run_particle_filter(model_input, seed=1)
+
+
+def test_particle_filter_reports_pre_resample_effective_sample_size():
+    model_input = DynamicModelInput(
+        times_hours=np.asarray([0.0, 12.0]),
+        costs_usd=np.asarray([[0.0], [200.0]]),
+        displayed_percent=np.asarray([0.0, 20.0]),
+        rights_percent=np.asarray([100.0]),
+    )
+
+    output = run_particle_filter(
+        model_input,
+        seed=31,
+        config=ParticleFilterConfig(resample_ess_fraction=1.0),
+    )
+
+    assert output.resampled[1]
+    assert output.ess_fraction[1] < 1.0

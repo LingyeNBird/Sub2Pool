@@ -77,6 +77,23 @@ class DashboardView(AdminAPIView):
             ),
             Decimal("0"),
         )
+        unattributed_used_percent = Decimal("0")
+        if observation is not None:
+            residual_attribution = observation.model_diagnostics.get(
+                "residual_attributed_percent"
+            )
+            if (
+                config.weekly_quota_model == "time_varying"
+                and residual_attribution is not None
+            ):
+                unattributed_used_percent = Decimal(
+                    str(residual_attribution)
+                )
+            else:
+                unattributed_used_percent = max(
+                    Decimal("0"),
+                    observation.estimated_used_percent - total_charged,
+                )
         data = {
             "configured": bool(
                 config.sub2api_admin_token_encrypted and config.openai_account_id
@@ -129,10 +146,7 @@ class DashboardView(AdminAPIView):
                 ),
                 "start_cost_breakdown": cost_breakdowns.zero(),
                 "unattributed_used_percent": float(
-                    max(
-                        Decimal("0"),
-                        observation.estimated_used_percent - total_charged,
-                    )
+                    unattributed_used_percent
                 ),
                 "sample_note": observation.sample_note if observation else "",
                 "snapshot_sampled_at": (

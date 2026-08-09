@@ -84,6 +84,59 @@ def test_dashboard_only_lists_participants_that_need_manual_adjustment():
         item["id"] for item in dashboard.json()["data"]["participants"]
     ] == [actionable.id]
 
+
+
+@pytest.mark.django_db
+def test_dashboard_uses_particle_filter_residual_attribution():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.weekly_quota_model = "time_varying"
+    config.save()
+    participant = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=51,
+        share_percent=50,
+    )
+    now = timezone.now()
+    observation = Observation.objects.create(
+        account_id=7,
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=3),
+        attribution_started_at=now - timedelta(days=4),
+        upstream_used_percent=Decimal("20"),
+        interval_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("400"),
+        selected_total_cost=Decimal("400"),
+        total_standard_cost=Decimal("400"),
+        total_actual_cost=Decimal("400"),
+        effective_usd_per_percent=Decimal("20"),
+        estimated_used_percent=Decimal("20"),
+        model_diagnostics={"residual_attributed_percent": 7.25},
+    )
+    ParticipantSnapshot.objects.create(
+        observation=observation,
+        participant=participant,
+        raw_selected_cost=Decimal("200"),
+        selected_cost=Decimal("200"),
+        charged_cycle_percent=Decimal("12"),
+        remaining_share_percent=Decimal("38"),
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    dashboard = client.get("/api/dashboard", **headers)
+
+    assert dashboard.status_code == 200
+    assert (
+        dashboard.json()["data"]["cycle"]["unattributed_used_percent"]
+        == 7.25
+    )
 @pytest.mark.django_db
 def test_constant_average_model_changes_only_presented_attribution():
     get_user_model().objects.create_superuser(

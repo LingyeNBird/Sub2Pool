@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from django.db import transaction
 
 from .types import LocalBundle, WindowReference
-from ..accounting.boundaries import RATE_METHOD, same_official_reset
+from ..accounting.boundaries import same_official_reset
 from ..fast_correction.domain import FastCorrectionInterval
 from ..fast_correction.persistence import apply_fast_interval
 from ..fast_correction.service import fetch_fast_interval
@@ -47,7 +47,6 @@ def create_raw_observation(
             "reset_at": window.reset_at,
             "query_mode": config.quota_query_mode,
             "sampled_at": window.sampled_at,
-            "rate_method": RATE_METHOD,
             **({"fast_correction_error": fast_error} if fast_error else {}),
         },
     )

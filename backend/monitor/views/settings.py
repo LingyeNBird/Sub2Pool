@@ -1,13 +1,25 @@
 """系统业务设置与连接测试 API。"""
 
+from django.db import transaction
 from django.utils import timezone
 
 from rest_framework.serializers import ValidationError
 from .base import AdminAPIView, error, ok
-from ..models import AppSettings
-from ..notifications import send_notification
-from ..serializers import AppSettingsSerializer, Sub2APIConnectionSerializer
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
+from ..models import AppSettings, Observation
+from ..notifications import send_notification
+from ..replay import rebuild_account
+from ..serializers import AppSettingsSerializer, Sub2APIConnectionSerializer
+
+DERIVED_RESULT_SETTINGS = frozenset(
+    {
+        "cost_basis",
+        "initial_usd_per_percent",
+        "safety_factor",
+        "limit_warning_usd",
+        "recommendation_change_usd",
+    }
+)
 
 def _temporary_sub2api_client(
     config: AppSettings,
@@ -39,10 +51,31 @@ class SettingsView(AdminAPIView):
         )
         if not serializer.is_valid():
             return error("设置字段格式无效", details=serializer.errors)
+        changed_derived_settings = {
+            field
+            for field in DERIVED_RESULT_SETTINGS
+            if field in serializer.validated_data
+            and getattr(config, field) != serializer.validated_data[field]
+        }
         try:
-            config = serializer.save()
+            with transaction.atomic():
+                config = serializer.save()
+                if changed_derived_settings:
+                    account_ids = (
+                        Observation.objects.order_by()
+                        .values_list("account_id", flat=True)
+                        .distinct()
+                    )
+                    for account_id in account_ids:
+                        rebuild_account(account_id, config)
         except ValidationError as exc:
             return error("设置校验失败", details=exc.detail)
+        except ValueError as exc:
+            return error(
+                "设置未保存：历史派生结果重建失败",
+                409,
+                {"replay": [str(exc)]},
+            )
         return ok(AppSettingsSerializer(config).data)
 
 

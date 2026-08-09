@@ -33,7 +33,11 @@ def _diagnostics(
     particle,
     bounds,
     residual_cost: Decimal,
+    residual_subject: int,
     aggregate_cost_difference: Decimal,
+    cost_monotonic_repair: Decimal,
+    cost_monotonic_repair_subjects: int,
+    total_cost_monotonic_repair: Decimal,
     filter_config: ParticleFilterConfig,
 ) -> dict:
     return {
@@ -63,8 +67,31 @@ def _diagnostics(
         ],
         "deterministic_repairs": bounds.infeasible_repairs,
         "residual_cost_usd": float(residual_cost),
+        "residual_attributed_percent": round(
+            float(particle.attributed_percent_hat[row, residual_subject]),
+            5,
+        ),
+        "residual_attributed_interval": [
+            round(
+                float(
+                    particle.attributed_percent_lower[row, residual_subject]
+                ),
+                5,
+            ),
+            round(
+                float(
+                    particle.attributed_percent_upper[row, residual_subject]
+                ),
+                5,
+            ),
+        ],
         "aggregate_cost_difference_usd": float(
             aggregate_cost_difference
+        ),
+        "cost_monotonic_repair_usd": float(cost_monotonic_repair),
+        "cost_monotonic_repair_subjects": cost_monotonic_repair_subjects,
+        "total_cost_monotonic_repair_usd": float(
+            total_cost_monotonic_repair
         ),
         "prior_capacity_usd": filter_config.initial_capacity_usd,
     }
@@ -168,8 +195,18 @@ def replay_dynamic_segment(
             particle=particle,
             bounds=bounds,
             residual_cost=replay_input.residual_costs[observation_index],
+            residual_subject=len(replay_input.subject_user_ids) - 1,
             aggregate_cost_difference=(
                 replay_input.aggregate_cost_differences[observation_index]
+            ),
+            cost_monotonic_repair=(
+                replay_input.cost_monotonic_repairs[observation_index]
+            ),
+            cost_monotonic_repair_subjects=(
+                replay_input.cost_monotonic_repair_subjects[observation_index]
+            ),
+            total_cost_monotonic_repair=(
+                replay_input.total_cost_monotonic_repairs[observation_index]
             ),
             filter_config=filter_config,
         )
@@ -297,6 +334,10 @@ def replay_dynamic_segment(
                 reason = "当前用户余额与最新测算建议差异较大"
             else:
                 reason = "当前用户余额无需调整"
+            recommendation_changed = bool(
+                snapshot.recommended_balance_usd is not None
+                and snapshot.recommended_balance_usd != recommended
+            )
 
             snapshot.selected_cost = selected_cost
             snapshot.delta_cost = (
@@ -318,6 +359,8 @@ def replay_dynamic_segment(
             snapshot.deterministic_balance_min_usd = deterministic_min
             snapshot.deterministic_balance_max_usd = deterministic_max
             snapshot.balance_difference_usd = difference
+            if snapshot.recommendation_applied and recommendation_changed:
+                snapshot.recommendation_applied = False
             snapshot.needs_manual_update = needs_update
             snapshot.reason = reason
         if snapshots:
@@ -338,6 +381,7 @@ def replay_dynamic_segment(
                     "deterministic_balance_max_usd",
                     "balance_difference_usd",
                     "needs_manual_update",
+                    "recommendation_applied",
                     "reason",
                 ],
             )

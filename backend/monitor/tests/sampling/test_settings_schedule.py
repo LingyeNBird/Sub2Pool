@@ -75,6 +75,95 @@ def test_partial_settings_patch_does_not_touch_other_cards():
     assert config.sub2api_base_url == "https://sub2api.example"
     assert config.smtp_host == "smtp.original.example"
 
+
+
+@pytest.mark.django_db
+def test_allocation_settings_rebuild_existing_derived_results(monkeypatch):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    now = timezone.now()
+    Observation.objects.create(
+        account_id=7,
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=3),
+        upstream_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("400"),
+        selected_total_cost=Decimal("400"),
+        total_standard_cost=Decimal("400"),
+        total_actual_cost=Decimal("400"),
+        effective_usd_per_percent=Decimal("20"),
+    )
+    rebuilt: list[tuple[int, Decimal]] = []
+
+    def fake_rebuild(account_id, config):
+        rebuilt.append((account_id, config.safety_factor))
+
+    monkeypatch.setattr(
+        "monitor.views.settings.rebuild_account",
+        fake_rebuild,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    response = client.patch(
+        "/api/settings",
+        data=json.dumps({"safety_factor": "0.9"}),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 200
+    assert rebuilt == [(7, Decimal("0.9000"))]
+    assert AppSettings.load().safety_factor == Decimal("0.9000")
+
+
+@pytest.mark.django_db
+def test_allocation_setting_rolls_back_when_derived_replay_fails(
+    monkeypatch,
+):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    now = timezone.now()
+    Observation.objects.create(
+        account_id=7,
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=3),
+        upstream_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("400"),
+        selected_total_cost=Decimal("400"),
+        total_standard_cost=Decimal("500"),
+        total_actual_cost=Decimal("400"),
+        effective_usd_per_percent=Decimal("20"),
+    )
+
+    def fail_rebuild(_account_id, _config):
+        raise ValueError("历史成本不满足模型约束")
+
+    monkeypatch.setattr(
+        "monitor.views.settings.rebuild_account",
+        fail_rebuild,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    response = client.patch(
+        "/api/settings",
+        data=json.dumps({"cost_basis": "standard"}),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["message"] == "设置未保存：历史派生结果重建失败"
+    assert AppSettings.load().cost_basis == "actual"
 @pytest.mark.django_db
 def test_settings_rejects_invalid_iana_timezone():
     get_user_model().objects.create_superuser(

@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand
+from django.db.models import Q
 
 from monitor.models import Observation
 from monitor.replay import RATE_METHOD, rebuild_account
@@ -30,7 +31,10 @@ class Command(BaseCommand):
                 stale = (
                     Observation.objects.filter(account_id=account_id)
                     .exclude(exclusion_source="manual")
-                    .exclude(raw_window__rate_method=RATE_METHOD)
+                    .filter(
+                        ~Q(raw_window__rate_method=RATE_METHOD)
+                        | Q(sample_note="等待派生计算")
+                    )
                     .order_by("observed_at", "id")
                     .first()
                 )

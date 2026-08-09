@@ -158,7 +158,11 @@ def run_particle_filter(
     tail = (1.0 - cfg.credible_mass) / 2.0
     interval_probabilities = (tail, 0.5, 1.0 - tail)
 
-    def record(index: int) -> None:
+    def record(
+        index: int,
+        *,
+        diagnostic_ess_fraction: float | None = None,
+    ) -> None:
         capacity_particles = V_MID + V_HALF * np.tanh(latent_capacity)
         total_particles = attributed_particles.sum(axis=1)
         remaining_percent = np.maximum(
@@ -208,7 +212,11 @@ def run_particle_filter(
                 balance_hat[index, subject],
                 balance_upper[index, subject],
             ) = balance_quantiles
-        ess_fraction[index] = 1.0 / np.sum(weights * weights) / particle_count
+        ess_fraction[index] = (
+            diagnostic_ess_fraction
+            if diagnostic_ess_fraction is not None
+            else 1.0 / np.sum(weights * weights) / particle_count
+        )
         for code in range(3):
             quantizer_probabilities[index, code] = weights[
                 quantizer_codes == code
@@ -311,7 +319,10 @@ def run_particle_filter(
             attributed_particles = attributed_particles[selected]
             weights.fill(1.0 / particle_count)
             resampled[index] = True
-        record(index)
+        record(
+            index,
+            diagnostic_ess_fraction=current_ess / particle_count,
+        )
 
     return ParticleFilterOutput(
         capacity_hat_usd=capacity_hat,

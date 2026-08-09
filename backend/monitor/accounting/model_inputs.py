@@ -26,6 +26,9 @@ class DynamicReplayInput:
     selected_totals: tuple[Decimal, ...]
     residual_costs: tuple[Decimal, ...]
     aggregate_cost_differences: tuple[Decimal, ...]
+    cost_monotonic_repairs: tuple[Decimal, ...]
+    cost_monotonic_repair_subjects: tuple[int, ...]
+    total_cost_monotonic_repairs: tuple[Decimal, ...]
 
 
 def stable_segment_seed(account_id: int, segment: ReplaySegment) -> int:
@@ -34,6 +37,13 @@ def stable_segment_seed(account_id: int, segment: ReplaySegment) -> int:
         f"{segment.started_at.isoformat()}"
     ).encode()
     return int.from_bytes(hashlib.sha256(material).digest()[:8], "big")
+
+def _selected_total_fact(observation, cost_basis: str) -> Decimal:
+    return (
+        observation.total_actual_cost
+        if cost_basis == "actual"
+        else observation.total_standard_cost
+    )
 
 
 def build_dynamic_replay_input(
@@ -102,11 +112,22 @@ def build_dynamic_replay_input(
                     baseline,
                 )
 
+    total_baseline = (
+        _selected_total_fact(observations[0], config.cost_basis)
+        if first_is_observed_baseline
+        else segment.total_baseline
+    )
     selected_totals: list[Decimal] = []
     residual_costs: list[Decimal] = []
     aggregate_cost_differences: list[Decimal] = []
+    cost_monotonic_repairs: list[Decimal] = []
+    cost_monotonic_repair_subjects: list[int] = []
+    total_cost_monotonic_repairs: list[Decimal] = []
     cost_rows: list[list[float]] = []
     last_raw_by_user: dict[int, Decimal] = dict(baseline_by_user)
+    last_model_by_user = {user_id: ZERO for user_id in ordered_users}
+    last_selected_total = ZERO
+    last_residual = ZERO
     for observation, snapshot_by_user in zip(
         observations,
         snapshots_by_observation,
@@ -120,17 +141,24 @@ def build_dynamic_replay_input(
             elif snapshot is not None:
                 last_raw_by_user[user_id] = snapshot.raw_selected_cost
 
-        selected_total = max(
+        raw_selected_total = max(
             ZERO,
-            observation.raw_selected_total_cost
-            - segment.total_baseline
+            _selected_total_fact(observation, config.cost_basis)
+            - total_baseline
             + correction_prefix.total_between(segment.started_at, observation),
         )
+        selected_total = max(last_selected_total, raw_selected_total)
         selected_totals.append(selected_total)
+        total_cost_monotonic_repairs.append(
+            selected_total - raw_selected_total
+        )
+        last_selected_total = selected_total
 
         user_costs: list[Decimal] = []
+        repair_total = ZERO
+        repaired_subjects = 0
         for user_id in ordered_users:
-            selected = max(
+            raw_selected = max(
                 ZERO,
                 last_raw_by_user.get(user_id, baseline_by_user.get(user_id, ZERO))
                 - baseline_by_user.get(user_id, ZERO)
@@ -141,11 +169,27 @@ def build_dynamic_replay_input(
                     observation_id=observation.id,
                 ),
             )
+            selected = max(last_model_by_user[user_id], raw_selected)
+            adjustment = selected - raw_selected
+            if adjustment > ZERO:
+                repair_total += adjustment
+                repaired_subjects += 1
+            last_model_by_user[user_id] = selected
             user_costs.append(selected)
+
         user_total = sum(user_costs, ZERO)
-        residual = max(ZERO, selected_total - user_total)
+        raw_residual = max(ZERO, selected_total - user_total)
+        residual = max(last_residual, raw_residual)
+        residual_adjustment = residual - raw_residual
+        if residual_adjustment > ZERO:
+            repair_total += residual_adjustment
+            repaired_subjects += 1
+        last_residual = residual
+
         residual_costs.append(residual)
         aggregate_cost_differences.append(selected_total - user_total)
+        cost_monotonic_repairs.append(repair_total)
+        cost_monotonic_repair_subjects.append(repaired_subjects)
         cost_rows.append(
             [float(value) for value in user_costs] + [float(residual)]
         )
@@ -183,4 +227,11 @@ def build_dynamic_replay_input(
         selected_totals=tuple(selected_totals),
         residual_costs=tuple(residual_costs),
         aggregate_cost_differences=tuple(aggregate_cost_differences),
+        cost_monotonic_repairs=tuple(cost_monotonic_repairs),
+        cost_monotonic_repair_subjects=tuple(
+            cost_monotonic_repair_subjects
+        ),
+        total_cost_monotonic_repairs=tuple(
+            total_cost_monotonic_repairs
+        ),
     )
