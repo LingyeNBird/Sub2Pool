@@ -13,6 +13,7 @@ import type {
 } from "@/types";
 
 import CostDeltaDetailDialog from "./components/CostDeltaDetailDialog.vue";
+import FastCorrectionDetailDialog from "./components/FastCorrectionDetailDialog.vue";
 import ExcludeObservationDialog from "./components/ExcludeObservationDialog.vue";
 import ManualStartDialog from "./components/ManualStartDialog.vue";
 import ObservationDetailDialog from "./components/ObservationDetailDialog.vue";
@@ -54,6 +55,7 @@ const restoringId = ref<number | null>(null);
 const manualStartId = ref<number | null>(null);
 const rebuilding = ref(false);
 const success = ref("");
+const fastCorrectionEnabled = ref(true);
 
 const filterDialog = ref<InstanceType<typeof ObservationFilterDialog> | null>(
   null,
@@ -61,6 +63,9 @@ const filterDialog = ref<InstanceType<typeof ObservationFilterDialog> | null>(
 const costDetailDialog = ref<InstanceType<typeof CostDeltaDetailDialog> | null>(
   null,
 );
+const fastCorrectionDetailDialog = ref<InstanceType<
+  typeof FastCorrectionDetailDialog
+> | null>(null);
 const detailDialog = ref<InstanceType<typeof ObservationDetailDialog> | null>(
   null,
 );
@@ -97,6 +102,7 @@ async function load() {
     rows.value = observations.items;
     pagination.value = observations.pagination;
     Object.assign(summary, observations.summary);
+    fastCorrectionEnabled.value = observations.fast_correction_enabled;
     applySchedule(monitorSchedule);
   } catch (error) {
     message.value =
@@ -268,9 +274,11 @@ onMounted(load);
     :restoring-id="restoringId"
     :manual-start-id="manualStartId"
     :rebuilding="rebuilding"
+    :fast-correction-enabled="fastCorrectionEnabled"
     @filter="openFilter"
     @detail="detailDialog?.open($event)"
     @cost-detail="costDetailDialog?.open($event)"
+    @fast-correction-detail="fastCorrectionDetailDialog?.open($event)"
     @exclude="excludeDialog?.open($event)"
     @restore="restore"
     @manual-start="manualStartDialog?.open($event)"
@@ -281,6 +289,7 @@ onMounted(load);
 
   <ObservationFilterDialog ref="filterDialog" @apply="applyFilters" />
   <CostDeltaDetailDialog ref="costDetailDialog" />
+  <FastCorrectionDetailDialog ref="fastCorrectionDetailDialog" />
   <ObservationDetailDialog ref="detailDialog" />
   <ExcludeObservationDialog
     ref="excludeDialog"

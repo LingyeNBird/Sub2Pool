@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 
 from ..models import AppSettings, Observation, Participant, ParticipantSnapshot
+from ..fast_correction import FastCorrectionPrefix
 
 
 def iso(value):
@@ -14,6 +15,51 @@ def iso(value):
 ZERO = Decimal("0")
 CENT = Decimal("0.01")
 PCT_PRECISION = Decimal("0.00001")
+TRUNCATED_PERCENT_TAIL = Decimal("0.9")
+HUNDRED = Decimal("100")
+class FastCorrectionBreakdownPresenter:
+    """把重放后的累计成本拆成 Sub2API 原值与累计 FAST 修正。"""
+
+    def __init__(self, config: AppSettings, account_id: int | None):
+        self.enabled = bool(config.fast_correction_enabled)
+        self.prefix = (
+            FastCorrectionPrefix(account_id, config.cost_basis)
+            if self.enabled and account_id
+            else None
+        )
+
+    @staticmethod
+    def _money(value: Decimal) -> float:
+        return float(value.quantize(CENT, rounding=ROUND_HALF_UP))
+
+    def for_observation(self, observation: Observation) -> dict[str, float]:
+        total = max(ZERO, observation.selected_total_cost)
+        correction = (
+            self.prefix.total_between(
+                observation.attribution_started_at,
+                observation,
+            )
+            if self.prefix is not None
+            and observation.attribution_started_at is not None
+            else ZERO
+        )
+        # 重放保证修正包含在总成本中；上限保护让历史异常数据也保持 A + B = 总额。
+        correction = min(total, max(ZERO, correction))
+        return {
+            "sub2api_cost_usd": self._money(total - correction),
+            "fast_correction_usd": self._money(correction),
+            "total_cost_usd": self._money(total),
+        }
+
+    @staticmethod
+    def zero() -> dict[str, float]:
+        return {
+            "sub2api_cost_usd": 0.0,
+            "fast_correction_usd": 0.0,
+            "total_cost_usd": 0.0,
+        }
+
+
 
 
 def display_cycle_rates(
@@ -58,6 +104,8 @@ def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
             if snapshot.recommended_balance_usd is not None
             else None
         ),
+        "recommended_balance_min_usd": None,
+        "recommended_balance_max_usd": None,
         "balance_difference_usd": (
             float(snapshot.balance_difference_usd)
             if snapshot.balance_difference_usd is not None
@@ -77,6 +125,45 @@ def latest_snapshot(participant: Participant) -> ParticipantSnapshot | None:
         .order_by("-observation__observed_at")
         .first()
     )
+
+def _constant_average_recommendation_bounds(
+    snapshot: ParticipantSnapshot,
+    config: AppSettings,
+    *,
+    selected_cost: Decimal,
+    remaining_share_percent: Decimal,
+) -> tuple[Decimal, Decimal]:
+    """按截尾整数百分比反推容量区间，再换算参与者的剩余余额区间。"""
+
+    observation = snapshot.observation
+    used_percent_min = max(ZERO, observation.interval_used_percent)
+    if used_percent_min <= 0:
+        display_rate, _raw_rate = display_cycle_rates(observation, config)
+        fallback = (
+            remaining_share_percent * display_rate * config.safety_factor
+        ).quantize(CENT, rounding=ROUND_HALF_UP)
+        return fallback, fallback
+
+    # 上游显示 p% 时按截尾值处理，真实进度视为 [p, p + 0.9]。
+    # 容量与进度互为反比，因此较大的进度端点产生较小的容量估计。
+    used_percent_max = min(
+        HUNDRED,
+        used_percent_min + TRUNCATED_PERCENT_TAIL,
+    )
+    total_cost = max(ZERO, observation.selected_total_cost)
+    capacity_min = total_cost * HUNDRED / used_percent_max
+    capacity_max = total_cost * HUNDRED / used_percent_min
+    share_ratio = snapshot.participant.share_percent / HUNDRED
+    recommended_min = (
+        max(ZERO, capacity_min * share_ratio - selected_cost)
+        * config.safety_factor
+    ).quantize(CENT, rounding=ROUND_HALF_UP)
+    recommended_max = (
+        max(ZERO, capacity_max * share_ratio - selected_cost)
+        * config.safety_factor
+    ).quantize(CENT, rounding=ROUND_HALF_UP)
+    return recommended_min, recommended_max
+
 
 def _constant_average_values(
     snapshot: ParticipantSnapshot,
@@ -100,20 +187,36 @@ def _constant_average_values(
         ZERO,
         snapshot.participant.share_percent - charged,
     ).quantize(PCT_PRECISION, rounding=ROUND_HALF_UP)
-    display_rate, _raw_rate = display_cycle_rates(observation, config)
+    recommended_min, recommended_max = (
+        _constant_average_recommendation_bounds(
+            snapshot,
+            config,
+            selected_cost=selected_cost,
+            remaining_share_percent=remaining,
+        )
+    )
     recommended = (
-        remaining * display_rate * config.safety_factor
+        (recommended_min + recommended_max) / Decimal("2")
     ).quantize(CENT, rounding=ROUND_HALF_UP)
     balance = (
         snapshot.current_balance_usd
         if snapshot.current_balance_usd is not None
         else snapshot.participant.latest_balance_usd
     )
-    difference = (
-        (recommended - balance).quantize(CENT, rounding=ROUND_HALF_UP)
-        if balance is not None
-        else None
-    )
+    if balance is None:
+        difference = None
+    elif balance < recommended_min:
+        difference = (recommended_min - balance).quantize(
+            CENT,
+            rounding=ROUND_HALF_UP,
+        )
+    elif balance > recommended_max:
+        difference = (recommended_max - balance).quantize(
+            CENT,
+            rounding=ROUND_HALF_UP,
+        )
+    else:
+        difference = ZERO
     exhausted = bool(
         balance is not None and balance <= config.limit_warning_usd
     )
@@ -121,7 +224,7 @@ def _constant_average_values(
         difference is not None
         and (
             abs(difference) >= config.recommendation_change_usd
-            or (exhausted and remaining > 0)
+            or (exhausted and recommended_max > 0)
         )
     )
     if remaining <= 0:
@@ -129,15 +232,17 @@ def _constant_average_values(
     elif exhausted:
         reason = "当前 Sub2API 用户余额接近耗尽，但仍有百分比权益"
     elif needs_update:
-        reason = "当前用户余额与平均恒定模型建议差异较大"
+        reason = "当前用户余额与平均恒定模型建议区间差异较大"
     else:
-        reason = "当前用户余额无需调整"
+        reason = "当前用户余额处于建议区间内，无需调整"
     return {
         "selected_cost": selected_cost,
         "charged_cycle_percent": charged,
         "remaining_share_percent": remaining,
         "current_balance_usd": balance,
         "recommended_balance_usd": recommended,
+        "recommended_balance_min_usd": recommended_min,
+        "recommended_balance_max_usd": recommended_max,
         "balance_difference_usd": difference,
         "needs_manual_update": needs_update,
         "reason": reason,
@@ -172,6 +277,12 @@ def display_snapshot_data(
         ),
         "recommended_balance_usd": float(
             values["recommended_balance_usd"]
+        ),
+        "recommended_balance_min_usd": float(
+            values["recommended_balance_min_usd"]
+        ),
+        "recommended_balance_max_usd": float(
+            values["recommended_balance_max_usd"]
         ),
         "balance_difference_usd": (
             float(values["balance_difference_usd"])

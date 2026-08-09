@@ -1,5 +1,7 @@
 """观测、通知和登录审计只读 API。"""
 
+from decimal import Decimal
+
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -16,8 +18,14 @@ from ..models import (
     NotificationEvent,
     Observation,
     Participant,
+    Sub2APIUserUsageSample,
 )
 from ..serializers import BlockedIPAddressSerializer
+from ..fast_correction import (
+    FAST_EXTRA_FACTOR,
+    SUB2API_FAST_MULTIPLIER,
+    UPSTREAM_FAST_MULTIPLIER,
+)
 from ..replay import (
     clear_manual_start,
     exclude_observation,
@@ -88,6 +96,7 @@ class BlockedIPAddressDetailView(AdminAPIView):
 
 class ObservationListView(AdminAPIView):
     def get(self, request):
+        config = AppSettings.load()
         queryset = Observation.objects.prefetch_related(
             "participant_snapshots__participant"
         )
@@ -160,6 +169,24 @@ class ObservationListView(AdminAPIView):
                     "effective_usd_per_percent": float(
                         item.effective_usd_per_percent
                     ),
+                    "fast_correction_usd": (
+                        float(
+                            item.fast_correction_actual_cost
+                            if config.cost_basis == "actual"
+                            else item.fast_correction_standard_cost
+                        )
+                        if (
+                            item.fast_correction_actual_cost
+                            if config.cost_basis == "actual"
+                            else item.fast_correction_standard_cost
+                        )
+                        is not None
+                        else None
+                    ),
+                    "fast_correction_calculated": (
+                        item.fast_correction_standard_cost is not None
+                        and item.fast_correction_actual_cost is not None
+                    ),
                     "valid_sample": item.valid_sample,
                     "sample_note": item.sample_note,
                     "rate_method": item.raw_window.get(
@@ -184,6 +211,7 @@ class ObservationListView(AdminAPIView):
         return ok(
             {
                 "items": result,
+                "fast_correction_enabled": config.fast_correction_enabled,
                 "pagination": pagination,
                 "summary": {
                     "total": total,
@@ -191,6 +219,128 @@ class ObservationListView(AdminAPIView):
                     "passive_count": passive_count,
                     "excluded_count": excluded_count,
                 },
+            }
+        )
+
+
+class ObservationFastCorrectionDetailView(AdminAPIView):
+    """展示一个采样区间内已持久化的 FAST 修正事实。"""
+
+    def get(self, _request, observation_id: int):
+        config = AppSettings.load()
+        observation = get_object_or_404(
+            Observation.objects.prefetch_related("fast_corrections"),
+            pk=observation_id,
+        )
+        details = list(observation.fast_corrections.all())
+        user_ids = [item.sub2api_user_id for item in details]
+        user_samples = {
+            item.sub2api_user_id: item
+            for item in Sub2APIUserUsageSample.objects.filter(
+                account_id=observation.account_id,
+                observed_at=observation.observed_at,
+                sub2api_user_id__in=user_ids,
+            )
+        }
+        participants = {
+            item.sub2api_user_id: item
+            for item in Participant.objects.filter(
+                sub2api_user_id__in=user_ids,
+            )
+        }
+        fast_cost_field = (
+            "fast_actual_cost"
+            if config.cost_basis == "actual"
+            else "fast_standard_cost"
+        )
+        correction_field = (
+            "actual_correction_cost"
+            if config.cost_basis == "actual"
+            else "standard_correction_cost"
+        )
+        selected_correction = (
+            observation.fast_correction_actual_cost
+            if config.cost_basis == "actual"
+            else observation.fast_correction_standard_cost
+        )
+        fast_request_count = sum(
+            item.fast_request_count for item in details
+        )
+        request_count = observation.fast_correction_request_count
+        fast_billed_cost = sum(
+            (getattr(item, fast_cost_field) for item in details),
+            Decimal("0"),
+        )
+        correction = selected_correction or Decimal("0")
+
+        users = []
+        for item in details:
+            sample = user_samples.get(item.sub2api_user_id)
+            participant = participants.get(item.sub2api_user_id)
+            username = sample.username if sample else ""
+            email = sample.email if sample else ""
+            user_fast_cost = getattr(item, fast_cost_field)
+            user_correction = getattr(item, correction_field)
+            users.append(
+                {
+                    "sub2api_user_id": item.sub2api_user_id,
+                    "username": username,
+                    "email": email,
+                    "display_name": (
+                        username
+                        or email
+                        or (participant.name if participant else "")
+                        or f"用户 {item.sub2api_user_id}"
+                    ),
+                    "request_count": item.request_count,
+                    "fast_request_count": item.fast_request_count,
+                    "non_fast_request_count": (
+                        max(0, item.request_count - item.fast_request_count)
+                        if item.request_count is not None
+                        else None
+                    ),
+                    "fast_billed_cost_usd": float(user_fast_cost),
+                    "correction_usd": float(user_correction),
+                    "corrected_fast_cost_usd": float(
+                        user_fast_cost + user_correction
+                    ),
+                }
+            )
+
+        return ok(
+            {
+                "observation_id": observation.id,
+                "started_at": iso(observation.fast_correction_started_at),
+                "ended_at": iso(observation.observed_at),
+                "calculated": (
+                    observation.fast_correction_standard_cost is not None
+                    and observation.fast_correction_actual_cost is not None
+                ),
+                "cost_basis": config.cost_basis,
+                "cost_basis_label": (
+                    "实际扣费" if config.cost_basis == "actual" else "标准扣费"
+                ),
+                "request_count": request_count,
+                "fast_request_count": fast_request_count,
+                "non_fast_request_count": (
+                    max(0, request_count - fast_request_count)
+                    if request_count is not None
+                    else None
+                ),
+                "fast_billed_cost_usd": float(fast_billed_cost),
+                "correction_usd": float(correction),
+                "corrected_fast_cost_usd": float(
+                    fast_billed_cost + correction
+                ),
+                "sub2api_fast_multiplier": float(SUB2API_FAST_MULTIPLIER),
+                "upstream_fast_multiplier": float(
+                    UPSTREAM_FAST_MULTIPLIER
+                ),
+                "correction_ratio": float(FAST_EXTRA_FACTOR),
+                "collection_error": str(
+                    observation.raw_window.get("fast_correction_error") or ""
+                ),
+                "users": users,
             }
         )
 

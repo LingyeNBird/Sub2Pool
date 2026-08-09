@@ -22,6 +22,7 @@ from monitor.models import (
     LoginEvent,
     NotificationEvent,
     Observation,
+    ObservationFastCorrection,
     Participant,
     ParticipantSnapshot,
     ParticipantUsageSample,
@@ -39,6 +40,7 @@ from monitor.sub2api import (
     Sub2APIClient,
     Sub2APIError,
     Sub2APIUserUsage,
+    Sub2APIUsageLog,
     UsageStats,
     UserBalance,
     WeeklyWindow,
@@ -518,7 +520,9 @@ def test_constant_average_model_changes_only_presented_attribution():
     assert constant["snapshot"]["allocation_model"] == "constant_average"
     assert constant["snapshot"]["charged_cycle_percent"] == 5.0
     assert constant["snapshot"]["remaining_share_percent"] == 45.0
-    assert constant["snapshot"]["recommended_balance_usd"] == 855.0
+    assert constant["snapshot"]["recommended_balance_usd"] == 834.55
+    assert constant["snapshot"]["recommended_balance_min_usd"] == 814.09
+    assert constant["snapshot"]["recommended_balance_max_usd"] == 855.0
     dashboard = client.get("/api/dashboard", **headers).json()["data"]
     assert dashboard["weekly_quota_model"] == "constant_average"
     assert dashboard["cycle"]["effective_usd_per_percent"] == 20.0
@@ -526,6 +530,12 @@ def test_constant_average_model_changes_only_presented_attribution():
     assert dashboard["cycle"]["rate_calculated"] is True
     assert dashboard["participants"][0]["snapshot"][
         "recommended_balance_usd"
+    ] == 834.55
+    assert dashboard["participants"][0]["snapshot"][
+        "recommended_balance_min_usd"
+    ] == 814.09
+    assert dashboard["participants"][0]["snapshot"][
+        "recommended_balance_max_usd"
     ] == 855.0
     stored.refresh_from_db()
     assert stored.charged_cycle_percent == Decimal("12")
@@ -550,6 +560,12 @@ def test_constant_average_model_changes_only_presented_attribution():
     assert time_varying_dashboard["participants"][0]["snapshot"][
         "recommended_balance_usd"
     ] == 722.0
+    assert time_varying_dashboard["participants"][0]["snapshot"][
+        "recommended_balance_min_usd"
+    ] is None
+    assert time_varying_dashboard["participants"][0]["snapshot"][
+        "recommended_balance_max_usd"
+    ] is None
 
 @pytest.mark.django_db
 def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
@@ -611,6 +627,81 @@ def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
     dashboard = client.get("/api/dashboard", **headers).json()["data"]
     assert dashboard["sub2api_admin_url"] == "https://admin.example:8443"
     assert dashboard["participants"] == []
+
+@pytest.mark.django_db
+def test_constant_average_one_click_applies_recommendation_midpoint(monkeypatch):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.weekly_quota_model = "constant_average"
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.openai_account_id = 7
+    config.save()
+    participant = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=51,
+        share_percent=50,
+        latest_balance_usd=Decimal("80"),
+    )
+    now = timezone.now()
+    observation = Observation.objects.create(
+        account_id=7,
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=4),
+        attribution_started_at=now - timedelta(days=3),
+        upstream_used_percent=Decimal("20"),
+        interval_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("400"),
+        selected_total_cost=Decimal("400"),
+        total_standard_cost=Decimal("400"),
+        total_actual_cost=Decimal("400"),
+        effective_usd_per_percent=Decimal("15"),
+    )
+    snapshot = ParticipantSnapshot.objects.create(
+        observation=observation,
+        participant=participant,
+        raw_selected_cost=Decimal("100"),
+        selected_cost=Decimal("100"),
+        current_balance_usd=Decimal("80"),
+        recommended_balance_usd=Decimal("722"),
+        needs_manual_update=True,
+    )
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, received_config):
+            assert received_config.pk == config.pk
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def set_user_balance_from_recommendation(self, user_id, balance):
+            captured.update(user_id=user_id, balance=balance)
+            return balance
+
+    monkeypatch.setattr("monitor.views.dashboard.Sub2APIClient", FakeClient)
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    applied = client.post(
+        f"/api/dashboard/participants/{participant.id}/apply-recommendation",
+        **headers,
+    )
+
+    assert applied.status_code == 200
+    assert applied.json()["data"]["applied_balance_usd"] == 834.55
+    assert captured == {"user_id": 51, "balance": Decimal("834.55")}
+    snapshot.refresh_from_db()
+    participant.refresh_from_db()
+    assert snapshot.current_balance_usd == Decimal("834.55")
+    assert participant.latest_balance_usd == Decimal("834.55")
 
 
 @pytest.mark.django_db
@@ -893,6 +984,129 @@ def test_passive_reset_timestamp_drift_keeps_the_same_cycle(monkeypatch):
         == observations[1].attribution_started_at
     )
 
+
+@pytest.mark.django_db
+def test_official_zero_observation_rebases_natural_day_usage_costs():
+    """自然日累计成本必须在官方窗口首个 0% 观测处扣除跨周期结转。"""
+
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.weekly_quota_model = "constant_average"
+    config.save()
+    participant = Participant.objects.create(
+        name="车主",
+        sub2api_user_id=1,
+        share_percent=100,
+        is_owner=True,
+    )
+    window_seconds = 604800
+    zero_observed_at = timezone.now().replace(microsecond=0)
+    new_reset_at = zero_observed_at + timedelta(
+        seconds=window_seconds,
+        minutes=-40,
+    )
+    old_reset_at = new_reset_at - timedelta(seconds=window_seconds)
+
+    def raw_observation(
+        observed_at,
+        reset_at,
+        used_percent,
+        total_cost,
+        participant_cost,
+    ):
+        observation = Observation.objects.create(
+            account_id=7,
+            source="manual",
+            observed_at=observed_at,
+            window_seconds=window_seconds,
+            upstream_resets_at=reset_at,
+            upstream_used_percent=used_percent,
+            raw_selected_total_cost=total_cost,
+            selected_total_cost=total_cost,
+            total_standard_cost=total_cost,
+            total_actual_cost=total_cost,
+            effective_usd_per_percent=Decimal("20"),
+        )
+        ParticipantSnapshot.objects.create(
+            observation=observation,
+            participant=participant,
+            raw_selected_cost=participant_cost,
+            selected_cost=participant_cost,
+            current_balance_usd=Decimal("1000"),
+            remaining_share_percent=Decimal("100"),
+        )
+        return observation
+
+    raw_observation(
+        zero_observed_at - timedelta(hours=1),
+        old_reset_at,
+        Decimal("71"),
+        Decimal("1931.418384"),
+        Decimal("1200"),
+    )
+    zero = raw_observation(
+        zero_observed_at,
+        new_reset_at,
+        Decimal("0"),
+        Decimal("175.310566"),
+        Decimal("100"),
+    )
+    raw_observation(
+        zero_observed_at + timedelta(hours=1),
+        new_reset_at,
+        Decimal("1"),
+        Decimal("196.788804"),
+        Decimal("115"),
+    )
+    latest = raw_observation(
+        zero_observed_at + timedelta(hours=2),
+        new_reset_at,
+        Decimal("3"),
+        Decimal("260.872599"),
+        Decimal("150"),
+    )
+
+    rebuild_account(7, config)
+    zero.refresh_from_db()
+    latest.refresh_from_db()
+    latest_snapshot = ParticipantSnapshot.objects.get(
+        observation=latest,
+        participant=participant,
+    )
+    assert zero.attribution_started_at == zero.observed_at
+    assert zero.selected_total_cost == Decimal("0")
+    assert zero.raw_window["replay_segment_reason"] == (
+        "official_zero_observation"
+    )
+    assert latest.attribution_started_at == zero.observed_at
+    assert latest.selected_total_cost == Decimal("85.562033")
+    assert latest_snapshot.selected_cost == Decimal("50")
+
+    statistics = client.get("/api/statistics", **headers).json()["data"]
+    assert statistics["capacity_summary"]["cycle"]["estimate_usd"] == 2852.07
+
+    appended = raw_observation(
+        zero_observed_at + timedelta(hours=3),
+        new_reset_at,
+        Decimal("4"),
+        Decimal("300"),
+        Decimal("170"),
+    )
+    result = rebuild_observation_suffix(appended, config)
+    appended.refresh_from_db()
+    assert result.rebuilt_observations == 1
+    assert appended.attribution_started_at == zero.observed_at
+    assert appended.selected_total_cost == Decimal("124.689434")
+    assert appended.raw_window["replay_segment_reason"] == (
+        "official_zero_observation"
+    )
 
 @pytest.mark.django_db
 def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
@@ -3082,8 +3296,18 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
         "observed_from": first_at.astimezone(ZoneInfo("UTC")).isoformat(),
         "observed_to": last_at.astimezone(ZoneInfo("UTC")).isoformat(),
         "start_cost_usd": 200.0,
+        "start_cost_breakdown": {
+            "sub2api_cost_usd": 200.0,
+            "fast_correction_usd": 0.0,
+            "total_cost_usd": 200.0,
+        },
         "start_percent": 10.0,
         "end_cost_usd": 300.0,
+        "end_cost_breakdown": {
+            "sub2api_cost_usd": 300.0,
+            "fast_correction_usd": 0.0,
+            "total_cost_usd": 300.0,
+        },
         "end_percent": 15.0,
         "cost_delta_usd": 100.0,
         "percent_delta": 5.0,
@@ -3098,8 +3322,18 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
         "minimum_usd": 1666.67,
         "maximum_usd": 2500.0,
         "start_cost_usd": 200.0,
+        "start_cost_breakdown": {
+            "sub2api_cost_usd": 200.0,
+            "fast_correction_usd": 0.0,
+            "total_cost_usd": 200.0,
+        },
         "start_percent": 10.0,
         "end_cost_usd": 300.0,
+        "end_cost_breakdown": {
+            "sub2api_cost_usd": 300.0,
+            "fast_correction_usd": 0.0,
+            "total_cost_usd": 300.0,
+        },
         "end_percent": 15.0,
         "cost_delta_usd": 100.0,
         "percent_delta": 5.0,
@@ -3277,3 +3511,452 @@ def test_resend_uses_a_new_idempotency_key_for_each_delivery(monkeypatch):
         f"pinche-notification-{first.pk}",
         f"pinche-notification-{second.pk}",
     }
+
+
+
+@pytest.mark.django_db
+def test_usage_logs_are_paginated_and_filtered_to_exact_interval():
+    config = AppSettings.load()
+    config.sub2api_base_url = "https://sub2api.example"
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.save()
+    started_at = timezone.now().replace(microsecond=0) - timedelta(hours=2)
+    ended_at = started_at + timedelta(hours=1)
+    requested_pages: list[int] = []
+
+    def raw_log(
+        log_id: int,
+        created_at,
+        *,
+        account_id: int = 7,
+        user_id: int = 51,
+        service_tier: str = "priority",
+    ):
+        return {
+            "id": log_id,
+            "user_id": user_id,
+            "account_id": account_id,
+            "created_at": created_at.isoformat(),
+            "service_tier": service_tier,
+            "total_cost": "4.00",
+            "actual_cost": "3.00",
+        }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/v1/admin/usage"
+        assert request.url.params["account_id"] == "7"
+        assert request.url.params["page_size"] == "1000"
+        assert request.url.params["sort_order"] == "asc"
+        page = int(request.url.params["page"])
+        requested_pages.append(page)
+        items = (
+            [
+                raw_log(1, started_at - timedelta(seconds=1)),
+                raw_log(2, started_at),
+                raw_log(3, ended_at),
+            ]
+            if page == 1
+            else [
+                raw_log(4, ended_at - timedelta(seconds=1), user_id=52),
+                raw_log(5, ended_at - timedelta(seconds=2), account_id=8),
+            ]
+        )
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "message": "success",
+                "data": {"items": items, "pages": 2},
+            },
+        )
+
+    with Sub2APIClient(config) as client:
+        client.client.close()
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"x-api-key": "admin-secret"},
+        )
+        rows = client.usage_logs(
+            account_id=7,
+            started_at=started_at,
+            ended_at=ended_at,
+            timezone_name="Asia/Shanghai",
+        )
+
+    assert requested_pages == [1, 2]
+    assert [row.id for row in rows] == [2, 4]
+    assert [row.user_id for row in rows] == [51, 52]
+    assert rows[0].total_cost == Decimal("4.00")
+    assert rows[0].actual_cost == Decimal("3.00")
+
+
+@pytest.mark.django_db
+def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.cost_basis = "actual"
+    config.fast_correction_enabled = True
+    config.save()
+    participant = Participant.objects.create(
+        name="已配置参与者",
+        sub2api_user_id=51,
+        share_percent=100,
+    )
+    reset_at = timezone.now() + timedelta(days=4)
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def query_weekly_window(self, _account_id, _mode):
+            return WeeklyWindow(
+                Decimal("10"),
+                604800,
+                345600,
+                int(reset_at.timestamp()),
+                "passive_snapshot",
+            )
+
+        def usage_stats(self, *, user_id=None, **_kwargs):
+            value = Decimal("200") if user_id is None else Decimal("150")
+            return UsageStats(value, value)
+
+        def user_balance(self, _user_id):
+            return UserBalance(Decimal("500"), Decimal("0"))
+
+        def usage_logs(
+            self,
+            *,
+            account_id,
+            started_at,
+            ended_at,
+            timezone_name,
+        ):
+            assert account_id == 7
+            assert started_at < ended_at
+            assert timezone_name == "Asia/Shanghai"
+            return [
+                Sub2APIUsageLog(
+                    1,
+                    51,
+                    7,
+                    ended_at - timedelta(minutes=3),
+                    "priority",
+                    Decimal("80"),
+                    Decimal("80"),
+                ),
+                Sub2APIUsageLog(
+                    2,
+                    52,
+                    7,
+                    ended_at - timedelta(minutes=2),
+                    "priority",
+                    Decimal("20"),
+                    Decimal("20"),
+                ),
+                Sub2APIUsageLog(
+                    3,
+                    51,
+                    7,
+                    ended_at - timedelta(minutes=1),
+                    "default",
+                    Decimal("100"),
+                    Decimal("100"),
+                ),
+            ]
+
+    monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+    result = run_monitor(force_upstream=True, source="manual")
+
+    assert result["status"] == "calibrated"
+    observation = Observation.objects.get()
+    assert observation.fast_correction_standard_cost == Decimal("25")
+    assert observation.fast_correction_actual_cost == Decimal("25")
+    assert observation.selected_total_cost == Decimal("225")
+    corrections = list(
+        ObservationFastCorrection.objects.order_by("sub2api_user_id")
+    )
+    assert [row.sub2api_user_id for row in corrections] == [51, 52]
+    assert [row.actual_correction_cost for row in corrections] == [
+        Decimal("20"),
+        Decimal("5"),
+    ]
+    assert observation.fast_correction_request_count == 3
+    assert [row.request_count for row in corrections] == [2, 1]
+
+    client = Client()
+    headers, _ = jwt_login(client)
+    detail_response = client.get(
+        f"/api/observations/{observation.id}/fast-correction",
+        **headers,
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()["data"]
+    assert detail["request_count"] == 3
+    assert detail["fast_request_count"] == 2
+    assert detail["non_fast_request_count"] == 1
+    assert detail["fast_billed_cost_usd"] == 100.0
+    assert detail["correction_usd"] == 25.0
+    assert detail["corrected_fast_cost_usd"] == 125.0
+    assert detail["sub2api_fast_multiplier"] == 2.0
+    assert detail["upstream_fast_multiplier"] == 2.5
+    assert detail["users"] == [
+        {
+            "sub2api_user_id": 51,
+            "username": "",
+            "email": "",
+            "display_name": "已配置参与者",
+            "request_count": 2,
+            "fast_request_count": 1,
+            "non_fast_request_count": 1,
+            "fast_billed_cost_usd": 80.0,
+            "correction_usd": 20.0,
+            "corrected_fast_cost_usd": 100.0,
+        },
+        {
+            "sub2api_user_id": 52,
+            "username": "",
+            "email": "",
+            "display_name": "用户 52",
+            "request_count": 1,
+            "fast_request_count": 1,
+            "non_fast_request_count": 0,
+            "fast_billed_cost_usd": 20.0,
+            "correction_usd": 5.0,
+            "corrected_fast_cost_usd": 25.0,
+        },
+    ]
+    snapshot = ParticipantSnapshot.objects.get(participant=participant)
+    assert snapshot.selected_cost == Decimal("170")
+
+
+@pytest.mark.django_db
+def test_disabled_fast_correction_skips_log_reads_and_preserves_null_interval(
+    monkeypatch,
+):
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.fast_correction_enabled = False
+    config.save()
+    Participant.objects.create(
+        name="车友",
+        sub2api_user_id=51,
+        share_percent=100,
+    )
+    reset_at = timezone.now() + timedelta(days=4)
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def query_weekly_window(self, _account_id, _mode):
+            return WeeklyWindow(
+                Decimal("10"),
+                604800,
+                345600,
+                int(reset_at.timestamp()),
+                "passive_snapshot",
+            )
+
+        def usage_stats(self, **_kwargs):
+            return UsageStats(Decimal("100"), Decimal("100"))
+
+        def user_balance(self, _user_id):
+            return UserBalance(Decimal("500"), Decimal("0"))
+
+        def usage_logs(self, **_kwargs):
+            raise AssertionError("关闭 FAST 修正后不应读取请求日志")
+
+    monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+    run_monitor(force_upstream=True, source="manual")
+
+    observation = Observation.objects.get()
+    assert observation.fast_correction_standard_cost is None
+    assert observation.fast_correction_actual_cost is None
+    assert observation.selected_total_cost == Decimal("100")
+
+
+@pytest.mark.django_db
+def test_fast_correction_rebuild_api_fills_missing_cycle_and_replays(monkeypatch):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.fast_correction_enabled = True
+    config.cost_basis = "actual"
+    config.save()
+    participant = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=51,
+        share_percent=100,
+    )
+    cycle_start = timezone.now().replace(microsecond=0) - timedelta(days=2)
+    reset_at = cycle_start + timedelta(days=7)
+    first_at = cycle_start + timedelta(hours=1)
+    second_at = cycle_start + timedelta(hours=2)
+
+    def observation_at(observed_at, used_percent, cost):
+        observation = Observation.objects.create(
+            account_id=7,
+            observed_at=observed_at,
+            window_seconds=604800,
+            upstream_resets_at=reset_at,
+            attribution_started_at=cycle_start,
+            upstream_used_percent=used_percent,
+            interval_used_percent=used_percent,
+            raw_selected_total_cost=cost,
+            selected_total_cost=cost,
+            total_standard_cost=cost,
+            total_actual_cost=cost,
+            effective_usd_per_percent=Decimal("10"),
+        )
+        ParticipantSnapshot.objects.create(
+            observation=observation,
+            participant=participant,
+            raw_selected_cost=cost,
+            selected_cost=cost,
+            remaining_share_percent=Decimal("100") - used_percent,
+        )
+        return observation
+
+    first = observation_at(first_at, Decimal("10"), Decimal("100"))
+    second = observation_at(second_at, Decimal("20"), Decimal("200"))
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def usage_logs(self, **kwargs):
+            assert kwargs["started_at"] == cycle_start
+            assert kwargs["ended_at"] == second_at
+            return [
+                Sub2APIUsageLog(
+                    1,
+                    51,
+                    7,
+                    first_at + timedelta(minutes=1),
+                    "priority",
+                    Decimal("100"),
+                    Decimal("100"),
+                )
+            ]
+
+    monkeypatch.setattr(
+        "monitor.fast_correction.Sub2APIClient",
+        FakeClient,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    settings_before = client.get("/api/settings", **headers).json()["data"]
+    assert settings_before["fast_correction_rebuild_recommended"] is True
+    assert settings_before["fast_correction_missing_intervals"] == 2
+
+    response = client.post(
+        "/api/settings/fast-correction/rebuild",
+        data=json.dumps({"scope": "cycle"}),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]
+    assert result["rebuilt_observations"] == 2
+    assert result["fast_request_count"] == 1
+    assert result["correction_usd"] == 25.0
+    first.refresh_from_db()
+    second.refresh_from_db()
+    assert first.fast_correction_actual_cost == Decimal("0")
+    assert second.fast_correction_actual_cost == Decimal("25")
+    assert second.selected_total_cost == Decimal("225")
+    assert ParticipantSnapshot.objects.get(
+        observation=second,
+        participant=participant,
+    ).selected_cost == Decimal("225")
+    settings_after = client.get("/api/settings", **headers).json()["data"]
+    assert settings_after["fast_correction_rebuild_recommended"] is False
+    assert settings_after["fast_correction_missing_intervals"] == 0
+    observations = client.get("/api/observations", **headers).json()["data"]
+    assert observations["fast_correction_enabled"] is True
+    assert observations["items"][0]["fast_correction_usd"] == 25.0
+    # 混合历史中未计算的区间必须按 0 累加，不能阻断后续已计算修正。
+    first.fast_correction_standard_cost = None
+    first.fast_correction_actual_cost = None
+    first.save(
+        update_fields=[
+            "fast_correction_standard_cost",
+            "fast_correction_actual_cost",
+        ]
+    )
+    dashboard = client.get("/api/dashboard", **headers).json()["data"]
+    assert dashboard["fast_correction_enabled"] is True
+    assert dashboard["cycle"]["start_cost_breakdown"] == {
+        "sub2api_cost_usd": 0.0,
+        "fast_correction_usd": 0.0,
+        "total_cost_usd": 0.0,
+    }
+    assert dashboard["cycle"]["selected_total_cost_breakdown"] == {
+        "sub2api_cost_usd": 200.0,
+        "fast_correction_usd": 25.0,
+        "total_cost_usd": 225.0,
+    }
+    assert dashboard["cycle"]["rate_samples"][0]["cost_breakdown"] == {
+        "sub2api_cost_usd": 200.0,
+        "fast_correction_usd": 25.0,
+        "total_cost_usd": 225.0,
+    }
+
+    statistics = client.get("/api/statistics", **headers).json()["data"]
+    assert statistics["fast_correction_enabled"] is True
+    assert statistics["capacity_summary"]["cycle"]["end_cost_breakdown"] == {
+        "sub2api_cost_usd": 200.0,
+        "fast_correction_usd": 25.0,
+        "total_cost_usd": 225.0,
+    }
+    # 首个区间尚未计算出 FAST 请求时按 0 展示，后续累计修正仍保持可追溯。
+    assert statistics["capacity_summary"]["cycle"]["rate_samples"][-1][
+        "cost_breakdown"
+    ] == {
+        "sub2api_cost_usd": 100.0,
+        "fast_correction_usd": 0.0,
+        "total_cost_usd": 100.0,
+    }
+
+    config.fast_correction_enabled = False
+    config.save(update_fields=["fast_correction_enabled"])
+    dashboard_without_breakdown = client.get(
+        "/api/dashboard",
+        **headers,
+    ).json()["data"]
+    statistics_without_breakdown = client.get(
+        "/api/statistics",
+        **headers,
+    ).json()["data"]
+    assert dashboard_without_breakdown["fast_correction_enabled"] is False
+    assert statistics_without_breakdown["fast_correction_enabled"] is False

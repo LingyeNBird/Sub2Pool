@@ -15,6 +15,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
+from .fast_correction import missing_current_cycle_intervals
 from .models import (
     AppSettings,
     BlockedIPAddress,
@@ -252,6 +253,7 @@ SETTINGS_FIELDS = (
     "timezone",
     "cost_basis",
     "weekly_quota_model",
+    "fast_correction_enabled",
     "initial_usd_per_percent",
     "safety_factor",
     "conservative_percentile",
@@ -312,6 +314,8 @@ class AppSettingsSerializer(serializers.ModelSerializer):
     sub2api_token_configured = serializers.SerializerMethodField()
     smtp_password_configured = serializers.SerializerMethodField()
     resend_api_key_configured = serializers.SerializerMethodField()
+    fast_correction_rebuild_recommended = serializers.SerializerMethodField()
+    fast_correction_missing_intervals = serializers.SerializerMethodField()
 
     class Meta:
         model = AppSettings
@@ -326,12 +330,16 @@ class AppSettingsSerializer(serializers.ModelSerializer):
             "sub2api_token_configured",
             "smtp_password_configured",
             "resend_api_key_configured",
+            "fast_correction_rebuild_recommended",
+            "fast_correction_missing_intervals",
             "last_local_check_at",
             "last_upstream_check_at",
             "last_success_at",
             "last_error",
         )
         read_only_fields = (
+            "fast_correction_rebuild_recommended",
+            "fast_correction_missing_intervals",
             "last_local_check_at",
             "last_upstream_check_at",
             "last_success_at",
@@ -346,6 +354,22 @@ class AppSettingsSerializer(serializers.ModelSerializer):
 
     def get_resend_api_key_configured(self, obj) -> bool:
         return bool(obj.resend_api_key_encrypted)
+
+    @staticmethod
+    def _fast_missing_count(obj: AppSettings) -> int:
+        cached = getattr(obj, "_fast_missing_interval_count", None)
+        if cached is None:
+            cached = missing_current_cycle_intervals(obj)
+            obj._fast_missing_interval_count = cached
+        return cached
+
+    def get_fast_correction_rebuild_recommended(self, obj) -> bool:
+        return bool(
+            obj.fast_correction_enabled and self._fast_missing_count(obj) > 0
+        )
+
+    def get_fast_correction_missing_intervals(self, obj) -> int:
+        return self._fast_missing_count(obj)
 
     def validate_timezone(self, value: str) -> str:
         try:

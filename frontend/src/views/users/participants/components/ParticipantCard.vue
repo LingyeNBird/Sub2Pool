@@ -6,6 +6,7 @@ import type { Participant } from "@/types";
 import {
   formatCompactPercent,
   formatCurrency,
+  formatCurrencyRange,
   formatPercent,
 } from "@/utils/formatters";
 
@@ -174,7 +175,9 @@ function edit() {
                   当前 {{ formatCurrency(participant.latest_balance_usd) }} /
                   建议
                   {{
-                    formatCurrency(
+                    formatCurrencyRange(
+                      participant.snapshot?.recommended_balance_min_usd,
+                      participant.snapshot?.recommended_balance_max_usd,
                       participant.snapshot?.recommended_balance_usd,
                     )
                   }}

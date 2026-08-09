@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urljoin
 from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -49,6 +50,19 @@ class Sub2APIUserUsage:
     username: str
     stats: UsageStats
 
+
+@dataclass(frozen=True)
+class Sub2APIUsageLog:
+    """FAST 修正所需的最小请求日志事实。"""
+
+    id: int
+    user_id: int
+    account_id: int
+    created_at: datetime
+    service_tier: str
+    total_cost: Decimal
+    actual_cost: Decimal
+
 @dataclass(frozen=True)
 class UserBalance:
     """Sub2API 用户的全局余额；该余额会被该用户的所有用量共同消耗。"""
@@ -62,6 +76,18 @@ def _decimal(value: Any, field: str) -> Decimal:
         return Decimal(str(value or 0))
     except (InvalidOperation, ValueError, TypeError) as exc:
         raise Sub2APIError(f"Sub2API 返回了无效字段 {field}") from exc
+
+
+def _timestamp(value: Any, field: str) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise Sub2APIError(f"Sub2API 返回了无效字段 {field}")
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise Sub2APIError(f"Sub2API 返回了无效字段 {field}") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class Sub2APIClient:
@@ -323,6 +349,111 @@ class Sub2APIClient:
             )
             for user_id in sorted(metadata)
         ]
+
+    def usage_logs(
+        self,
+        *,
+        account_id: int,
+        started_at: datetime | None,
+        ended_at: datetime,
+        timezone_name: str,
+    ) -> list[Sub2APIUsageLog]:
+        """分页只读请求日志，并在本地收紧到精确的半开时间区间。
+
+        Sub2API 列表接口只支持按自然日过滤，所以网络请求先覆盖相关日期，
+        再按 ``[started_at, ended_at)`` 过滤。重建全部历史时 ``started_at``
+        为 ``None``，此时从该账号最早的请求日志开始。
+        """
+
+        if ended_at.tzinfo is None:
+            raise ValueError("ended_at 必须包含时区")
+        try:
+            location = ZoneInfo(timezone_name)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise Sub2APIError("FAST 修正使用了无效的统计时区") from exc
+
+        end_utc = ended_at.astimezone(timezone.utc)
+        start_utc = (
+            started_at.astimezone(timezone.utc)
+            if started_at is not None
+            else None
+        )
+        params: dict[str, Any] = {
+            "page_size": 1000,
+            "account_id": account_id,
+            "end_date": end_utc.astimezone(location).date().isoformat(),
+            "timezone": timezone_name,
+            "sort_by": "created_at",
+            "sort_order": "asc",
+            "exact_total": "true",
+        }
+        if start_utc is not None:
+            params["start_date"] = (
+                start_utc.astimezone(location).date().isoformat()
+            )
+
+        rows: list[Sub2APIUsageLog] = []
+        seen_ids: set[int] = set()
+        page = 1
+        while True:
+            params["page"] = page
+            data = self._get("api/v1/admin/usage", params=params)
+            if not isinstance(data, dict) or not isinstance(
+                data.get("items"),
+                list,
+            ):
+                raise Sub2APIError("请求日志响应结构错误")
+            for raw in data["items"]:
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    log_id = int(raw.get("id"))
+                    user_id = int(raw.get("user_id"))
+                    returned_account_id = int(raw.get("account_id"))
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    log_id <= 0
+                    or user_id <= 0
+                    or returned_account_id != account_id
+                    or log_id in seen_ids
+                ):
+                    continue
+                created_at = _timestamp(raw.get("created_at"), "created_at")
+                if created_at >= end_utc or (
+                    start_utc is not None and created_at < start_utc
+                ):
+                    continue
+                seen_ids.add(log_id)
+                rows.append(
+                    Sub2APIUsageLog(
+                        id=log_id,
+                        user_id=user_id,
+                        account_id=returned_account_id,
+                        created_at=created_at,
+                        service_tier=str(raw.get("service_tier") or "")
+                        .strip()
+                        .lower(),
+                        total_cost=_decimal(raw.get("total_cost"), "total_cost"),
+                        actual_cost=_decimal(
+                            raw.get("actual_cost"),
+                            "actual_cost",
+                        ),
+                    )
+                )
+
+            try:
+                pages = max(1, int(data.get("pages") or 1))
+            except (TypeError, ValueError) as exc:
+                raise Sub2APIError("请求日志分页字段无效") from exc
+            if page >= pages:
+                break
+            page += 1
+            if page > 10_000:
+                raise Sub2APIError("请求日志数量异常，已停止读取")
+
+        rows.sort(key=lambda item: (item.created_at, item.id))
+        return rows
 
     def query_weekly_window(self, account_id: int, mode: str = "passive") -> WeeklyWindow:
         """读取七天窗口。

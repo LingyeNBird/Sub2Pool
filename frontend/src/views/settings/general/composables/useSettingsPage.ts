@@ -9,7 +9,11 @@ import {
   setAccessToken,
 } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
-import type { AppSettingsData, OpenAIAccountOption } from "@/types";
+import type {
+  AppSettingsData,
+  FastCorrectionRebuildResult,
+  OpenAIAccountOption,
+} from "@/types";
 
 export interface PasswordForm {
   old_password: string;
@@ -32,6 +36,8 @@ export function useSettingsPage() {
   const loadingAccounts = ref(false);
   const exportingDatabase = ref(false);
   const importingDatabase = ref(false);
+  const rebuildingFastCorrection = ref(false);
+  const savedFastCorrectionEnabled = ref(true);
   const passwordForm = reactive<PasswordForm>({
     old_password: "",
     new_password: "",
@@ -80,6 +86,7 @@ export function useSettingsPage() {
     loading.value = true;
     try {
       settings.value = await api<AppSettingsData>("settings");
+      savedFastCorrectionEnabled.value = settings.value.fast_correction_enabled;
       if (settings.value.sub2api_token_configured) {
         await loadOpenAIAccounts(false);
       }
@@ -173,6 +180,66 @@ export function useSettingsPage() {
       "stale_warning_hours",
       "monitoring_enabled",
     ]);
+  }
+
+  async function saveFastCorrection() {
+    if (!settings.value) return false;
+    saving.value = "fast-correction";
+    message.value = "";
+    success.value = "";
+    const wasEnabled = savedFastCorrectionEnabled.value;
+    try {
+      const updated = await api<AppSettingsData>("settings", {
+        method: "PATCH",
+        body: jsonBody({
+          fast_correction_enabled: settings.value.fast_correction_enabled,
+        }),
+      });
+      settings.value.fast_correction_enabled = updated.fast_correction_enabled;
+      settings.value.fast_correction_rebuild_recommended =
+        updated.fast_correction_rebuild_recommended;
+      settings.value.fast_correction_missing_intervals =
+        updated.fast_correction_missing_intervals;
+      savedFastCorrectionEnabled.value = updated.fast_correction_enabled;
+      success.value = "FAST 修正设置已保存";
+      return Boolean(
+        !wasEnabled &&
+        updated.fast_correction_enabled &&
+        updated.fast_correction_rebuild_recommended,
+      );
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "保存 FAST 修正设置失败";
+      return false;
+    } finally {
+      saving.value = "";
+    }
+  }
+
+  async function rebuildFastCorrection(scope: "cycle" | "all") {
+    if (!settings.value) return false;
+    rebuildingFastCorrection.value = true;
+    message.value = "";
+    success.value = "";
+    try {
+      const result = await api<FastCorrectionRebuildResult>(
+        "settings/fast-correction/rebuild",
+        {
+          method: "POST",
+          body: jsonBody({ scope }),
+        },
+      );
+      settings.value.fast_correction_rebuild_recommended = false;
+      settings.value.fast_correction_missing_intervals = 0;
+      success.value = `FAST 修正重建完成：处理 ${result.rebuilt_observations} 个采样区间，识别 ${result.fast_request_count} 条 FAST 请求，补充 ${result.correction_usd.toFixed(2)} 美元等效用量。`;
+      return true;
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "FAST 修正重建失败";
+      return false;
+    } finally {
+      rebuildingFastCorrection.value = false;
+    }
   }
 
   function saveEmail() {
@@ -322,6 +389,7 @@ export function useSettingsPage() {
     loadingAccounts,
     exportingDatabase,
     importingDatabase,
+    rebuildingFastCorrection,
     passwordForm,
     loadOpenAIAccounts,
     saveConnection,
@@ -331,6 +399,8 @@ export function useSettingsPage() {
     saveNotifications,
     exportDatabase,
     importDatabase,
+    saveFastCorrection,
+    rebuildFastCorrection,
     test,
     changePassword,
   };

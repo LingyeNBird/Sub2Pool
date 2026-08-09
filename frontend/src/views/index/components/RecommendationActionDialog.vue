@@ -2,7 +2,7 @@
 import { ref } from "vue";
 
 import type { Participant } from "@/types";
-import { formatCurrency } from "@/utils/formatters";
+import { formatCurrency, formatCurrencyRange } from "@/utils/formatters";
 
 const props = defineProps<{
   adminUrl: string;
@@ -96,10 +96,34 @@ defineExpose({ open, close });
                 <template
                   v-if="participant?.snapshot?.recommended_balance_usd != null"
                 >
-                  将 Sub2API 用户余额设置为
-                  {{
-                    formatCurrency(participant.snapshot.recommended_balance_usd)
-                  }}
+                  <template
+                    v-if="
+                      participant.snapshot.allocation_model ===
+                      'constant_average'
+                    "
+                  >
+                    将 Sub2API 用户余额设置为建议区间中间值
+                    {{
+                      formatCurrency(
+                        participant.snapshot.recommended_balance_usd,
+                      )
+                    }}（建议区间
+                    {{
+                      formatCurrencyRange(
+                        participant.snapshot.recommended_balance_min_usd,
+                        participant.snapshot.recommended_balance_max_usd,
+                        participant.snapshot.recommended_balance_usd,
+                      )
+                    }}）
+                  </template>
+                  <template v-else>
+                    将 Sub2API 用户余额设置为
+                    {{
+                      formatCurrency(
+                        participant.snapshot.recommended_balance_usd,
+                      )
+                    }}
+                  </template>
                 </template>
                 <template v-else>当前没有可应用的额度建议</template>
               </span>

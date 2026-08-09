@@ -13,6 +13,7 @@ from .views.dashboard import (
     DashboardView,
 )
 from .views.database import DatabaseExportView, DatabaseImportView
+from .views.fast_correction import FastCorrectionRebuildView
 from .views.monitoring import RunMonitorView
 from .views.participants import (
     ParticipantDetailView,
@@ -26,6 +27,7 @@ from .views.records import (
     LoginEventListView,
     NotificationListView,
     ObservationListView,
+    ObservationFastCorrectionDetailView,
     ObservationRebuildView,
     ObservationManualStartView,
     ObservationExclusionView,
@@ -66,6 +68,10 @@ urlpatterns = [
     path("system-users", SystemUserListView.as_view()),
     path("system-users/<int:user_id>", SystemUserDetailView.as_view()),
     path("observations", ObservationListView.as_view()),
+    path(
+        "observations/<int:observation_id>/fast-correction",
+        ObservationFastCorrectionDetailView.as_view(),
+    ),
     path("observations/rebuild", ObservationRebuildView.as_view()),
     path(
         "observations/<int:observation_id>/exclude",
@@ -84,5 +90,9 @@ urlpatterns = [
     path("settings/openai-accounts", OpenAIAccountListView.as_view()),
     path("settings/test-sub2api", TestSub2APIView.as_view()),
     path("settings/test-email", TestEmailView.as_view()),
+    path(
+        "settings/fast-correction/rebuild",
+        FastCorrectionRebuildView.as_view(),
+    ),
     path("monitor/run", RunMonitorView.as_view()),
 ]

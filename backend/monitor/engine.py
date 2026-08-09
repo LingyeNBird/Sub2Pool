@@ -14,6 +14,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from .fast_correction import FastCorrectionInterval, apply_fast_interval, fetch_fast_interval
 from .models import (
     AppSettings,
     Observation,
@@ -279,6 +280,8 @@ def _create_raw_observation(
     window: WeeklyWindow,
     local: LocalBundle,
     source: str,
+    fast_interval: FastCorrectionInterval | None = None,
+    fast_error: str = "",
 ) -> Observation:
     """持久化不可变采样事实；派生字段先给安全初值，随后由重放器覆盖。"""
 
@@ -304,6 +307,7 @@ def _create_raw_observation(
             "query_mode": config.quota_query_mode,
             "sampled_at": window.sampled_at,
             "rate_method": RATE_METHOD,
+            **({"fast_correction_error": fast_error} if fast_error else {}),
         },
     )
     ParticipantSnapshot.objects.bulk_create(
@@ -319,7 +323,56 @@ def _create_raw_observation(
             for row in local.participants
         ]
     )
+    if fast_interval is not None:
+        apply_fast_interval(observation, fast_interval)
+        observation.save(
+            update_fields=[
+                "fast_correction_started_at",
+                "fast_correction_standard_cost",
+                "fast_correction_actual_cost",
+                "fast_correction_request_count",
+            ]
+        )
     return observation
+
+
+def _fetch_fast_correction(
+    client: Sub2APIClient,
+    config: AppSettings,
+    reference: WindowReference,
+    latest_raw: Observation | None,
+    ended_at: datetime,
+) -> tuple[FastCorrectionInterval | None, str]:
+    """读取一个原始采样区间的 FAST 请求；失败不阻断核心百分比采样。"""
+
+    if not config.fast_correction_enabled:
+        return None, ""
+    if not callable(getattr(client, "usage_logs", None)):
+        return None, ""
+
+    official_start = reference.reset_at - timedelta(
+        seconds=reference.window_seconds
+    )
+    started_at = official_start
+    if latest_raw is not None and _same_official_reset(
+        latest_raw.upstream_resets_at,
+        reference.reset_at,
+    ):
+        started_at = latest_raw.observed_at
+    started_at = min(started_at, ended_at)
+    try:
+        return (
+            fetch_fast_interval(
+                client,
+                account_id=reference.account_id,
+                started_at=started_at,
+                ended_at=ended_at,
+                timezone_name=config.timezone,
+            ),
+            "",
+        )
+    except (Sub2APIError, ValueError) as exc:
+        return None, str(exc)[:500]
 
 
 def _send_observation_notifications(
@@ -448,6 +501,13 @@ def _run_monitor_locked(
             )
             reference = _window_reference(account_id, window)
             local = _fetch_local(client, config, reference, participants, now)
+            fast_interval, fast_error = _fetch_fast_correction(
+                client,
+                config,
+                reference,
+                None,
+                local.checked_at,
+            )
             _save_local_bundle(config, reference, local, None)
             observation = _create_raw_observation(
                 config=config,
@@ -455,6 +515,8 @@ def _run_monitor_locked(
                 window=window,
                 local=local,
                 source=requested_source,
+                fast_interval=fast_interval,
+                fast_error=fast_error,
             )
             rebuild_observation_suffix(observation, config)
             observation.refresh_from_db()
@@ -592,6 +654,13 @@ def _run_monitor_locked(
         elif reset_near and not force_upstream:
             source = "reset"
 
+        fast_interval, fast_error = _fetch_fast_correction(
+            client,
+            config,
+            reference,
+            latest_raw,
+            local.checked_at,
+        )
         _save_local_bundle(config, reference, local, previous)
         observation = _create_raw_observation(
             config=config,
@@ -599,6 +668,8 @@ def _run_monitor_locked(
             window=window,
             local=local,
             source=source,
+            fast_interval=fast_interval,
+            fast_error=fast_error,
         )
         rebuild_observation_suffix(observation, config)
         observation.refresh_from_db()

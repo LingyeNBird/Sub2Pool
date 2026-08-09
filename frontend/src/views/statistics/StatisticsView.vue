@@ -89,5 +89,8 @@ onMounted(load);
     :loading="loading"
   />
   <CapacityBasisDialog v-if="data" ref="basisDialog" :data="data" />
-  <DailyClosingBasisDialog ref="closingBasisDialog" />
+  <DailyClosingBasisDialog
+    ref="closingBasisDialog"
+    :fast-correction-enabled="data?.fast_correction_enabled ?? false"
+  />
 </template>

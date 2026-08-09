@@ -8,7 +8,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.utils import timezone
 
 from .base import AuthenticatedAPIView, ok
-from .presenters import bounded_query_int, display_cycle_rates, iso
+from .presenters import (
+    FastCorrectionBreakdownPresenter,
+    bounded_query_int,
+    display_cycle_rates,
+    iso,
+)
 from ..models import (
     AppSettings,
     Observation,
@@ -26,6 +31,7 @@ def _closing_basis(
     observation: Observation,
     rate_rows: list[Observation],
     config: AppSettings,
+    cost_breakdowns: FastCorrectionBreakdownPresenter,
 ) -> dict:
     """给出某个每日收盘点当时可追溯的累计折算依据。"""
     used_percent = observation.interval_used_percent
@@ -45,12 +51,15 @@ def _closing_basis(
             config.rate_history_samples,
         )
     )
+    end_cost_breakdown = cost_breakdowns.for_observation(observation)
     return {
         "observed_at": iso(observation.observed_at),
         "starts_at": iso(observation.attribution_started_at),
         "start_cost_usd": 0.0,
         "start_percent": 0.0,
         "end_cost_usd": _money(observation.selected_total_cost),
+        "start_cost_breakdown": cost_breakdowns.zero(),
+        "end_cost_breakdown": end_cost_breakdown,
         "end_percent": float(used_percent),
         "raw_estimate_usd": (
             _money(raw_estimate) if raw_estimate is not None else None
@@ -67,6 +76,7 @@ def _closing_basis(
             {
                 "observed_at": iso(row.observed_at),
                 "cost_usd": _money(row.selected_total_cost),
+                "cost_breakdown": cost_breakdowns.for_observation(row),
                 "used_percent": float(row.interval_used_percent),
                 "usd_per_percent": float(row.sample_usd_per_percent),
             }
@@ -81,6 +91,7 @@ def _daily_closing_basis(
     last: Observation,
     sample_count: int,
     config: AppSettings,
+    cost_breakdowns: FastCorrectionBreakdownPresenter,
 ) -> dict | None:
     """按某日同一归属区间的首末观测计算日内增量折算。"""
     if sample_count < 2:
@@ -100,6 +111,8 @@ def _daily_closing_basis(
         if percent_delta > 1
         else None
     )
+    start_cost_breakdown = cost_breakdowns.for_observation(first)
+    end_cost_breakdown = cost_breakdowns.for_observation(last)
     return {
         "observed_from": iso(first.observed_at),
         "observed_to": iso(last.observed_at),
@@ -107,6 +120,8 @@ def _daily_closing_basis(
         "start_percent": float(first.interval_used_percent),
         "end_cost_usd": _money(last.selected_total_cost),
         "end_percent": float(last.interval_used_percent),
+        "start_cost_breakdown": start_cost_breakdown,
+        "end_cost_breakdown": end_cost_breakdown,
         "cost_delta_usd": _money(cost_delta),
         "percent_delta": float(percent_delta),
         "estimate_usd": _money(estimate),
@@ -122,6 +137,7 @@ def _capacity_summary(
     config: AppSettings,
     location: ZoneInfo,
     now: datetime,
+    cost_breakdowns: FastCorrectionBreakdownPresenter,
 ) -> dict:
     """分别给出本周期累计折算和今日已覆盖观测区间的增量折算。"""
     empty_today = {
@@ -132,6 +148,8 @@ def _capacity_summary(
         "start_percent": None,
         "end_cost_usd": None,
         "end_percent": None,
+        "start_cost_breakdown": None,
+        "end_cost_breakdown": None,
         "cost_delta_usd": None,
         "percent_delta": None,
         "sample_count": 0,
@@ -204,6 +222,8 @@ def _capacity_summary(
         "start_cost_usd": 0.0,
         "start_percent": 0.0,
         "end_cost_usd": _money(latest.selected_total_cost),
+        "start_cost_breakdown": cost_breakdowns.zero(),
+        "end_cost_breakdown": cost_breakdowns.for_observation(latest),
         "end_percent": float(used_percent),
         "cost_usd": _money(latest.selected_total_cost),
         "used_percent": float(used_percent),
@@ -221,6 +241,7 @@ def _capacity_summary(
             {
                 "observed_at": iso(row.observed_at),
                 "cost_usd": _money(row.selected_total_cost),
+                "cost_breakdown": cost_breakdowns.for_observation(row),
                 "used_percent": float(row.interval_used_percent),
                 "usd_per_percent": float(row.sample_usd_per_percent),
             }
@@ -255,6 +276,8 @@ def _capacity_summary(
             "start_percent": float(first.interval_used_percent),
             "end_cost_usd": _money(last.selected_total_cost),
             "end_percent": float(last.interval_used_percent),
+            "start_cost_breakdown": cost_breakdowns.for_observation(first),
+            "end_cost_breakdown": cost_breakdowns.for_observation(last),
             "cost_delta_usd": _money(cost_delta),
             "percent_delta": float(percent_delta),
             "observed_from": iso(first.observed_at),
@@ -301,6 +324,10 @@ def _capacity_summary(
 class StatisticsView(AuthenticatedAPIView):
     def get(self, request):
         config = AppSettings.load()
+        cost_breakdowns = FastCorrectionBreakdownPresenter(
+            config,
+            config.openai_account_id,
+        )
         capacity_period = request.query_params.get("capacity_period", "day")
         if capacity_period not in {"day", "month"}:
             capacity_period = "day"
@@ -320,7 +347,12 @@ class StatisticsView(AuthenticatedAPIView):
             location = ZoneInfo("UTC")
 
         now = timezone.now()
-        capacity_summary = _capacity_summary(config, location, now)
+        capacity_summary = _capacity_summary(
+            config,
+            location,
+            now,
+            cost_breakdowns,
+        )
         capacity_start = datetime.combine(
             (now - timedelta(days=capacity_days)).astimezone(location).date(),
             time.min,
@@ -404,6 +436,7 @@ class StatisticsView(AuthenticatedAPIView):
                 row["_daily_last_observation"],
                 row["_daily_sample_count"],
                 config,
+                cost_breakdowns,
             )
         if capacity_period == "day":
             capacity_series = [
@@ -417,6 +450,7 @@ class StatisticsView(AuthenticatedAPIView):
                         row["_closing_observation"],
                         row["_rate_rows"],
                         config,
+                        cost_breakdowns,
                     ),
                     "daily_total_usd": (
                         row["_daily_basis"]["estimate_usd"]
@@ -524,6 +558,7 @@ class StatisticsView(AuthenticatedAPIView):
             {
                 "capacity_period": capacity_period,
                 "capacity_series": capacity_series,
+                "fast_correction_enabled": config.fast_correction_enabled,
                 "capacity_summary": capacity_summary,
                 "usage_days": usage_days,
                 "usage_precision": usage_precision,

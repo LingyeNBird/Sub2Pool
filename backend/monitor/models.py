@@ -59,6 +59,8 @@ class AppSettings(models.Model):
         ),
         default="time_varying",
     )
+    # FAST 修正只控制新采样是否读取请求日志；已经落库的修正事实永久保留。
+    fast_correction_enabled = models.BooleanField(default=True)
     initial_usd_per_percent = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("16"))
     safety_factor = models.DecimalField(
         max_digits=6, decimal_places=4, default=Decimal("0.95"),
@@ -205,6 +207,26 @@ class Observation(models.Model):
     selected_total_cost = models.DecimalField(max_digits=18, decimal_places=6)
     total_standard_cost = models.DecimalField(max_digits=18, decimal_places=6)
     total_actual_cost = models.DecimalField(max_digits=18, decimal_places=6)
+    # 每个字段记录“上一原始采样点到当前采样点”的额外等效成本。
+    # NULL 表示该区间尚未计算；0 表示已计算且没有 FAST 请求。
+    fast_correction_standard_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    fast_correction_actual_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    fast_correction_started_at = models.DateTimeField(null=True, blank=True)
+    # FAST 明细的区间请求总数；NULL 表示旧版本尚未保存，重建后可补齐。
+    fast_correction_request_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+    )
     delta_percent = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
     delta_cost = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     sample_usd_per_percent = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
@@ -342,6 +364,50 @@ class Sub2APIUserUsageSample(models.Model):
             models.Index(
                 fields=["sub2api_user_id", "observed_at"],
                 name="sub2api_user_usage_time",
+            )
+        ]
+
+
+class ObservationFastCorrection(models.Model):
+    """一个观测区间内，单个 Sub2API 用户的 FAST 等效成本修正。
+
+    记录按原始 Sub2API 用户 ID 保存，不依赖当时是否已经创建参与者。因此以后
+    才绑定的参与者也能在重放时获得完整的历史 FAST 修正。
+    """
+
+    observation = models.ForeignKey(
+        Observation,
+        on_delete=models.CASCADE,
+        related_name="fast_corrections",
+    )
+    sub2api_user_id = models.BigIntegerField(db_index=True)
+    fast_request_count = models.PositiveIntegerField(default=0)
+    # 该用户在区间内的全部请求数；FAST 与非 FAST 请求均计入。
+    # NULL 表示旧版本明细尚未通过修正重建补齐。
+    request_count = models.PositiveIntegerField(null=True, blank=True)
+    fast_standard_cost = models.DecimalField(max_digits=18, decimal_places=6)
+    fast_actual_cost = models.DecimalField(max_digits=18, decimal_places=6)
+    standard_correction_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+    )
+    actual_correction_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+    )
+
+    class Meta:
+        ordering = ["sub2api_user_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["observation", "sub2api_user_id"],
+                name="unique_observation_fast_user",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["sub2api_user_id", "observation"],
+                name="fast_correction_user_obs",
             )
         ]
 

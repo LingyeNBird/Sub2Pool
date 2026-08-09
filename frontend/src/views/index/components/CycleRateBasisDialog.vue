@@ -5,7 +5,12 @@ import CalculationBasisHeader from "@/components/common/CalculationBasisHeader.v
 import CalculationBasisTimeline from "@/components/common/CalculationBasisTimeline.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import type { DashboardData } from "@/types";
-import { formatCurrency, formatPercent } from "@/utils/formatters";
+import {
+  formatCostBreakdown,
+  formatCostTerms,
+  formatCurrency,
+  formatPercent,
+} from "@/utils/formatters";
 
 defineProps<{
   data: DashboardData;
@@ -52,21 +57,33 @@ defineExpose({ open, close });
         <CalculationBasisTimeline
           v-if="data.weekly_quota_model === 'constant_average'"
           :start-time="dateTime(data.cycle.starts_at)"
-          start-value="$0.00 / 0.00%"
+          :start-value="`${formatCostBreakdown(
+            0,
+            data.cycle.start_cost_breakdown,
+            data.fast_correction_enabled,
+          )} / ${formatPercent(0)}`"
           end-label="当前累计终点"
           :end-time="dateTime(data.cycle.observed_at)"
-          :end-value="`${formatCurrency(
+          :end-value="`${formatCostBreakdown(
             data.cycle.selected_total_cost,
+            data.cycle.selected_total_cost_breakdown,
+            data.fast_correction_enabled,
           )} / ${formatPercent(data.cycle.interval_used_percent)}`"
         />
         <CalculationBasisTimeline
           v-else-if="data.cycle.rate_samples[0]"
           :start-time="dateTime(data.cycle.starts_at)"
-          start-value="$0.00 / 0.00%"
+          :start-value="`${formatCostBreakdown(
+            0,
+            data.cycle.start_cost_breakdown,
+            data.fast_correction_enabled,
+          )} / ${formatPercent(0)}`"
           end-label="最近有效样本终点"
           :end-time="dateTime(data.cycle.rate_samples[0].observed_at)"
-          :end-value="`${formatCurrency(
+          :end-value="`${formatCostBreakdown(
             data.cycle.rate_samples[0].cost_usd,
+            data.cycle.rate_samples[0].cost_breakdown,
+            data.fast_correction_enabled,
           )} / ${formatPercent(data.cycle.rate_samples[0].used_percent)}`"
         />
         <div
@@ -79,8 +96,13 @@ defineExpose({ open, close });
           <p
             class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
           >
-            {{ formatCurrency(data.cycle.selected_total_cost) }} ÷
-            {{ formatPercent(data.cycle.interval_used_percent) }} =
+            ({{
+              formatCostTerms(
+                data.cycle.selected_total_cost,
+                data.cycle.selected_total_cost_breakdown,
+                data.fast_correction_enabled,
+              )
+            }}) ÷ {{ formatPercent(data.cycle.interval_used_percent) }} =
             {{ formatCurrency(data.cycle.effective_usd_per_percent) }} / 1%
           </p>
           <p class="mt-2 text-sm opacity-70">
@@ -97,8 +119,13 @@ defineExpose({ open, close });
           <p
             class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
           >
-            {{ formatCurrency(data.cycle.rate_samples[0].cost_usd) }} ÷
-            {{ formatPercent(data.cycle.rate_samples[0].used_percent) }} =
+            ({{
+              formatCostTerms(
+                data.cycle.rate_samples[0].cost_usd,
+                data.cycle.rate_samples[0].cost_breakdown,
+                data.fast_correction_enabled,
+              )
+            }}) ÷ {{ formatPercent(data.cycle.rate_samples[0].used_percent) }} =
             {{ formatCurrency(data.cycle.rate_samples[0].usd_per_percent) }} /
             1%
           </p>
@@ -131,7 +158,15 @@ defineExpose({ open, close });
                 :key="sample.observed_at"
               >
                 <td>{{ dateTime(sample.observed_at) }}</td>
-                <td>{{ formatCurrency(sample.cost_usd) }}</td>
+                <td>
+                  {{
+                    formatCostBreakdown(
+                      sample.cost_usd,
+                      sample.cost_breakdown,
+                      data.fast_correction_enabled,
+                    )
+                  }}
+                </td>
                 <td>{{ formatPercent(sample.used_percent) }}</td>
                 <td>{{ formatCurrency(sample.usd_per_percent) }}</td>
               </tr>

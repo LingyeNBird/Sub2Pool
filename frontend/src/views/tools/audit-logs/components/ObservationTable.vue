@@ -14,12 +14,14 @@ defineProps<{
   restoringId: number | null;
   manualStartId: number | null;
   rebuilding: boolean;
+  fastCorrectionEnabled: boolean;
 }>();
 
 const emit = defineEmits<{
   filter: [kind: ObservationFilterKind];
   detail: [row: Observation];
   costDetail: [row: Observation];
+  fastCorrectionDetail: [row: Observation];
   exclude: [row: Observation];
   restore: [row: Observation];
   manualStart: [row: Observation];
@@ -107,6 +109,7 @@ function sourceLabel(value: string) {
                 </th>
                 <th>上游已用</th>
                 <th>成本增量</th>
+                <th v-if="fastCorrectionEnabled">FAST 修正</th>
                 <th>百分比增量</th>
                 <th>累计样本美元 / 1%</th>
                 <th>采用值</th>
@@ -175,6 +178,17 @@ function sourceLabel(value: string) {
                   </button>
                   <span v-else>—</span>
                 </td>
+                <td v-if="fastCorrectionEnabled">
+                  <button
+                    v-if="row.fast_correction_calculated"
+                    type="button"
+                    class="link cursor-pointer font-medium tabular-nums link-hover"
+                    @click="emit('fastCorrectionDetail', row)"
+                  >
+                    {{ formatCurrency(row.fast_correction_usd) }}
+                  </button>
+                  <span v-else class="opacity-60">未计算</span>
+                </td>
                 <td>{{ formatPercent(row.delta_percent) }}</td>
                 <td>{{ formatCurrency(row.sample_usd_per_percent) }}</td>
                 <td class="font-semibold">
@@ -231,7 +245,10 @@ function sourceLabel(value: string) {
                 </td>
               </tr>
               <tr v-if="rows.length === 0">
-                <td colspan="9" class="py-8 text-center opacity-60">
+                <td
+                  :colspan="fastCorrectionEnabled ? 10 : 9"
+                  class="py-8 text-center opacity-60"
+                >
                   尚无观测记录
                 </td>
               </tr>

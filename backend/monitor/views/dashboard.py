@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from .base import AdminAPIView, error, ok
 from .presenters import (
+    FastCorrectionBreakdownPresenter,
     display_cycle_rates,
     display_recommendation,
     iso,
@@ -37,6 +38,10 @@ def _admin_url(value: str) -> str:
 class DashboardView(AdminAPIView):
     def get(self, _request):
         config = AppSettings.load()
+        cost_breakdowns = FastCorrectionBreakdownPresenter(
+            config,
+            config.openai_account_id,
+        )
         snapshot_stale = bool(
             config.last_upstream_check_at
             and timezone.now() - config.last_upstream_check_at
@@ -114,6 +119,7 @@ class DashboardView(AdminAPIView):
             "last_error": config.last_error,
             "quota_query_mode": config.quota_query_mode,
             "sub2api_admin_url": _admin_url(config.sub2api_base_url),
+            "fast_correction_enabled": config.fast_correction_enabled,
             "weekly_quota_model": config.weekly_quota_model,
             "cycle": None,
             "participants": [
@@ -148,6 +154,10 @@ class DashboardView(AdminAPIView):
                 "selected_total_cost": (
                     float(observation.selected_total_cost) if observation else None
                 ),
+                "selected_total_cost_breakdown": (
+                    cost_breakdowns.for_observation(observation)
+                ),
+                "start_cost_breakdown": cost_breakdowns.zero(),
                 "unattributed_used_percent": (
                     float(
                         max(
@@ -174,6 +184,7 @@ class DashboardView(AdminAPIView):
                     {
                         "observed_at": iso(row.observed_at),
                         "cost_usd": float(row.selected_total_cost),
+                        "cost_breakdown": cost_breakdowns.for_observation(row),
                         "used_percent": float(row.interval_used_percent),
                         "usd_per_percent": float(row.sample_usd_per_percent),
                     }

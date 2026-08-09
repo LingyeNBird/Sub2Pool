@@ -1,9 +1,14 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 
 import AllocationModelCard from "./components/AllocationModelCard.vue";
 import DatabaseTransferCard from "./components/DatabaseTransferCard.vue";
 import EmailServiceCard from "./components/EmailServiceCard.vue";
+import FastCorrectionCard from "./components/FastCorrectionCard.vue";
+import FastCorrectionRebuildDialog, {
+  type FastCorrectionRebuildScope,
+} from "./components/FastCorrectionRebuildDialog.vue";
 import LoginSecurityCard from "./components/LoginSecurityCard.vue";
 import NotificationRulesCard from "./components/NotificationRulesCard.vue";
 import SamplingStrategyCard from "./components/SamplingStrategyCard.vue";
@@ -24,18 +29,37 @@ const {
   loadingAccounts,
   exportingDatabase,
   importingDatabase,
+  rebuildingFastCorrection,
   passwordForm,
   loadOpenAIAccounts,
   saveConnection,
   saveAllocation,
   saveSampling,
   saveEmail,
+  saveFastCorrection,
+  rebuildFastCorrection,
   saveNotifications,
   exportDatabase,
   importDatabase,
   test,
   changePassword,
 } = useSettingsPage();
+
+const fastCorrectionDialog = ref<InstanceType<
+  typeof FastCorrectionRebuildDialog
+> | null>(null);
+
+async function handleFastCorrectionSave() {
+  if (await saveFastCorrection()) {
+    fastCorrectionDialog.value?.open(true);
+  }
+}
+
+async function handleFastCorrectionRebuild(scope: FastCorrectionRebuildScope) {
+  if (await rebuildFastCorrection(scope)) {
+    fastCorrectionDialog.value?.close();
+  }
+}
 </script>
 
 <template>
@@ -81,6 +105,13 @@ const {
       :saving="saving === 'allocation'"
       @save="saveAllocation"
     />
+    <FastCorrectionCard
+      v-model:settings="settings"
+      :saving="saving === 'fast-correction'"
+      :rebuilding="rebuildingFastCorrection"
+      @save="handleFastCorrectionSave"
+      @rebuild="fastCorrectionDialog?.open()"
+    />
     <SamplingStrategyCard
       v-model:settings="settings"
       :saving="saving === 'sampling'"
@@ -108,4 +139,9 @@ const {
     />
     <LoginSecurityCard v-model:form="passwordForm" @change="changePassword" />
   </div>
+  <FastCorrectionRebuildDialog
+    ref="fastCorrectionDialog"
+    :rebuilding="rebuildingFastCorrection"
+    @confirm="handleFastCorrectionRebuild"
+  />
 </template>

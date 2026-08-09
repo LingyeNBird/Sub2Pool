@@ -5,9 +5,17 @@ import CalculationBasisHeader from "@/components/common/CalculationBasisHeader.v
 import CalculationBasisTimeline from "@/components/common/CalculationBasisTimeline.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import type { CapacityPoint } from "@/types";
-import { formatCurrency, formatPercent } from "@/utils/formatters";
+import {
+  formatCostBreakdown,
+  formatCostTerms,
+  formatCurrency,
+  formatPercent,
+} from "@/utils/formatters";
 
 type BasisKind = "cycle" | "daily";
+defineProps<{
+  fastCorrectionEnabled: boolean;
+}>();
 
 const dialog = ref<HTMLDialogElement | null>(null);
 const point = ref<CapacityPoint | null>(null);
@@ -79,9 +87,17 @@ defineExpose({ open, close });
           :start-time="
             cycleBasis.starts_at ? dateTime(cycleBasis.starts_at) : '—'
           "
-          :start-value="`${formatCurrency(cycleBasis.start_cost_usd)} / ${formatPercent(cycleBasis.start_percent)}`"
+          :start-value="`${formatCostBreakdown(
+            cycleBasis.start_cost_usd,
+            cycleBasis.start_cost_breakdown,
+            fastCorrectionEnabled,
+          )} / ${formatPercent(cycleBasis.start_percent)}`"
           :end-time="dateTime(cycleBasis.observed_at)"
-          :end-value="`${formatCurrency(cycleBasis.end_cost_usd)} / ${formatPercent(cycleBasis.end_percent)}`"
+          :end-value="`${formatCostBreakdown(
+            cycleBasis.end_cost_usd,
+            cycleBasis.end_cost_breakdown,
+            fastCorrectionEnabled,
+          )} / ${formatPercent(cycleBasis.end_percent)}`"
         />
 
         <div class="mt-3 rounded-box border border-base-300 p-4">
@@ -92,11 +108,20 @@ defineExpose({ open, close });
             v-if="cycleBasis.raw_estimate_usd !== null"
             class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
           >
-            ({{ formatCurrency(cycleBasis.end_cost_usd) }} −
-            {{ formatCurrency(cycleBasis.start_cost_usd) }}) ÷ ({{
-              formatPercent(cycleBasis.end_percent)
-            }}
-            − {{ formatPercent(cycleBasis.start_percent) }}) × 100 =
+            (({{
+              formatCostTerms(
+                cycleBasis.end_cost_usd,
+                cycleBasis.end_cost_breakdown,
+                fastCorrectionEnabled,
+              )
+            }}) − ({{
+              formatCostTerms(
+                cycleBasis.start_cost_usd,
+                cycleBasis.start_cost_breakdown,
+                fastCorrectionEnabled,
+              )
+            }})) ÷ ({{ formatPercent(cycleBasis.end_percent) }} −
+            {{ formatPercent(cycleBasis.start_percent) }}) × 100 =
             {{ formatCurrency(cycleBasis.raw_estimate_usd) }}
           </p>
           <p v-else class="mt-2 text-center text-sm opacity-70">
@@ -135,7 +160,15 @@ defineExpose({ open, close });
                 :key="sample.observed_at"
               >
                 <td>{{ dateTime(sample.observed_at) }}</td>
-                <td>{{ formatCurrency(sample.cost_usd) }}</td>
+                <td>
+                  {{
+                    formatCostBreakdown(
+                      sample.cost_usd,
+                      sample.cost_breakdown,
+                      fastCorrectionEnabled,
+                    )
+                  }}
+                </td>
                 <td>{{ formatPercent(sample.used_percent) }}</td>
                 <td>{{ formatCurrency(sample.usd_per_percent) }}</td>
               </tr>
@@ -151,9 +184,17 @@ defineExpose({ open, close });
         />
         <CalculationBasisTimeline
           :start-time="dateTime(dailyBasis.observed_from)"
-          :start-value="`${formatCurrency(dailyBasis.start_cost_usd)} / ${formatPercent(dailyBasis.start_percent)}`"
+          :start-value="`${formatCostBreakdown(
+            dailyBasis.start_cost_usd,
+            dailyBasis.start_cost_breakdown,
+            fastCorrectionEnabled,
+          )} / ${formatPercent(dailyBasis.start_percent)}`"
           :end-time="dateTime(dailyBasis.observed_to)"
-          :end-value="`${formatCurrency(dailyBasis.end_cost_usd)} / ${formatPercent(dailyBasis.end_percent)}`"
+          :end-value="`${formatCostBreakdown(
+            dailyBasis.end_cost_usd,
+            dailyBasis.end_cost_breakdown,
+            fastCorrectionEnabled,
+          )} / ${formatPercent(dailyBasis.end_percent)}`"
         />
 
         <div class="mt-3 rounded-box border border-base-300 p-4">
@@ -163,11 +204,20 @@ defineExpose({ open, close });
           <p
             class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
           >
-            ({{ formatCurrency(dailyBasis.end_cost_usd) }} −
-            {{ formatCurrency(dailyBasis.start_cost_usd) }}) ÷ ({{
-              formatPercent(dailyBasis.end_percent)
-            }}
-            − {{ formatPercent(dailyBasis.start_percent) }}) × 100 =
+            (({{
+              formatCostTerms(
+                dailyBasis.end_cost_usd,
+                dailyBasis.end_cost_breakdown,
+                fastCorrectionEnabled,
+              )
+            }}) − ({{
+              formatCostTerms(
+                dailyBasis.start_cost_usd,
+                dailyBasis.start_cost_breakdown,
+                fastCorrectionEnabled,
+              )
+            }})) ÷ ({{ formatPercent(dailyBasis.end_percent) }} −
+            {{ formatPercent(dailyBasis.start_percent) }}) × 100 =
             {{ formatCurrency(dailyBasis.estimate_usd) }}
           </p>
           <p class="mt-3 text-sm opacity-70">

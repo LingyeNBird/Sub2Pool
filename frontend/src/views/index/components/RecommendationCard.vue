@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Participant } from "@/types";
-import { formatCurrency } from "@/utils/formatters";
+import { formatCurrency, formatCurrencyRange } from "@/utils/formatters";
 
 defineProps<{
   participant: Participant;
@@ -41,7 +41,13 @@ defineEmits<{
           <template v-if="participant.snapshot">
             建议把 Sub2API 用户余额设置为
             <strong class="text-2xl font-bold text-primary sm:text-3xl">
-              {{ formatCurrency(participant.snapshot.recommended_balance_usd) }}
+              {{
+                formatCurrencyRange(
+                  participant.snapshot.recommended_balance_min_usd,
+                  participant.snapshot.recommended_balance_max_usd,
+                  participant.snapshot.recommended_balance_usd,
+                )
+              }}
             </strong>
             。
           </template>

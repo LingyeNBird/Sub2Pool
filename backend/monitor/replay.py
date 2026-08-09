@@ -14,6 +14,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from .fast_correction import FastCorrectionPrefix
 
 from .models import (
     AppSettings,
@@ -27,7 +28,7 @@ ZERO = Decimal("0")
 CENT = Decimal("0.01")
 PCT_PRECISION = Decimal("0.00001")
 RATE_PRECISION = Decimal("0.000001")
-RATE_METHOD = "boundary_suffix_replay_v2"
+RATE_METHOD = "boundary_suffix_replay_v3"
 RESET_ROLLBACK_TOLERANCE = Decimal("0.1")
 RESET_TIME_TOLERANCE = timedelta(minutes=5)
 
@@ -109,8 +110,41 @@ def _participant_raw_costs(observation: Observation) -> dict[int, Decimal]:
         for snapshot in observation.participant_snapshots.all()
     }
 
+def _observed_baseline_segment(
+    observation: Observation,
+    *,
+    reason: str,
+    percent_baseline: Decimal,
+) -> ReplaySegment:
+    """复用“以真实观测建立基线”之后的全部区间初始化逻辑。"""
+
+    return ReplaySegment(
+        observations=[],
+        started_at=observation.observed_at,
+        first_observed_at=observation.observed_at,
+        resets_at=observation.upstream_resets_at,
+        reason=reason,
+        total_baseline=observation.raw_selected_total_cost,
+        participant_baselines=_participant_raw_costs(observation),
+        percent_baseline=percent_baseline,
+    )
+
 
 def _official_segment(observation: Observation) -> ReplaySegment:
+    """建立官方窗口区间，并优先采用首个 0% 观测的累计成本基线。
+
+    Sub2API 的聚合用量接口按自然日统计。官方窗口若在当天零点之后重置，
+    该接口会把零点至重置时刻的旧周期成本一并返回。首个 0% 观测是能够
+    直接确认的新周期零点，因此必须扣除它当时的累计成本；否则这段旧周期
+    成本会被错误折算进新周期容量。
+    """
+
+    if observation.upstream_used_percent == ZERO:
+        return _observed_baseline_segment(
+            observation,
+            reason="official_zero_observation",
+            percent_baseline=ZERO,
+        )
     return ReplaySegment(
         observations=[],
         started_at=_official_start(observation),
@@ -126,14 +160,9 @@ def _official_segment(observation: Observation) -> ReplaySegment:
 def _manual_start_segment(observation: Observation) -> ReplaySegment:
     """管理员起点以该观测的累计成本和百分比作为新的零基线。"""
 
-    return ReplaySegment(
-        observations=[],
-        started_at=observation.observed_at,
-        first_observed_at=observation.observed_at,
-        resets_at=observation.upstream_resets_at,
+    return _observed_baseline_segment(
+        observation,
         reason="manual_override",
-        total_baseline=observation.raw_selected_total_cost,
-        participant_baselines=_participant_raw_costs(observation),
         percent_baseline=observation.upstream_used_percent,
     )
 
@@ -305,6 +334,7 @@ def _replay_segment(
     *,
     previous_observation: Observation | None = None,
     rate_history_seed: list[tuple[Decimal, Decimal]] | None = None,
+    correction_prefix: FastCorrectionPrefix,
 ) -> tuple[int, Decimal | None]:
     previous = previous_observation
     previous_snapshots = (
@@ -322,7 +352,12 @@ def _replay_segment(
     for observation in segment.observations:
         selected_total = max(
             ZERO,
-            observation.raw_selected_total_cost - segment.total_baseline,
+            observation.raw_selected_total_cost
+            - segment.total_baseline
+            + correction_prefix.total_between(
+                segment.started_at,
+                observation,
+            ),
         )
         interval_percent = max(
             ZERO,
@@ -452,7 +487,13 @@ def _replay_segment(
             snapshot.selected_cost = max(
                 ZERO,
                 snapshot.raw_selected_cost
-                - segment.participant_baselines.get(snapshot.participant_id, ZERO),
+                - segment.participant_baselines.get(snapshot.participant_id, ZERO)
+                + correction_prefix.user_between(
+                    snapshot.participant.sub2api_user_id,
+                    segment.started_at,
+                    observation.observed_at,
+                    observation_id=observation.id,
+                ),
             )
             old = previous_snapshots.get(snapshot.participant_id)
             participant_deltas[snapshot.participant_id] = (
@@ -598,6 +639,7 @@ def _replay_usage_samples(
     account_id: int,
     segments: list[ReplaySegment],
     replay_from: datetime | None,
+    correction_prefix: FastCorrectionPrefix,
 ) -> None:
     if not segments:
         return
@@ -616,7 +658,12 @@ def _replay_usage_samples(
         sample.selected_cost = max(
             ZERO,
             sample.raw_selected_cost
-            - segment.participant_baselines.get(sample.participant_id, ZERO),
+            - segment.participant_baselines.get(sample.participant_id, ZERO)
+            + correction_prefix.user_between(
+                sample.participant.sub2api_user_id,
+                segment.started_at,
+                sample.observed_at,
+            ),
         )
     if samples:
         ParticipantUsageSample.objects.bulk_update(
@@ -823,16 +870,23 @@ def rebuild_account(
             ],
         )
 
+    correction_prefix = FastCorrectionPrefix(account_id, config.cost_basis)
     rebuilt = 0
     for segment in segments:
         count, fallback_rate = _replay_segment(
             segment,
             config,
             fallback_rate,
+            correction_prefix=correction_prefix,
         )
         rebuilt += count
 
-    _replay_usage_samples(account_id, segments, replay_from)
+    _replay_usage_samples(
+        account_id,
+        segments,
+        replay_from,
+        correction_prefix,
+    )
     _update_participant_latest(account_id)
     latest = (
         Observation.objects.filter(
@@ -866,19 +920,30 @@ def _append_segment(
             observation.upstream_resets_at,
         )
     ):
-        manual_start = (
+        anchor = (
             Observation.objects.filter(
                 account_id=observation.account_id,
                 observed_at=previous.attribution_started_at,
-                is_manual_start=True,
                 excluded_at__isnull=True,
             )
+            .filter(
+                Q(is_manual_start=True)
+                | Q(upstream_used_percent=ZERO)
+            )
             .prefetch_related("participant_snapshots__participant")
-            .order_by("-id")
+            .order_by("-is_manual_start", "id")
             .first()
         )
-        if manual_start is not None:
-            segment = _manual_start_segment(manual_start)
+        if anchor is not None and anchor.is_manual_start:
+            segment = _manual_start_segment(anchor)
+        elif (
+            anchor is not None
+            and _same_official_reset(
+                anchor.upstream_resets_at,
+                observation.upstream_resets_at,
+            )
+        ):
+            segment = _official_segment(anchor)
         else:
             segment = _official_segment(observation)
             segment.started_at = previous.attribution_started_at
@@ -1022,17 +1087,23 @@ def rebuild_observation_suffix(
         seed_previous,
         max(0, config.rate_history_samples - 1),
     )
+    correction_prefix = FastCorrectionPrefix(
+        observation.account_id,
+        config.cost_basis,
+    )
     rebuilt, _latest_rate = _replay_segment(
         segment,
         config,
         fallback_rate,
         previous_observation=seed_previous,
         rate_history_seed=rate_history,
+        correction_prefix=correction_prefix,
     )
     _replay_usage_samples(
         observation.account_id,
         [segment],
         observation.observed_at,
+        correction_prefix,
     )
     _update_participant_latest(observation.account_id)
     return ReplayResult(

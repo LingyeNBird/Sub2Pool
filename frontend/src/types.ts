@@ -8,6 +8,8 @@ export interface Snapshot {
   remaining_share_percent: number;
   current_balance_usd: number | null;
   recommended_balance_usd: number | null;
+  recommended_balance_min_usd: number | null;
+  recommended_balance_max_usd: number | null;
   balance_difference_usd: number | null;
   needs_manual_update: boolean;
   recommendation_applied: boolean;
@@ -63,10 +65,16 @@ export interface SystemUser {
   last_login: string | null;
   date_joined: string;
 }
+export interface CostBreakdown {
+  sub2api_cost_usd: number;
+  fast_correction_usd: number;
+  total_cost_usd: number;
+}
 
 export interface RateSample {
   observed_at: string;
   cost_usd: number;
+  cost_breakdown: CostBreakdown;
   used_percent: number;
   usd_per_percent: number;
 }
@@ -79,6 +87,7 @@ export interface DashboardData {
   last_success_at: string | null;
   last_error: string;
   sub2api_admin_url: string;
+  fast_correction_enabled: boolean;
   quota_query_mode: string;
   weekly_quota_model: "time_varying" | "constant_average";
   needs_manual_update_count: number;
@@ -91,6 +100,8 @@ export interface DashboardData {
     interval_used_percent: number;
     effective_usd_per_percent: number | null;
     selected_total_cost: number | null;
+    selected_total_cost_breakdown: CostBreakdown;
+    start_cost_breakdown: CostBreakdown;
     unattributed_used_percent: number | null;
     sample_note: string;
     snapshot_sampled_at: string | null;
@@ -118,6 +129,8 @@ export interface Observation {
   delta_cost: number | null;
   sample_usd_per_percent: number | null;
   effective_usd_per_percent: number;
+  fast_correction_usd: number | null;
+  fast_correction_calculated: boolean;
   valid_sample: boolean;
   sample_note: string;
   rate_method: string;
@@ -133,12 +146,55 @@ export interface Observation {
   manual_start_set_at: string | null;
 }
 
+export interface FastCorrectionUserDetail {
+  sub2api_user_id: number;
+  username: string;
+  email: string;
+  display_name: string;
+  request_count: number | null;
+  fast_request_count: number;
+  non_fast_request_count: number | null;
+  fast_billed_cost_usd: number;
+  correction_usd: number;
+  corrected_fast_cost_usd: number;
+}
+
+export interface FastCorrectionDetail {
+  observation_id: number;
+  started_at: string | null;
+  ended_at: string;
+  calculated: boolean;
+  cost_basis: "actual" | "standard";
+  cost_basis_label: string;
+  request_count: number | null;
+  fast_request_count: number;
+  non_fast_request_count: number | null;
+  fast_billed_cost_usd: number;
+  correction_usd: number;
+  corrected_fast_cost_usd: number;
+  sub2api_fast_multiplier: number;
+  upstream_fast_multiplier: number;
+  correction_ratio: number;
+  collection_error: string;
+  users: FastCorrectionUserDetail[];
+}
+
 export interface ObservationRebuildResult {
   rebuilt_observations: number;
   automatic_exclusions: number;
   inferred_intervals: number;
   latest_observation_id: number | null;
   replay_started_at: string | null;
+}
+
+export interface FastCorrectionRebuildResult {
+  scope: "cycle" | "all";
+  rebuilt_observations: number;
+  request_count: number;
+  fast_request_count: number;
+  correction_usd: number;
+  replay_started_at: string | null;
+  replayed_observations: number;
 }
 
 export interface MonitorSchedule {
@@ -185,6 +241,7 @@ export interface LoginEventData extends PaginatedData<LoginEventRecord> {
 }
 
 export interface ObservationListData extends PaginatedData<Observation> {
+  fast_correction_enabled: boolean;
   summary: {
     total: number;
     valid_count: number;
@@ -228,8 +285,10 @@ export interface CapacityClosingBasis {
   starts_at: string | null;
   start_cost_usd: number;
   start_percent: number;
+  start_cost_breakdown: CostBreakdown;
   end_cost_usd: number;
   end_percent: number;
+  end_cost_breakdown: CostBreakdown;
   raw_estimate_usd: number | null;
   estimate_usd: number;
   effective_usd_per_percent: number;
@@ -246,8 +305,10 @@ export interface CapacityDailyClosingBasis {
   observed_from: string;
   observed_to: string;
   start_cost_usd: number;
+  start_cost_breakdown: CostBreakdown;
   start_percent: number;
   end_cost_usd: number;
+  end_cost_breakdown: CostBreakdown;
   end_percent: number;
   cost_delta_usd: number;
   percent_delta: number;
@@ -273,8 +334,10 @@ export interface CycleCapacityEstimate {
   estimate_usd: number;
   raw_estimate_usd: number | null;
   start_cost_usd: number;
+  start_cost_breakdown: CostBreakdown;
   start_percent: number;
   end_cost_usd: number;
+  end_cost_breakdown: CostBreakdown;
   end_percent: number;
   cost_usd: number;
   used_percent: number;
@@ -296,8 +359,10 @@ export interface DailyCapacityEstimate {
   minimum_usd: number | null;
   maximum_usd: number | null;
   start_cost_usd: number | null;
+  start_cost_breakdown: CostBreakdown | null;
   start_percent: number | null;
   end_cost_usd: number | null;
+  end_cost_breakdown: CostBreakdown | null;
   end_percent: number | null;
   cost_delta_usd: number | null;
   percent_delta: number | null;
@@ -331,6 +396,7 @@ export interface ParticipantUsageSeries {
 export interface StatisticsData {
   capacity_period: "day" | "month";
   capacity_series: CapacityPoint[];
+  fast_correction_enabled: boolean;
   capacity_summary: CapacitySummary;
   usage_days: number;
   usage_precision: "raw" | "hour" | "day";
@@ -357,6 +423,9 @@ export interface AppSettingsData {
   timezone: string;
   cost_basis: string;
   weekly_quota_model: "time_varying" | "constant_average";
+  fast_correction_enabled: boolean;
+  fast_correction_rebuild_recommended: boolean;
+  fast_correction_missing_intervals: number;
   initial_usd_per_percent: number;
   safety_factor: number;
   conservative_percentile: number;

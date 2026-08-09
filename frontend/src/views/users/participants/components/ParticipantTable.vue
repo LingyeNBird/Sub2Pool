@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import type { Participant } from "@/types";
-import { formatCurrency, formatPercent } from "@/utils/formatters";
+import {
+  formatCurrency,
+  formatCurrencyRange,
+  formatPercent,
+} from "@/utils/formatters";
 
 const props = defineProps<{
   participants: Participant[];
@@ -54,7 +58,13 @@ defineEmits<{
           <td>{{ formatCurrency(participant.latest_selected_cost) }}</td>
           <td>{{ formatCurrency(participant.latest_balance_usd) }}</td>
           <td class="font-semibold">
-            {{ formatCurrency(participant.snapshot?.recommended_balance_usd) }}
+            {{
+              formatCurrencyRange(
+                participant.snapshot?.recommended_balance_min_usd,
+                participant.snapshot?.recommended_balance_max_usd,
+                participant.snapshot?.recommended_balance_usd,
+              )
+            }}
           </td>
           <td>
             <span

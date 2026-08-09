@@ -5,7 +5,12 @@ import CalculationBasisHeader from "@/components/common/CalculationBasisHeader.v
 import CalculationBasisTimeline from "@/components/common/CalculationBasisTimeline.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import type { StatisticsData } from "@/types";
-import { formatCurrency, formatPercent } from "@/utils/formatters";
+import {
+  formatCostBreakdown,
+  formatCostTerms,
+  formatCurrency,
+  formatPercent,
+} from "@/utils/formatters";
 
 defineProps<{
   data: StatisticsData;
@@ -54,12 +59,16 @@ defineExpose({ open, close });
         />
         <CalculationBasisTimeline
           :start-time="dateTime(data.capacity_summary.cycle.starts_at)"
-          :start-value="`${formatCurrency(
+          :start-value="`${formatCostBreakdown(
             data.capacity_summary.cycle.start_cost_usd,
+            data.capacity_summary.cycle.start_cost_breakdown,
+            data.fast_correction_enabled,
           )} / ${formatPercent(data.capacity_summary.cycle.start_percent)}`"
           :end-time="dateTime(data.capacity_summary.cycle.observed_at)"
-          :end-value="`${formatCurrency(
+          :end-value="`${formatCostBreakdown(
             data.capacity_summary.cycle.end_cost_usd,
+            data.capacity_summary.cycle.end_cost_breakdown,
+            data.fast_correction_enabled,
           )} / ${formatPercent(data.capacity_summary.cycle.end_percent)}`"
         />
         <div class="mt-3 rounded-box border border-base-300 p-4">
@@ -74,10 +83,22 @@ defineExpose({ open, close });
           <p
             class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
           >
-            ({{ formatCurrency(data.capacity_summary.cycle.end_cost_usd) }} −
-            {{ formatCurrency(data.capacity_summary.cycle.start_cost_usd) }}) ÷
-            ({{ formatPercent(data.capacity_summary.cycle.end_percent) }} −
-            {{ formatPercent(data.capacity_summary.cycle.start_percent) }}) ×
+            (({{
+              formatCostTerms(
+                data.capacity_summary.cycle.end_cost_usd,
+                data.capacity_summary.cycle.end_cost_breakdown,
+                data.fast_correction_enabled,
+              )
+            }}) − ({{
+              formatCostTerms(
+                data.capacity_summary.cycle.start_cost_usd,
+                data.capacity_summary.cycle.start_cost_breakdown,
+                data.fast_correction_enabled,
+              )
+            }})) ÷ ({{
+              formatPercent(data.capacity_summary.cycle.end_percent)
+            }}
+            − {{ formatPercent(data.capacity_summary.cycle.start_percent) }}) ×
             100 =
             {{ formatCurrency(data.capacity_summary.cycle.raw_estimate_usd) }}
           </p>
@@ -138,7 +159,15 @@ defineExpose({ open, close });
                 :key="sample.observed_at"
               >
                 <td>{{ dateTime(sample.observed_at) }}</td>
-                <td>{{ formatCurrency(sample.cost_usd) }}</td>
+                <td>
+                  {{
+                    formatCostBreakdown(
+                      sample.cost_usd,
+                      sample.cost_breakdown,
+                      data.fast_correction_enabled,
+                    )
+                  }}
+                </td>
                 <td>{{ formatPercent(sample.used_percent) }}</td>
                 <td>{{ formatCurrency(sample.usd_per_percent) }}</td>
               </tr>
@@ -158,12 +187,16 @@ defineExpose({ open, close });
         />
         <CalculationBasisTimeline
           :start-time="dateTime(data.capacity_summary.today.observed_from)"
-          :start-value="`${formatCurrency(
+          :start-value="`${formatCostBreakdown(
             data.capacity_summary.today.start_cost_usd,
+            data.capacity_summary.today.start_cost_breakdown,
+            data.fast_correction_enabled,
           )} / ${formatPercent(data.capacity_summary.today.start_percent)}`"
           :end-time="dateTime(data.capacity_summary.today.observed_to)"
-          :end-value="`${formatCurrency(
+          :end-value="`${formatCostBreakdown(
             data.capacity_summary.today.end_cost_usd,
+            data.capacity_summary.today.end_cost_breakdown,
+            data.fast_correction_enabled,
           )} / ${formatPercent(data.capacity_summary.today.end_percent)}`"
         />
         <div class="mt-3 rounded-box border border-base-300 p-4">
@@ -173,10 +206,22 @@ defineExpose({ open, close });
           <p
             class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
           >
-            ({{ formatCurrency(data.capacity_summary.today.end_cost_usd) }} −
-            {{ formatCurrency(data.capacity_summary.today.start_cost_usd) }}) ÷
-            ({{ formatPercent(data.capacity_summary.today.end_percent) }} −
-            {{ formatPercent(data.capacity_summary.today.start_percent) }}) ×
+            (({{
+              formatCostTerms(
+                data.capacity_summary.today.end_cost_usd,
+                data.capacity_summary.today.end_cost_breakdown,
+                data.fast_correction_enabled,
+              )
+            }}) − ({{
+              formatCostTerms(
+                data.capacity_summary.today.start_cost_usd,
+                data.capacity_summary.today.start_cost_breakdown,
+                data.fast_correction_enabled,
+              )
+            }})) ÷ ({{
+              formatPercent(data.capacity_summary.today.end_percent)
+            }}
+            − {{ formatPercent(data.capacity_summary.today.start_percent) }}) ×
             100 = {{ formatCurrency(data.capacity_summary.today.estimate_usd) }}
           </p>
           <p class="mt-2 text-sm opacity-70">
