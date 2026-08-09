@@ -8,11 +8,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from .accounting.attribution import apply_participant_attribution
 from .accounting.boundaries import (
     RATE_METHOD,
     RESET_ROLLBACK_TOLERANCE,
@@ -32,13 +33,10 @@ from .models import (
     AppSettings,
     Observation,
     Participant,
-    ParticipantSnapshot,
     ParticipantUsageSample,
 )
 
 ZERO = Decimal("0")
-CENT = Decimal("0.01")
-PCT_PRECISION = Decimal("0.00001")
 
 
 
@@ -122,15 +120,23 @@ def _replay_segment(
             valid_sample=valid_sample,
             rate_source=rate_source,
         )
-        snapshots = list(observation.participant_snapshots.all())
-        current_participant_ids = {
-            snapshot.participant_id for snapshot in snapshots
-        }
-        previous_participant_ids = set(previous_snapshots)
-        participant_roster_changed = bool(
-            previous is not None
-            and current_participant_ids != previous_participant_ids
+        attribution = apply_participant_attribution(
+            observation=observation,
+            previous_snapshots=previous_snapshots,
+            has_previous=previous is not None,
+            segment=segment,
+            correction_prefix=correction_prefix,
+            selected_total=selected_total,
+            interval_percent=interval_percent,
+            delta_percent=delta_percent,
+            delta_cost=delta_cost,
+            valid_sample=valid_sample,
+            effective_rate=effective_rate,
+            config=config,
         )
+        snapshots = attribution.snapshots
+        current_participant_ids = attribution.participant_ids
+        participant_roster_changed = attribution.roster_changed
         raw_window = dict(observation.raw_window)
         raw_window.pop("reset_candidate_status", None)
         raw_window.pop("previous_observation_id", None)
@@ -174,148 +180,6 @@ def _replay_segment(
             has_valid_rate = True
             rate_history.append((sample_rate, interval_percent))
 
-        participant_deltas: dict[int, Decimal | None] = {}
-        for snapshot in snapshots:
-            snapshot.selected_cost = max(
-                ZERO,
-                snapshot.raw_selected_cost
-                - segment.participant_baselines.get(snapshot.participant_id, ZERO)
-                + correction_prefix.user_between(
-                    snapshot.participant.sub2api_user_id,
-                    segment.started_at,
-                    observation.observed_at,
-                    observation_id=observation.id,
-                ),
-            )
-            old = previous_snapshots.get(snapshot.participant_id)
-            participant_deltas[snapshot.participant_id] = (
-                snapshot.selected_cost - old.selected_cost
-                if old is not None
-                else None
-            )
-
-        if participant_roster_changed:
-            # 参与者中途加入或退出时，旧观测没有完整的逐用户快照，不能把
-            # 新参与者的整周期累计成本误当成“本次增量”。使用当前整周期
-            # 累计成本重新分摊当前已用百分比，之后再恢复逐观测增量归属。
-            participant_weights = {
-                snapshot.participant_id: max(ZERO, snapshot.selected_cost)
-                for snapshot in snapshots
-            }
-            attribution_total = selected_total
-        else:
-            participant_weights = {
-                snapshot.participant_id: max(
-                    ZERO,
-                    (
-                        snapshot.selected_cost
-                        if previous is None
-                        else (
-                            participant_deltas[snapshot.participant_id]
-                            or ZERO
-                        )
-                    ),
-                )
-                for snapshot in snapshots
-            }
-            attribution_total = (
-                selected_total
-                if previous is None
-                else max(ZERO, delta_cost or ZERO)
-            )
-        positive_total = sum(participant_weights.values(), ZERO)
-        denominator = max(attribution_total, positive_total)
-
-        for snapshot in snapshots:
-            old = previous_snapshots.get(snapshot.participant_id)
-            participant_delta = participant_deltas[snapshot.participant_id]
-            positive_delta = participant_weights[snapshot.participant_id]
-            old_charged = (
-                old.charged_cycle_percent if old is not None else ZERO
-            )
-            if participant_roster_changed:
-                charged = (
-                    interval_percent * positive_delta / denominator
-                    if denominator > 0
-                    else ZERO
-                )
-                charged_delta = charged - old_charged
-            else:
-                charged_delta = ZERO
-                if denominator > 0:
-                    if previous is None:
-                        charged_delta = (
-                            interval_percent * positive_delta / denominator
-                        )
-                    elif valid_sample and delta_percent is not None:
-                        charged_delta = (
-                            delta_percent * positive_delta / denominator
-                        )
-                charged = max(ZERO, old_charged + charged_delta)
-            remaining = max(
-                ZERO,
-                snapshot.participant.share_percent - charged,
-            )
-            recommended = (
-                remaining * effective_rate * config.safety_factor
-            ).quantize(CENT, rounding=ROUND_HALF_UP)
-            balance = snapshot.current_balance_usd
-            difference = (
-                (recommended - balance).quantize(CENT, rounding=ROUND_HALF_UP)
-                if balance is not None
-                else None
-            )
-            exhausted = bool(
-                balance is not None and balance <= config.limit_warning_usd
-            )
-            needs_update = bool(
-                difference is not None
-                and (
-                    abs(difference) >= config.recommendation_change_usd
-                    or (exhausted and remaining > 0)
-                )
-            )
-            if remaining <= 0:
-                reason = "本上游周期的百分比权益已用尽"
-            elif exhausted:
-                reason = "当前 Sub2API 用户余额接近耗尽，但仍有百分比权益"
-            elif needs_update:
-                reason = "当前用户余额与最新测算建议差异较大"
-            else:
-                reason = "当前用户余额无需调整"
-
-            snapshot.delta_cost = participant_delta
-            snapshot.charged_delta_percent = charged_delta.quantize(
-                PCT_PRECISION,
-                rounding=ROUND_HALF_UP,
-            )
-            snapshot.charged_cycle_percent = charged.quantize(
-                PCT_PRECISION,
-                rounding=ROUND_HALF_UP,
-            )
-            snapshot.remaining_share_percent = remaining.quantize(
-                PCT_PRECISION,
-                rounding=ROUND_HALF_UP,
-            )
-            snapshot.recommended_balance_usd = recommended
-            snapshot.balance_difference_usd = difference
-            snapshot.needs_manual_update = needs_update
-            snapshot.reason = reason
-        if snapshots:
-            ParticipantSnapshot.objects.bulk_update(
-                snapshots,
-                [
-                    "selected_cost",
-                    "delta_cost",
-                    "charged_delta_percent",
-                    "charged_cycle_percent",
-                    "remaining_share_percent",
-                    "recommended_balance_usd",
-                    "balance_difference_usd",
-                    "needs_manual_update",
-                    "reason",
-                ],
-            )
         previous = observation
         previous_snapshots = {
             snapshot.participant_id: snapshot for snapshot in snapshots
