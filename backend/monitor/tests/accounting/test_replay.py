@@ -109,9 +109,13 @@ def test_integer_percent_plateau_uses_cumulative_cost_for_capacity(monkeypatch):
     assert observations[1].sample_usd_per_percent == Decimal("26.972384")
     assert observations[2].delta_cost == Decimal("6.873233")
     assert observations[2].sample_usd_per_percent == Decimal("25.790081")
-    assert Decimal("14") <= observations[2].effective_usd_per_percent <= Decimal(
-        "21"
+    assert Decimal("10") <= observations[2].effective_usd_per_percent <= Decimal(
+        "35"
     )
+    assert abs(
+        observations[2].effective_usd_per_percent
+        - observations[2].sample_usd_per_percent
+    ) < Decimal("5")
     assert observations[2].selected_total_cost == cost_values[-1]
     assert observations[2].raw_window["rate_method"] == RATE_METHOD
 
@@ -411,8 +415,8 @@ def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
     }
     owner_snapshot = snapshots[owner.id]
     rider_snapshot = snapshots[rider.id]
-    assert Decimal("4.75") <= owner_snapshot.charged_cycle_percent <= Decimal(
-        "7.15"
+    assert Decimal("9") <= owner_snapshot.charged_cycle_percent <= Decimal(
+        "11"
     )
     assert (
         owner_snapshot.charged_percent_lower

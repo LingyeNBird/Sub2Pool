@@ -78,6 +78,18 @@ class DashboardView(AdminAPIView):
             Decimal("0"),
         )
         unattributed_used_percent = Decimal("0")
+        presented_estimated_percent = (
+            observation.interval_used_percent
+            if (
+                observation is not None
+                and config.weekly_quota_model == "constant_average"
+            )
+            else (
+                observation.estimated_used_percent
+                if observation is not None
+                else Decimal("0")
+            )
+        )
         if observation is not None:
             residual_attribution = observation.model_diagnostics.get(
                 "residual_attributed_percent"
@@ -92,7 +104,7 @@ class DashboardView(AdminAPIView):
             else:
                 unattributed_used_percent = max(
                     Decimal("0"),
-                    observation.estimated_used_percent - total_charged,
+                    presented_estimated_percent - total_charged,
                 )
         data = {
             "configured": bool(
@@ -158,7 +170,7 @@ class DashboardView(AdminAPIView):
                     else bool(observation.model_diagnostics)
                 ),
                 "estimated_used_percent": float(
-                    observation.estimated_used_percent
+                    presented_estimated_percent
                 ),
                 "capacity_lower_usd": (
                     float(observation.capacity_lower_usd)

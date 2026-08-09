@@ -145,3 +145,63 @@ def run_deterministic_bounds(
         balance_upper_usd=balance_upper,
         infeasible_repairs=infeasible_repairs,
     )
+
+def project_attribution_to_bounds(
+    point_estimate: np.ndarray,
+    bounds: DeterministicBoundsOutput,
+) -> tuple[np.ndarray, int, float]:
+    """把概率点估计投影到逐主体与总进度的确定性可行外包络。"""
+
+    if point_estimate.shape != bounds.attributed_percent_lower.shape:
+        raise ValueError("归属点估计与确定性边界形状不一致")
+    projected = np.empty_like(point_estimate, dtype=float)
+    repaired_rows = 0
+    max_adjustment = 0.0
+    for row in range(len(point_estimate)):
+        lower = bounds.attributed_percent_lower[row]
+        if row:
+            # 归属是周期累计量；逐行投影也必须保留时间单调性。
+            lower = np.maximum(lower, projected[row - 1])
+        upper = bounds.attributed_percent_upper[row]
+        estimate = point_estimate[row]
+        feasible_total_lower = max(
+            float(bounds.total_percent_lower[row]),
+            float(lower.sum()),
+        )
+        feasible_total_upper = min(
+            float(bounds.total_percent_upper[row]),
+            float(upper.sum()),
+        )
+        if feasible_total_lower > feasible_total_upper:
+            feasible_total_lower = float(lower.sum())
+            feasible_total_upper = float(upper.sum())
+        target_total = float(
+            np.clip(
+                estimate.sum(),
+                feasible_total_lower,
+                feasible_total_upper,
+            )
+        )
+
+        # 欧氏投影到 box 与固定总和的交集：
+        # x_i = clip(estimate_i + λ, lower_i, upper_i)。
+        lambda_lower = float(np.min(lower - estimate)) - 1.0
+        lambda_upper = float(np.max(upper - estimate)) + 1.0
+        for _ in range(80):
+            midpoint = 0.5 * (lambda_lower + lambda_upper)
+            candidate = np.clip(estimate + midpoint, lower, upper)
+            if float(candidate.sum()) < target_total:
+                lambda_lower = midpoint
+            else:
+                lambda_upper = midpoint
+        candidate = np.clip(
+            estimate + 0.5 * (lambda_lower + lambda_upper),
+            lower,
+            upper,
+        )
+        projected[row] = candidate
+        row_adjustment = float(np.max(np.abs(candidate - estimate)))
+        if row_adjustment > 1e-8:
+            repaired_rows += 1
+            max_adjustment = max(max_adjustment, row_adjustment)
+    return projected, repaired_rows, max_adjustment

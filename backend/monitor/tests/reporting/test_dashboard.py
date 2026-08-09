@@ -196,6 +196,8 @@ def test_constant_average_model_changes_only_presented_attribution():
     assert dashboard["cycle"]["effective_usd_per_percent"] == 20.0
     assert dashboard["cycle"]["interval_used_percent"] == 20.0
     assert dashboard["cycle"]["rate_calculated"] is True
+    assert dashboard["cycle"]["estimated_used_percent"] == 20.0
+    assert dashboard["cycle"]["unattributed_used_percent"] == 15.0
     assert dashboard["participants"][0]["snapshot"][
         "recommended_balance_usd"
     ] == 834.55

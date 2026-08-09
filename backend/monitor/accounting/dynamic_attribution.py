@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
+import numpy as np
 
 from .contracts import ReplaySegment
-from .deterministic_bounds import run_deterministic_bounds
+from .deterministic_bounds import (
+    project_attribution_to_bounds,
+    run_deterministic_bounds,
+)
 from .model_inputs import (
     ALGORITHM_VERSION,
     build_dynamic_replay_input,
@@ -32,6 +36,9 @@ def _diagnostics(
     seed: int,
     particle,
     bounds,
+    projected_attribution,
+    projection_repaired_rows: int,
+    projection_max_adjustment_pp: float,
     residual_cost: Decimal,
     residual_subject: int,
     aggregate_cost_difference: Decimal,
@@ -40,6 +47,28 @@ def _diagnostics(
     total_cost_monotonic_repair: Decimal,
     filter_config: ParticleFilterConfig,
 ) -> dict:
+    progress_lower = max(
+        float(particle.total_percent_lower[row]),
+        float(bounds.total_percent_lower[row]),
+    )
+    progress_upper = min(
+        float(particle.total_percent_upper[row]),
+        float(bounds.total_percent_upper[row]),
+    )
+    progress_interval_fallback = progress_lower > progress_upper
+    if progress_interval_fallback:
+        progress_lower = float(bounds.total_percent_lower[row])
+        progress_upper = float(bounds.total_percent_upper[row])
+    projected_total = float(projected_attribution[row].sum())
+    progress_lower = max(
+        float(bounds.total_percent_lower[row]),
+        min(progress_lower, projected_total),
+    )
+    progress_upper = min(
+        float(bounds.total_percent_upper[row]),
+        max(progress_upper, projected_total),
+    )
+
     return {
         "algorithm": ALGORITHM_VERSION,
         "seed": seed,
@@ -57,10 +86,15 @@ def _diagnostics(
         },
         "ess_fraction": round(float(particle.ess_fraction[row]), 8),
         "resampled": bool(particle.resampled[row]),
-        "progress_probability_interval": [
+        "raw_progress_probability_interval": [
             round(float(particle.total_percent_lower[row]), 5),
             round(float(particle.total_percent_upper[row]), 5),
         ],
+        "progress_probability_interval": [
+            round(progress_lower, 5),
+            round(progress_upper, 5),
+        ],
+        "progress_interval_fallback": progress_interval_fallback,
         "progress_deterministic_bounds": [
             round(float(bounds.total_percent_lower[row]), 5),
             round(float(bounds.total_percent_upper[row]), 5),
@@ -68,7 +102,7 @@ def _diagnostics(
         "deterministic_repairs": bounds.infeasible_repairs,
         "residual_cost_usd": float(residual_cost),
         "residual_attributed_percent": round(
-            float(particle.attributed_percent_hat[row, residual_subject]),
+            float(projected_attribution[row, residual_subject]),
             5,
         ),
         "residual_attributed_interval": [
@@ -92,6 +126,27 @@ def _diagnostics(
         "cost_monotonic_repair_subjects": cost_monotonic_repair_subjects,
         "total_cost_monotonic_repair_usd": float(
             total_cost_monotonic_repair
+        ),
+        "attribution_projection_applied": bool(
+            np.max(
+                np.abs(
+                    projected_attribution[row]
+                    - particle.attributed_percent_hat[row]
+                )
+            )
+            > 1e-8
+        ),
+        "projection_repaired_rows": projection_repaired_rows,
+        "projection_max_adjustment_pp": round(
+            projection_max_adjustment_pp,
+            5,
+        ),
+        "capacity_range_usd": [
+            filter_config.capacity_min_usd,
+            filter_config.capacity_max_usd,
+        ],
+        "balance_interval_inflation": (
+            filter_config.balance_interval_inflation
         ),
         "prior_capacity_usd": filter_config.initial_capacity_usd,
     }
@@ -127,6 +182,24 @@ def replay_dynamic_segment(
         config=filter_config,
     )
     bounds = run_deterministic_bounds(replay_input.model_input)
+    (
+        projected_attribution,
+        projection_repaired_rows,
+        projection_max_adjustment_pp,
+    ) = project_attribution_to_bounds(
+        particle.attributed_percent_hat,
+        bounds,
+    )
+    projected_total = projected_attribution.sum(axis=1)
+    projected_balance = (
+        np.maximum(
+            replay_input.model_input.rights_percent[None, :]
+            - projected_attribution,
+            0.0,
+        )
+        * particle.capacity_hat_usd[:, None]
+        / 100.0
+    )
 
     previous_observation: Observation | None = None
     previous_snapshots: dict[int, ParticipantSnapshot] = {}
@@ -172,7 +245,7 @@ def replay_dynamic_segment(
         )
         observation.effective_usd_per_percent = effective_rate
         observation.estimated_used_percent = _decimal(
-            particle.total_percent_hat[row],
+            projected_total[row],
             PERCENT_PRECISION,
         )
         observation.capacity_lower_usd = _decimal(
@@ -194,6 +267,9 @@ def replay_dynamic_segment(
             seed=seed,
             particle=particle,
             bounds=bounds,
+            projected_attribution=projected_attribution,
+            projection_repaired_rows=projection_repaired_rows,
+            projection_max_adjustment_pp=projection_max_adjustment_pp,
             residual_cost=replay_input.residual_costs[observation_index],
             residual_subject=len(replay_input.subject_user_ids) - 1,
             aggregate_cost_difference=(
@@ -251,19 +327,36 @@ def replay_dynamic_segment(
                 RATE_PRECISION,
             )
             charged = _decimal(
-                particle.attributed_percent_hat[row, subject],
+                projected_attribution[row, subject],
                 PERCENT_PRECISION,
             )
+            charged_lower_value = max(
+                float(particle.attributed_percent_lower[row, subject]),
+                float(bounds.attributed_percent_lower[row, subject]),
+            )
+            charged_upper_value = min(
+                float(particle.attributed_percent_upper[row, subject]),
+                float(bounds.attributed_percent_upper[row, subject]),
+            )
+            if charged_lower_value > charged_upper_value:
+                charged_lower_value = float(
+                    bounds.attributed_percent_lower[row, subject]
+                )
+                charged_upper_value = float(
+                    bounds.attributed_percent_upper[row, subject]
+                )
             charged_lower = _decimal(
-                particle.attributed_percent_lower[row, subject],
+                charged_lower_value,
                 PERCENT_PRECISION,
             )
             charged_upper = _decimal(
-                particle.attributed_percent_upper[row, subject],
+                charged_upper_value,
                 PERCENT_PRECISION,
             )
             remaining = max(ZERO, snapshot.participant.share_percent - charged)
 
+            charged_lower = min(charged_lower, charged)
+            charged_upper = max(charged_upper, charged)
             deterministic_min = _decimal(
                 bounds.balance_lower_usd[row, subject],
                 MONEY_PRECISION,
@@ -273,7 +366,7 @@ def replay_dynamic_segment(
                 MONEY_PRECISION,
             )
             point_balance = _decimal(
-                particle.balance_hat_usd[row, subject],
+                projected_balance[row, subject],
                 MONEY_PRECISION,
             )
             point_balance = min(
@@ -300,6 +393,8 @@ def replay_dynamic_segment(
                     deterministic_max,
                 )
 
+            probability_min = min(probability_min, point_balance)
+            probability_max = max(probability_max, point_balance)
             recommended = (point_balance * config.safety_factor).quantize(
                 CENT,
                 rounding=ROUND_HALF_UP,

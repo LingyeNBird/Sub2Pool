@@ -8,23 +8,26 @@ import numpy as np
 
 from .dynamic_contracts import DynamicModelInput, ParticleFilterOutput
 
-V_MIN = 1400.0
-V_MAX = 2100.0
-V_MID = 1750.0
-V_HALF = 350.0
+V_MIN = 1000.0
+V_MAX = 3500.0
+V_MID = 2250.0
+V_HALF = 1250.0
 QUANTIZER_NAMES = ("floor", "nearest", "ceil")
 
 
 @dataclass(frozen=True)
 class ParticleFilterConfig:
-    particles: int = 320
+    particles: int = 480
     latent_stationary_sd: float = 0.78
     speed_taus_hours: tuple[float, ...] = (6.0, 24.0, 72.0)
     timing_dirichlet_alpha: float = 0.8
-    observation_soft_sigma_pp: float = 0.15
+    observation_soft_sigma_pp: float = 0.05
     max_substeps: int = 6
     resample_ess_fraction: float = 0.50
     credible_mass: float = 0.90
+    balance_interval_inflation: float = 1.30
+    capacity_min_usd: float = V_MIN
+    capacity_max_usd: float = V_MAX
     initial_capacity_usd: float | None = None
     initial_capacity_sd_usd: float = 120.0
 
@@ -92,6 +95,14 @@ def run_particle_filter(
     cfg = config or ParticleFilterConfig()
     if cfg.particles < 30:
         raise ValueError("粒子数量过少")
+    if cfg.capacity_min_usd >= cfg.capacity_max_usd:
+        raise ValueError("容量下界必须小于容量上界")
+    capacity_mid = 0.5 * (
+        cfg.capacity_min_usd + cfg.capacity_max_usd
+    )
+    capacity_half = 0.5 * (
+        cfg.capacity_max_usd - cfg.capacity_min_usd
+    )
 
     rng = np.random.default_rng(seed)
     observation_count, subject_count = model_input.costs_usd.shape
@@ -99,8 +110,8 @@ def run_particle_filter(
 
     if cfg.initial_capacity_usd is None:
         initial_capacity = rng.uniform(
-            V_MIN + 0.5,
-            V_MAX - 0.5,
+            cfg.capacity_min_usd + 0.5,
+            cfg.capacity_max_usd - 0.5,
             size=particle_count,
         )
     else:
@@ -110,11 +121,15 @@ def run_particle_filter(
                 cfg.initial_capacity_sd_usd,
                 size=particle_count,
             ),
-            V_MIN + 0.5,
-            V_MAX - 0.5,
+            cfg.capacity_min_usd + 0.5,
+            cfg.capacity_max_usd - 0.5,
         )
     latent_capacity = np.arctanh(
-        np.clip((initial_capacity - V_MID) / V_HALF, -0.999999, 0.999999)
+        np.clip(
+            (initial_capacity - capacity_mid) / capacity_half,
+            -0.999999,
+            0.999999,
+        )
     )
     speed_options = np.asarray(cfg.speed_taus_hours, dtype=float)
     speed_codes = rng.integers(0, len(speed_options), size=particle_count)
@@ -163,7 +178,9 @@ def run_particle_filter(
         *,
         diagnostic_ess_fraction: float | None = None,
     ) -> None:
-        capacity_particles = V_MID + V_HALF * np.tanh(latent_capacity)
+        capacity_particles = (
+            capacity_mid + capacity_half * np.tanh(latent_capacity)
+        )
         total_particles = attributed_particles.sum(axis=1)
         remaining_percent = np.maximum(
             model_input.rights_percent[None, :] - attributed_particles,
@@ -247,7 +264,9 @@ def run_particle_filter(
                 persistence * latent_capacity
                 + innovation_sd * rng.normal(size=particle_count)
             )
-            capacity_at_substep = V_MID + V_HALF * np.tanh(latent_capacity)
+            capacity_at_substep = (
+                capacity_mid + capacity_half * np.tanh(latent_capacity)
+            )
             inverse_capacities[:, substep] = 100.0 / capacity_at_substep
 
         cost_delta = np.maximum(
@@ -322,6 +341,19 @@ def run_particle_filter(
         record(
             index,
             diagnostic_ess_fraction=current_ess / particle_count,
+        )
+
+    if cfg.balance_interval_inflation != 1.0:
+        balance_lower = np.maximum(
+            balance_hat
+            - cfg.balance_interval_inflation
+            * (balance_hat - balance_lower),
+            0.0,
+        )
+        balance_upper = (
+            balance_hat
+            + cfg.balance_interval_inflation
+            * (balance_upper - balance_hat)
         )
 
     return ParticleFilterOutput(

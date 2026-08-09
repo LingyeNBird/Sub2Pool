@@ -1,8 +1,14 @@
 import numpy as np
 import pytest
 
-from monitor.accounting.deterministic_bounds import run_deterministic_bounds
-from monitor.accounting.dynamic_contracts import DynamicModelInput
+from monitor.accounting.deterministic_bounds import (
+    project_attribution_to_bounds,
+    run_deterministic_bounds,
+)
+from monitor.accounting.dynamic_contracts import (
+    DeterministicBoundsOutput,
+    DynamicModelInput,
+)
 from monitor.accounting.particle_filter import (
     ParticleFilterConfig,
     run_particle_filter,
@@ -47,6 +53,31 @@ def test_particle_filter_is_repeatable_and_tracks_constant_case():
     assert np.all(first.capacity_hat_usd <= first.capacity_upper_usd)
 
 
+def test_expanded_capacity_support_tracks_values_above_legacy_ceiling():
+    model_input = DynamicModelInput(
+        times_hours=np.asarray([0.0, 12.0, 24.0, 36.0]),
+        costs_usd=np.asarray(
+            [[0.0], [140.0], [280.0], [560.0]]
+        ),
+        displayed_percent=np.asarray([0.0, 5.0, 10.0, 20.0]),
+        rights_percent=np.asarray([100.0]),
+    )
+
+    expanded = run_particle_filter(model_input, seed=81)
+    legacy = run_particle_filter(
+        model_input,
+        seed=81,
+        config=ParticleFilterConfig(
+            capacity_min_usd=1400.0,
+            capacity_max_usd=2100.0,
+        ),
+    )
+
+    assert expanded.capacity_hat_usd[-1] > 2100.0
+    assert abs(expanded.total_percent_hat[-1] - 20.0) < abs(
+        legacy.total_percent_hat[-1] - 20.0
+    )
+
 def test_particle_filter_supports_uncertain_manual_baseline():
     model_input = DynamicModelInput(
         times_hours=np.asarray([0.0, 12.0, 24.0]),
@@ -74,6 +105,42 @@ def test_deterministic_bounds_contain_constant_case_truth():
     assert output.total_percent_lower[-1] <= 20.0
     assert output.total_percent_upper[-1] >= 20.0
     assert output.infeasible_repairs == 0
+
+def test_guarded_projection_restores_deterministic_progress_feasibility():
+    bounds = run_deterministic_bounds(_constant_capacity_input())
+    impossible = np.zeros_like(bounds.attributed_percent_lower)
+
+    projected, repaired_rows, max_adjustment = (
+        project_attribution_to_bounds(impossible, bounds)
+    )
+
+    assert repaired_rows > 0
+    assert max_adjustment > 0
+    assert np.all(projected >= bounds.attributed_percent_lower - 1e-9)
+    assert np.all(projected <= bounds.attributed_percent_upper + 1e-9)
+    totals = projected.sum(axis=1)
+    assert np.all(totals >= bounds.total_percent_lower - 1e-9)
+    assert np.all(totals <= bounds.total_percent_upper + 1e-9)
+
+
+def test_guarded_projection_preserves_cumulative_monotonicity():
+    bounds = DeterministicBoundsOutput(
+        total_percent_lower=np.asarray([0.0, 5.0, 10.0]),
+        total_percent_upper=np.asarray([0.0, 5.0, 10.0]),
+        attributed_percent_lower=np.zeros((3, 2)),
+        attributed_percent_upper=np.asarray(
+            [[0.0, 0.0], [5.0, 5.0], [10.0, 10.0]]
+        ),
+        balance_lower_usd=np.zeros((3, 2)),
+        balance_upper_usd=np.zeros((3, 2)),
+        infeasible_repairs=0,
+    )
+    oscillating = np.asarray([[0.0, 0.0], [5.0, 0.0], [0.0, 10.0]])
+
+    projected, _, _ = project_attribution_to_bounds(oscillating, bounds)
+
+    np.testing.assert_allclose(projected.sum(axis=1), [0.0, 5.0, 10.0])
+    assert np.all(np.diff(projected, axis=0) >= -1e-9)
 
 
 def test_dynamic_models_cap_progress_at_cycle_exhaustion():
