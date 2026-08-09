@@ -5,470 +5,43 @@
 模块从最早受影响的边界向后重算。
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import timedelta
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
-from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from .fast_correction import FastCorrectionInterval, apply_fast_interval, fetch_fast_interval
-from .models import (
-    AppSettings,
-    Observation,
-    Participant,
-    ParticipantSnapshot,
-    ParticipantUsageSample,
-    Sub2APIUserUsageSample,
+from .accounting.boundaries import same_official_reset as _same_official_reset
+from .integrations.sub2api import Sub2APIClient, Sub2APIError
+from .models import AppSettings, Participant
+from .notifications import notify_collection_error
+from .replay import RESET_ROLLBACK_TOLERANCE, rebuild_observation_suffix
+from .sampling.local_usage import (
+    fetch_local as _fetch_local,
+    save_local_bundle as _save_local_bundle,
 )
-from .notifications import notify_collection_error, send_notification
-from .replay import (
-    RATE_METHOD,
-    RESET_ROLLBACK_TOLERANCE,
-    RESET_TIME_TOLERANCE,
-    rebuild_observation_suffix,
+from .sampling.notifications import (
+    finish_success as _finish_success,
+    send_observation_notifications as _send_observation_notifications,
 )
-from .integrations.sub2api import (
-    Sub2APIClient,
-    Sub2APIError,
-    Sub2APIUserUsage,
-    UsageStats,
-    UserBalance,
-    WeeklyWindow,
+from .sampling.observations import (
+    create_raw_observation as _create_raw_observation,
+    fetch_fast_correction as _fetch_fast_correction,
+)
+from .sampling.selectors import (
+    has_pending_rollback as _has_pending_rollback,
+    latest_included as _latest_included,
+    latest_raw as _latest_raw,
+)
+from .sampling.triggers import evaluate_sampling_trigger
+from .sampling.types import (
+    observation_reference as _observation_reference,
+    window_reference as _window_reference,
 )
 
 ZERO = Decimal("0")
-CENT = Decimal("0.01")
 
 
-@dataclass
-class LocalParticipantData:
-    participant: Participant
-    stats: UsageStats
-    balance: UserBalance
-
-    def selected_cost(self, basis: str) -> Decimal:
-        return self.stats.selected(basis)
-
-
-@dataclass
-class LocalBundle:
-    total: UsageStats
-    participants: list[LocalParticipantData]
-    users: list[Sub2APIUserUsage]
-    checked_at: datetime
-
-
-@dataclass(frozen=True)
-class WindowReference:
-    account_id: int
-    reset_at: datetime
-    window_seconds: int
-
-
-def _epoch_datetime(value: int) -> datetime:
-    """兼容被代理误转成毫秒的 Unix 时间，内部统一为 UTC。"""
-
-    if value > 10_000_000_000:
-        value //= 1000
-    return datetime.fromtimestamp(value, tz=dt_timezone.utc)
-
-
-def _window_reference(account_id: int, window: WeeklyWindow) -> WindowReference:
-    return WindowReference(
-        account_id=account_id,
-        reset_at=_epoch_datetime(window.reset_at),
-        window_seconds=window.window_seconds,
-    )
-
-
-def _observation_reference(observation: Observation) -> WindowReference:
-    return WindowReference(
-        account_id=observation.account_id,
-        reset_at=observation.upstream_resets_at,
-        window_seconds=observation.window_seconds,
-    )
-
-
-def _same_official_reset(left: datetime, right: datetime) -> bool:
-    return abs(left - right) <= RESET_TIME_TOLERANCE
-
-
-def _fetch_local(
-    client: Sub2APIClient,
-    config: AppSettings,
-    reference: WindowReference,
-    participants: list[Participant],
-    now: datetime,
-) -> LocalBundle:
-    """只读取 Sub2API；数据库写入在最终确认查询窗口后统一执行一次。"""
-
-    location = ZoneInfo(config.timezone)
-    start_date = (
-        reference.reset_at - timedelta(seconds=reference.window_seconds)
-    ).astimezone(location).date()
-    end_date = now.astimezone(location).date()
-    query = {
-        "account_id": reference.account_id,
-        "start_date": start_date,
-        "end_date": end_date,
-        "timezone_name": config.timezone,
-    }
-    total = client.usage_stats(**query)
-
-    # 正式客户端会一次性读取全部用户；保留回退分支，便于兼容只实现旧版
-    # usage_stats 接口的替代客户端，不会改变正式采样的全量行为。
-    fetch_all = getattr(client, "all_user_usage_stats", None)
-    all_users = fetch_all(**query) if callable(fetch_all) else []
-    usage_by_user = {item.user_id: item for item in all_users}
-
-    rows: list[LocalParticipantData] = []
-    for participant in participants:
-        user_usage = usage_by_user.get(participant.sub2api_user_id)
-        if user_usage is None:
-            stats = client.usage_stats(
-                **query,
-                user_id=participant.sub2api_user_id,
-            )
-            user_usage = Sub2APIUserUsage(
-                user_id=participant.sub2api_user_id,
-                email=participant.sub2api_email,
-                username=participant.sub2api_username,
-                stats=stats,
-            )
-            usage_by_user[user_usage.user_id] = user_usage
-            all_users.append(user_usage)
-        rows.append(
-            LocalParticipantData(
-                participant=participant,
-                stats=user_usage.stats,
-                balance=client.user_balance(participant.sub2api_user_id),
-            )
-        )
-    return LocalBundle(
-        total=total,
-        participants=rows,
-        users=all_users,
-        checked_at=now,
-    )
-
-
-def _participant_baselines(
-    latest: Observation | None,
-) -> dict[int, Decimal]:
-    if latest is None:
-        return {}
-    return {
-        snapshot.participant_id: max(
-            ZERO,
-            snapshot.raw_selected_cost - snapshot.selected_cost,
-        )
-        for snapshot in latest.participant_snapshots.all()
-    }
-
-
-def _save_local_bundle(
-    config: AppSettings,
-    reference: WindowReference,
-    local: LocalBundle,
-    latest: Observation | None,
-) -> None:
-    """保存一次本地趋势点；raw 字段永远保留 Sub2API 返回的累计值。"""
-    window_started_at = reference.reset_at - timedelta(
-        seconds=reference.window_seconds
-    )
-    Sub2APIUserUsageSample.objects.bulk_create(
-        [
-            Sub2APIUserUsageSample(
-                account_id=reference.account_id,
-                sub2api_user_id=user.user_id,
-                username=user.username,
-                email=user.email,
-                observed_at=local.checked_at,
-                window_started_at=window_started_at,
-                window_resets_at=reference.reset_at,
-                total_standard_cost=user.stats.total_cost,
-                total_actual_cost=user.stats.total_actual_cost,
-            )
-            for user in local.users
-        ],
-        ignore_conflicts=True,
-    )
-
-    baselines = _participant_baselines(latest)
-    participants: list[Participant] = []
-    usage_samples: list[ParticipantUsageSample] = []
-    for row in local.participants:
-        raw_cost = row.selected_cost(config.cost_basis)
-        selected_cost = max(
-            ZERO,
-            raw_cost - baselines.get(row.participant.pk, ZERO),
-        )
-        row.participant.latest_balance_usd = row.balance.balance
-        row.participant.latest_selected_cost = selected_cost
-        row.participant.last_checked_at = local.checked_at
-        participants.append(row.participant)
-        usage_samples.append(
-            ParticipantUsageSample(
-                participant=row.participant,
-                account_id=reference.account_id,
-                attribution_started_at=(
-                    latest.attribution_started_at if latest is not None else None
-                ),
-                observed_at=local.checked_at,
-                balance_usd=row.balance.balance,
-                selected_cost=selected_cost,
-                raw_selected_cost=raw_cost,
-            )
-        )
-    if participants:
-        Participant.objects.bulk_update(
-            participants,
-            ["latest_balance_usd", "latest_selected_cost", "last_checked_at"],
-        )
-        ParticipantUsageSample.objects.bulk_create(
-            usage_samples,
-            ignore_conflicts=True,
-        )
-
-
-def _latest_included(account_id: int) -> Observation | None:
-    return (
-        Observation.objects.filter(
-            account_id=account_id,
-            excluded_at__isnull=True,
-        )
-        .prefetch_related("participant_snapshots__participant")
-        .order_by("-observed_at", "-id")
-        .first()
-    )
-
-
-def _latest_raw(account_id: int) -> Observation | None:
-    return (
-        Observation.objects.filter(account_id=account_id)
-        .prefetch_related("participant_snapshots__participant")
-        .order_by("-observed_at", "-id")
-        .first()
-    )
-
-
-def _has_pending_rollback(account_id: int) -> bool:
-    return Observation.objects.filter(
-        account_id=account_id,
-        exclusion_source="automatic",
-    ).exists()
-
-
-def _is_limit_exhausted(
-    config: AppSettings,
-    row: LocalParticipantData,
-    previous: ParticipantSnapshot | None,
-) -> bool:
-    if previous is None or previous.remaining_share_percent <= 0:
-        return False
-    return row.balance.balance <= config.limit_warning_usd
-
-
-@transaction.atomic
-def _create_raw_observation(
-    *,
-    config: AppSettings,
-    reference: WindowReference,
-    window: WeeklyWindow,
-    local: LocalBundle,
-    source: str,
-    fast_interval: FastCorrectionInterval | None = None,
-    fast_error: str = "",
-) -> Observation:
-    """持久化不可变采样事实；派生字段先给安全初值，随后由重放器覆盖。"""
-
-    selected_total = local.total.selected(config.cost_basis)
-    observation = Observation.objects.create(
-        account_id=reference.account_id,
-        source=source,
-        observed_at=local.checked_at,
-        window_seconds=reference.window_seconds,
-        upstream_resets_at=reference.reset_at,
-        upstream_used_percent=window.used_percent,
-        raw_selected_total_cost=selected_total,
-        selected_total_cost=selected_total,
-        total_standard_cost=local.total.total_cost,
-        total_actual_cost=local.total.total_actual_cost,
-        effective_usd_per_percent=config.initial_usd_per_percent,
-        sample_note="等待派生计算",
-        raw_window={
-            "slot": window.slot,
-            "window_seconds": window.window_seconds,
-            "reset_after_seconds": window.reset_after_seconds,
-            "reset_at": window.reset_at,
-            "query_mode": config.quota_query_mode,
-            "sampled_at": window.sampled_at,
-            "rate_method": RATE_METHOD,
-            **({"fast_correction_error": fast_error} if fast_error else {}),
-        },
-    )
-    ParticipantSnapshot.objects.bulk_create(
-        [
-            ParticipantSnapshot(
-                observation=observation,
-                participant=row.participant,
-                raw_selected_cost=row.selected_cost(config.cost_basis),
-                selected_cost=row.selected_cost(config.cost_basis),
-                current_balance_usd=row.balance.balance,
-                remaining_share_percent=row.participant.share_percent,
-            )
-            for row in local.participants
-        ]
-    )
-    if fast_interval is not None:
-        apply_fast_interval(observation, fast_interval)
-        observation.save(
-            update_fields=[
-                "fast_correction_started_at",
-                "fast_correction_standard_cost",
-                "fast_correction_actual_cost",
-                "fast_correction_request_count",
-            ]
-        )
-    return observation
-
-
-def _fetch_fast_correction(
-    client: Sub2APIClient,
-    config: AppSettings,
-    reference: WindowReference,
-    latest_raw: Observation | None,
-    ended_at: datetime,
-) -> tuple[FastCorrectionInterval | None, str]:
-    """读取一个原始采样区间的 FAST 请求；失败不阻断核心百分比采样。"""
-
-    if not config.fast_correction_enabled:
-        return None, ""
-    if not callable(getattr(client, "usage_logs", None)):
-        return None, ""
-
-    official_start = reference.reset_at - timedelta(
-        seconds=reference.window_seconds
-    )
-    started_at = official_start
-    if latest_raw is not None and _same_official_reset(
-        latest_raw.upstream_resets_at,
-        reference.reset_at,
-    ):
-        started_at = latest_raw.observed_at
-    started_at = min(started_at, ended_at)
-    try:
-        return (
-            fetch_fast_interval(
-                client,
-                account_id=reference.account_id,
-                started_at=started_at,
-                ended_at=ended_at,
-                timezone_name=config.timezone,
-            ),
-            "",
-        )
-    except (Sub2APIError, ValueError) as exc:
-        return None, str(exc)[:500]
-
-
-def _send_observation_notifications(
-    config: AppSettings,
-    observation: Observation,
-    previous_rate: Decimal | None,
-) -> None:
-    """仅对这次最终被纳入重放结果的观测发送通知。"""
-
-    interval_key = (
-        observation.attribution_started_at.isoformat()
-        if observation.attribution_started_at
-        else str(observation.pk)
-    )
-    for snapshot in observation.participant_snapshots.select_related(
-        "participant"
-    ):
-        exhausted = bool(
-            snapshot.current_balance_usd is not None
-            and snapshot.current_balance_usd <= config.limit_warning_usd
-        )
-        if (
-            exhausted
-            and snapshot.remaining_share_percent > 0
-            and config.notify_on_limit_exhausted
-        ):
-            send_notification(
-                config=config,
-                event_type="limit_exhausted",
-                dedupe_key=(
-                    f"balance-exhausted:{interval_key}:"
-                    f"{snapshot.participant_id}:{snapshot.recommended_balance_usd}"
-                ),
-                participant=snapshot.participant,
-                subject=(
-                    f"[拼车额度] {snapshot.participant.name} 需要手动补充余额"
-                ),
-                body=(
-                    f"{snapshot.participant.name} 的 Sub2API 用户余额已接近耗尽。\n\n"
-                    f"当前用户余额：${snapshot.current_balance_usd}\n"
-                    f"剩余百分比权益：{snapshot.remaining_share_percent}%\n"
-                    "建议手动把用户余额设置为："
-                    f"${snapshot.recommended_balance_usd}\n\n"
-                    "请核对后在 Sub2API 管理台手动操作。"
-                ),
-                severity="error",
-            )
-        elif (
-            snapshot.needs_manual_update
-            and config.notify_on_recommendation_change
-        ):
-            send_notification(
-                config=config,
-                event_type="recommendation_changed",
-                dedupe_key=(
-                    f"balance-recommendation:{interval_key}:"
-                    f"{snapshot.participant_id}:{snapshot.recommended_balance_usd}"
-                ),
-                participant=snapshot.participant,
-                subject=(
-                    f"[拼车额度] {snapshot.participant.name} 的余额建议已变化"
-                ),
-                body=(
-                    f"建议用户余额：${snapshot.recommended_balance_usd}\n"
-                    f"原因：{snapshot.reason}\n请登录服务查看测算依据。"
-                ),
-            )
-
-    effective_rate = observation.effective_usd_per_percent
-    if previous_rate and previous_rate > 0 and config.notify_on_rate_change:
-        change = (
-            abs(effective_rate - previous_rate)
-            / previous_rate
-            * Decimal(100)
-        )
-        if change >= config.rate_change_alert_percent:
-            send_notification(
-                config=config,
-                event_type="rate_changed",
-                dedupe_key=f"rate-change:{interval_key}:{observation.pk}",
-                subject="[拼车额度] 美元/百分比估算发生明显变化",
-                body=(
-                    f"原估算：${previous_rate}/%\n"
-                    f"新保守估算：${effective_rate}/%\n"
-                    f"变化：{change.quantize(CENT)}%"
-                ),
-            )
-
-
-def _finish_success(config: AppSettings, checked_at: datetime) -> None:
-    AppSettings.objects.filter(pk=config.pk).update(
-        last_local_check_at=checked_at,
-        last_upstream_check_at=checked_at,
-        last_success_at=checked_at,
-        last_error="",
-    )
 
 
 def _run_monitor_locked(
@@ -549,58 +122,20 @@ def _run_monitor_locked(
             participants,
             now,
         )
-        previous_snapshots = (
-            {
-                item.participant_id: item
-                for item in previous.participant_snapshots.all()
-            }
-            if previous
-            else {}
+        trigger = evaluate_sampling_trigger(
+            config=config,
+            local=local,
+            latest_raw=latest_raw,
+            previous=previous,
+            now=now,
+            force_upstream=force_upstream,
+            has_pending_rollback=_has_pending_rollback(account_id),
         )
-        selected_total = local.total.selected(config.cost_basis)
-        cost_rolled_back = bool(
-            previous
-            and selected_total + CENT < previous.raw_selected_total_cost
-        )
-        cost_progress = (
-            max(ZERO, selected_total - previous.raw_selected_total_cost)
-            if previous
-            else selected_total
-        )
-        effective_rate = (
-            previous.effective_usd_per_percent
-            if previous
-            else config.initial_usd_per_percent
-        )
-        threshold_cost = effective_rate * config.progress_threshold_percent
-        exhausted = any(
-            _is_limit_exhausted(
-                config,
-                row,
-                previous_snapshots.get(row.participant.pk),
-            )
-            for row in local.participants
-        )
-        active_too_long = bool(
-            previous
-            and cost_progress > 0
-            and now - previous.observed_at
-            >= timedelta(hours=config.active_max_calibration_hours)
-        )
-        reset_near = now >= (
-            latest_raw.upstream_resets_at
-            - timedelta(minutes=config.reset_proximity_minutes)
-        )
-        due = bool(
-            force_upstream
-            or previous is None
-            or cost_progress >= threshold_cost
-            or cost_rolled_back
-            or exhausted
-            or active_too_long
-            or reset_near
-            or _has_pending_rollback(account_id)
-        )
+        cost_progress = trigger.cost_progress
+        threshold_cost = trigger.threshold_cost
+        exhausted = trigger.exhausted
+        reset_near = trigger.reset_near
+        due = trigger.due
 
         if not due:
             _save_local_bundle(
