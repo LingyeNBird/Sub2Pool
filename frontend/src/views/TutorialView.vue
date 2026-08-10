@@ -3,6 +3,8 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import ConstantAverageAlgorithmTutorial from "./tutorial/components/ConstantAverageAlgorithmTutorial.vue";
+import ParticleFilterAlgorithmTutorial from "./tutorial/components/ParticleFilterAlgorithmTutorial.vue";
 
 import { tutorialPages, type TutorialNoteTone } from "./tutorial/tutorialPages";
 
@@ -88,7 +90,13 @@ watch(activePageId, async () => {
           </div>
         </header>
 
-        <div class="divide-y divide-base-300">
+        <ParticleFilterAlgorithmTutorial
+          v-if="activePage.interactive === 'particle-filter'"
+        />
+        <ConstantAverageAlgorithmTutorial
+          v-else-if="activePage.interactive === 'constant-average'"
+        />
+        <div v-else class="divide-y divide-base-300">
           <section
             v-for="section in activePage.sections"
             :key="section.title"

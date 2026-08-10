@@ -21,6 +21,7 @@ export interface TutorialPage {
   summary: string;
   icon: string;
   sections: TutorialSection[];
+  interactive?: "particle-filter" | "constant-average";
   action?: {
     label: string;
     to: string;
@@ -306,6 +307,31 @@ export const tutorialGroups: TutorialGroup[] = [
           },
         ],
         action: { label: "查看额度统计", to: "/statistics" },
+      },
+    ],
+  },
+  {
+    label: "算法讲解",
+    pages: [
+      {
+        id: "particle-filter-algorithm",
+        group: "算法讲解",
+        title: "粒子滤波：让许多可能性一起工作",
+        summary:
+          "从候选答案、整数显示规则、容量路径、筛选到余额建议，一步一步看懂动态额度模型。",
+        icon: "sparkles",
+        sections: [],
+        interactive: "particle-filter",
+      },
+      {
+        id: "constant-average-algorithm",
+        group: "算法讲解",
+        title: "平均恒定：用一段历史得到一个平均值",
+        summary:
+          "用可拖动的端点完整走一遍简单折算，并理解它适合回答什么、不适合回答什么。",
+        icon: "calculator",
+        sections: [],
+        interactive: "constant-average",
       },
     ],
   },

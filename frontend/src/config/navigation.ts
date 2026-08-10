@@ -108,6 +108,17 @@ export const navigation: NavigationGroup[] = [
         to: "/tutorial?page=statistics",
         exactQuery: true,
       },
+      { label: "算法讲解", section: true },
+      {
+        label: "粒子滤波算法",
+        to: "/tutorial?page=particle-filter-algorithm",
+        exactQuery: true,
+      },
+      {
+        label: "平均恒定算法",
+        to: "/tutorial?page=constant-average-algorithm",
+        exactQuery: true,
+      },
       { label: "机制与维护", section: true },
       {
         label: "周限刷新与中途拼车",
