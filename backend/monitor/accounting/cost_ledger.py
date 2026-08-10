@@ -100,6 +100,53 @@ def normalize_observation_costs(
     return rows
 
 
+def normalize_user_sample(
+    row: Sub2APIUserUsageSample,
+    previous: Sub2APIUserUsageSample | None,
+) -> None:
+    """Populate one user's comparable cumulative-cost coordinate in memory."""
+
+    same_window_epoch = bool(
+        previous is not None
+        and same_official_reset(
+            previous.window_resets_at,
+            row.window_resets_at,
+        )
+    )
+    interval_standard = row.interval_standard_cost
+    interval_actual = row.interval_actual_cost
+    if same_window_epoch and previous is not None:
+        if interval_standard is None or interval_actual is None:
+            if _same_known_window(
+                previous.window_started_at,
+                row.window_started_at,
+            ):
+                interval_standard = (
+                    row.total_standard_cost - previous.total_standard_cost
+                )
+                interval_actual = (
+                    row.total_actual_cost - previous.total_actual_cost
+                )
+        if interval_standard is not None and interval_actual is not None:
+            previous_standard = previous.normalized_standard_cost
+            previous_actual = previous.normalized_actual_cost
+            if previous_standard is None:
+                previous_standard = previous.total_standard_cost
+            if previous_actual is None:
+                previous_actual = previous.total_actual_cost
+            row.normalized_standard_cost = max(
+                ZERO,
+                previous_standard + interval_standard,
+            )
+            row.normalized_actual_cost = max(
+                ZERO,
+                previous_actual + interval_actual,
+            )
+            return
+    row.normalized_standard_cost = row.total_standard_cost
+    row.normalized_actual_cost = row.total_actual_cost
+
+
 def normalize_user_costs(account_id: int) -> None:
     """Rebuild comparable cumulative coordinates for every Sub2API user."""
 
@@ -114,56 +161,13 @@ def normalize_user_costs(account_id: int) -> None:
     changed: list[Sub2APIUserUsageSample] = []
     for row in rows:
         previous = previous_by_user.get(row.sub2api_user_id)
-        same_window_epoch = bool(
-            previous is not None
-            and same_official_reset(
-                previous.window_resets_at,
-                row.window_resets_at,
-            )
-        )
-        interval_standard = row.interval_standard_cost
-        interval_actual = row.interval_actual_cost
-
-        if same_window_epoch and previous is not None:
-            if interval_standard is None or interval_actual is None:
-                if _same_known_window(
-                    previous.window_started_at,
-                    row.window_started_at,
-                ):
-                    interval_standard = (
-                        row.total_standard_cost - previous.total_standard_cost
-                    )
-                    interval_actual = (
-                        row.total_actual_cost - previous.total_actual_cost
-                    )
-            if interval_standard is not None and interval_actual is not None:
-                previous_standard = previous.normalized_standard_cost
-                previous_actual = previous.normalized_actual_cost
-                if previous_standard is None:
-                    previous_standard = previous.total_standard_cost
-                if previous_actual is None:
-                    previous_actual = previous.total_actual_cost
-                normalized_standard = max(
-                    ZERO,
-                    previous_standard + interval_standard,
-                )
-                normalized_actual = max(
-                    ZERO,
-                    previous_actual + interval_actual,
-                )
-            else:
-                normalized_standard = row.total_standard_cost
-                normalized_actual = row.total_actual_cost
-        else:
-            normalized_standard = row.total_standard_cost
-            normalized_actual = row.total_actual_cost
-
+        old_standard = row.normalized_standard_cost
+        old_actual = row.normalized_actual_cost
+        normalize_user_sample(row, previous)
         if (
-            row.normalized_standard_cost != normalized_standard
-            or row.normalized_actual_cost != normalized_actual
+            old_standard != row.normalized_standard_cost
+            or old_actual != row.normalized_actual_cost
         ):
-            row.normalized_standard_cost = normalized_standard
-            row.normalized_actual_cost = normalized_actual
             changed.append(row)
         previous_by_user[row.sub2api_user_id] = row
 

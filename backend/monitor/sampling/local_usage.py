@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from .types import LocalBundle, LocalParticipantData, WindowReference
 from ..accounting.boundaries import same_official_reset
+from ..accounting.cost_ledger import normalize_user_sample
 from ..integrations.sub2api import (
     Sub2APIReader,
     Sub2APIUsageLog,
@@ -257,13 +258,25 @@ def _user_interval(
 
 def _participant_baselines(
     latest: Observation | None,
+    cost_basis: str,
 ) -> dict[int, Decimal]:
     if latest is None:
         return {}
+    normalized_by_user = {
+        row.sub2api_user_id: row.normalized_cost(cost_basis)
+        for row in Sub2APIUserUsageSample.objects.filter(
+            account_id=latest.account_id,
+            observed_at=latest.observed_at,
+        )
+    }
     return {
         snapshot.participant_id: max(
             ZERO,
-            snapshot.raw_selected_cost - snapshot.selected_cost,
+            normalized_by_user.get(
+                snapshot.participant.sub2api_user_id,
+                snapshot.raw_selected_cost,
+            )
+            - snapshot.selected_cost,
         )
         for snapshot in latest.participant_snapshots.all()
     }
@@ -282,46 +295,55 @@ def save_local_bundle(
     previous_by_user = _latest_user_samples(reference.account_id)
     user_samples: list[Sub2APIUserUsageSample] = []
     for user in local.users:
+        previous = previous_by_user.get(user.user_id)
         interval_start, interval_standard, interval_actual, source = (
             _user_interval(
                 user,
-                previous_by_user.get(user.user_id),
+                previous,
                 reference,
                 local,
                 interval_logs,
             )
         )
-        user_samples.append(
-            Sub2APIUserUsageSample(
-                account_id=reference.account_id,
-                sub2api_user_id=user.user_id,
-                username=user.username,
-                email=user.email,
-                observed_at=local.checked_at,
-                window_started_at=local.cost_window_started_at,
-                window_ended_at=local.cost_window_ended_at,
-                window_resets_at=reference.reset_at,
-                total_standard_cost=user.stats.total_cost,
-                total_actual_cost=user.stats.total_actual_cost,
-                interval_started_at=interval_start,
-                interval_standard_cost=interval_standard,
-                interval_actual_cost=interval_actual,
-                interval_source=source,
-            )
+        sample = Sub2APIUserUsageSample(
+            account_id=reference.account_id,
+            sub2api_user_id=user.user_id,
+            username=user.username,
+            email=user.email,
+            observed_at=local.checked_at,
+            window_started_at=local.cost_window_started_at,
+            window_ended_at=local.cost_window_ended_at,
+            window_resets_at=reference.reset_at,
+            total_standard_cost=user.stats.total_cost,
+            total_actual_cost=user.stats.total_actual_cost,
+            interval_started_at=interval_start,
+            interval_standard_cost=interval_standard,
+            interval_actual_cost=interval_actual,
+            interval_source=source,
         )
+        normalize_user_sample(sample, previous)
+        user_samples.append(sample)
     Sub2APIUserUsageSample.objects.bulk_create(
         user_samples,
         ignore_conflicts=True,
     )
 
-    baselines = _participant_baselines(latest)
+    normalized_by_user = {
+        sample.sub2api_user_id: sample.normalized_cost(config.cost_basis)
+        for sample in user_samples
+    }
+    baselines = _participant_baselines(latest, config.cost_basis)
     changed_participants: list[Participant] = []
     usage_samples: list[ParticipantUsageSample] = []
     for row in local.participants:
         raw_cost = row.selected_cost(config.cost_basis)
+        normalized_cost = normalized_by_user.get(
+            row.participant.sub2api_user_id,
+            raw_cost,
+        )
         selected_cost = max(
             ZERO,
-            raw_cost - baselines.get(row.participant.pk, ZERO),
+            normalized_cost - baselines.get(row.participant.pk, ZERO),
         )
         row.participant.latest_balance_usd = row.balance.balance
         row.participant.latest_selected_cost = selected_cost
