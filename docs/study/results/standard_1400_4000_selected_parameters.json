@@ -1,0 +1,29 @@
+{
+  "single_width_pp": 12,
+  "multiscale_widths_pp": [
+    4,
+    8,
+    16
+  ],
+  "multiphase_width_pp": 12,
+  "adaptive_widths_pp": [
+    3,
+    6,
+    9,
+    12,
+    18
+  ],
+  "adaptive_spread_threshold": 0.04,
+  "window_shrink_pp": 1.5,
+  "pf_observation_soft_sigma_pp": 0.05,
+  "pf_timing_dirichlet_alpha": 0.8,
+  "pf_interval_inflation": 1.3,
+  "pf_guarded_inertia": 0.0,
+  "pf_latent_stationary_sd": 0.6,
+  "tuning_case_count": 180,
+  "capacity_min_usd": 1400.0,
+  "capacity_max_usd": 4000.0,
+  "particle_count": 320,
+  "particle_tuning_case_count": 72,
+  "selection_rule": "Each point-estimator family uses the parameter with the lowest tuning-set mean trajectory MAE; case-level p95 is retained as a separate diagnostic. Interval inflation is the smallest grid value with at least 90% pooled sample-time coverage."
+}

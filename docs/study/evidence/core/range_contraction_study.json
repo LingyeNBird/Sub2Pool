@@ -1,0 +1,123 @@
+{
+  "study": "causal staged contraction after adaptive PF expansion",
+  "continuous_capacity_paths": true,
+  "standard_range_usd": [
+    1400.0,
+    4000.0
+  ],
+  "upper_stages_usd": [
+    6000.0,
+    10000.0,
+    20000.0
+  ],
+  "lower_stages_usd": [
+    700.0,
+    250.0,
+    50.0
+  ],
+  "regimes": [
+    "upper_return_mild",
+    "upper_return_extreme",
+    "lower_return_mild",
+    "lower_return_extreme",
+    "upper_rebound",
+    "lower_rebound",
+    "upper_persistent",
+    "lower_persistent",
+    "in_range_upper",
+    "in_range_lower"
+  ],
+  "candidate_count": 378,
+  "development_cases": 400,
+  "frozen_cases": 400,
+  "confirmation_cases": 600,
+  "finalists": [
+    "direct_all_47018b5643",
+    "direct_high_1649a86b4e",
+    "shadow_all_bd16932a44",
+    "shadow_high_7f1db5b75f"
+  ],
+  "finalist_parameters": [
+    {
+      "candidate_id": "direct_all_47018b5643",
+      "family": "direct",
+      "margin_usd": 300.0,
+      "consecutive_hits": 3,
+      "cooldown_hours": 48.0,
+      "minimum_stage": 0,
+      "shadow_boundary_mass": null,
+      "shadow_residual_pp": null
+    },
+    {
+      "candidate_id": "direct_high_1649a86b4e",
+      "family": "direct",
+      "margin_usd": 150.0,
+      "consecutive_hits": 3,
+      "cooldown_hours": 48.0,
+      "minimum_stage": 1,
+      "shadow_boundary_mass": null,
+      "shadow_residual_pp": null
+    },
+    {
+      "candidate_id": "shadow_all_bd16932a44",
+      "family": "shadow",
+      "margin_usd": 150.0,
+      "consecutive_hits": 3,
+      "cooldown_hours": 48.0,
+      "minimum_stage": 0,
+      "shadow_boundary_mass": 0.05,
+      "shadow_residual_pp": 0.05
+    },
+    {
+      "candidate_id": "shadow_high_7f1db5b75f",
+      "family": "shadow",
+      "margin_usd": 300.0,
+      "consecutive_hits": 3,
+      "cooldown_hours": 48.0,
+      "minimum_stage": 1,
+      "shadow_boundary_mass": 0.05,
+      "shadow_residual_pp": 0.05
+    }
+  ],
+  "confirmation_comparisons_vs_no_shrink": {
+    "direct_all_47018b5643": {
+      "cases": 600,
+      "mean_difference_usd": 1.523994701826432,
+      "ci95_low_usd": 0.8806326634874725,
+      "ci95_high_usd": 2.1754762699484997,
+      "candidate_better_fraction": 0.10333333333333333,
+      "identical_fraction": 0.645
+    },
+    "direct_high_1649a86b4e": {
+      "cases": 600,
+      "mean_difference_usd": 1.1938105692239815,
+      "ci95_low_usd": 0.5584146687098969,
+      "ci95_high_usd": 1.8656865929523907,
+      "candidate_better_fraction": 0.055,
+      "identical_fraction": 0.7733333333333333
+    },
+    "shadow_all_bd16932a44": {
+      "cases": 600,
+      "mean_difference_usd": 1.2397270322327372,
+      "ci95_low_usd": 0.5585800982833774,
+      "ci95_high_usd": 1.9903112842360016,
+      "candidate_better_fraction": 0.11333333333333333,
+      "identical_fraction": 0.68
+    },
+    "shadow_high_7f1db5b75f": {
+      "cases": 600,
+      "mean_difference_usd": 0.7398251196060535,
+      "ci95_low_usd": 0.2030072478321572,
+      "ci95_high_usd": 1.2690778204738482,
+      "candidate_better_fraction": 0.055,
+      "identical_fraction": 0.8166666666666667
+    }
+  },
+  "random_salts": {
+    "development": "discovery-development-20260810",
+    "frozen": "discovery-frozen-20260810",
+    "confirmation": "independent-confirmation-20260810"
+  },
+  "primary_metric": "full-cycle held participant-balance MAE in USD",
+  "causal_rule": "candidate decisions use current and past observations only"
+}

@@ -1,0 +1,23 @@
+{
+  "best_mean_hybrid": {
+    "algorithm": "fallback_conservative_on_risk_w0p35_d0p18",
+    "development_mean_mae_usd": 52.63545254133819,
+    "policy": {
+      "mode": "conservative_on_risk",
+      "width_threshold": 0.35,
+      "disagreement_threshold": 0.18,
+      "name": "fallback_conservative_on_risk_w0p35_d0p18"
+    }
+  },
+  "best_overallocation_risk": {
+    "algorithm": "particle_filter_mixture",
+    "development_mean_mae_usd": 52.39940574118018,
+    "development_p95_case_max_over_usd": 791.0833958490747,
+    "policy": null
+  },
+  "particle_filter_development": {
+    "mean_mae_usd": 52.39940574118018,
+    "p95_case_max_over_usd": 791.0833958490747
+  },
+  "selection_rule": "Mean fallback minimizes development mean trajectory MAE among observable hybrids. Risk fallback minimizes development P95 case maximum over-allocation subject to mean MAE no more than 1.00 USD above PF."
+}

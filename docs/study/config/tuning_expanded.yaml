@@ -1,0 +1,43 @@
+name: expanded_range_tuning
+base_seed: 202608120
+results_prefix: expanded_
+selected_parameters_file: expanded_selected_parameters.json
+selection_file: expanded_tuning_selection.json
+capacity_range: [1000.0, 3500.0]
+num_cases: 180
+horizon_hours: 168.0
+dt_hours: 0.16666666666666666
+speeds: [slow, medium, fast]
+participants: [2, 4, 6]
+rights_profiles: [balanced, moderate_skew, extreme_skew]
+scenarios:
+  - uniform
+  - front_loaded
+  - back_loaded
+  - single_burst
+  - multi_burst
+  - one_steady_others_burst
+  - staggered
+  - overlapping
+  - skewed_heavy
+  - v_high_corr
+  - v_low_corr
+sample_hours: [1.0, 3.0, 6.0]
+quantizers: [floor, nearest, ceil]
+target_progress: [70.0, 92.0]
+window_grid:
+  single_width_pp: [3, 6, 9, 12]
+  multiphase_width_pp: [3, 6, 9, 12]
+  adaptive_spread_threshold: [0.04, 0.08, 0.12, 0.18]
+  multiscale_sets:
+    - [2, 4, 8]
+    - [3, 6, 12]
+    - [4, 8, 16]
+particle_grid:
+  cases: 72
+  particles: 320
+  latent_stationary_sd: [0.78, 1.00, 1.20, 1.40]
+  observation_soft_sigma_pp: [0.05, 0.10, 0.15]
+  timing_dirichlet_alpha: [0.45, 0.8, 1.6]
+interval_inflation_grid: [1.0, 1.3, 1.6, 2.0, 2.5, 3.0]
+guarded_inertia_grid: [0.0, 0.1, 0.2, 0.35]

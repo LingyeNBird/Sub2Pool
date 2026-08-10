@@ -1,0 +1,51 @@
+{
+  "source": "production replay against copied SQLite; no network calls",
+  "replay_result": {
+    "rebuilt_observations": 82,
+    "automatic_exclusions": 0,
+    "inferred_intervals": 2,
+    "latest_observation_id": 83
+  },
+  "algorithm": "particle_filter_v3",
+  "observations": 82,
+  "incompatible_observations": 25,
+  "projected_observations": 42,
+  "invalid_snapshot_intervals": 0,
+  "latest": {
+    "displayed_percent": 20.0,
+    "interval_used_percent": 20.0,
+    "estimated_used_percent": 19.60712,
+    "capacity_usd": 2948.97,
+    "capacity_interval_usd": [
+      2416.5164,
+      3515.6671
+    ],
+    "charged_percent_by_subject": [
+      17.15135,
+      2.45577
+    ],
+    "recommended_balance_by_subject": [
+      1200.41,
+      1051.81
+    ],
+    "diagnostics": {
+      "capacity_range_usd": [
+        1400.0,
+        4000.0
+      ],
+      "particles": 480,
+      "balance_interval_inflation": 1.3,
+      "progress_probability_interval": [
+        19.06867,
+        20.01152
+      ],
+      "progress_deterministic_bounds": [
+        19.0,
+        21.0
+      ],
+      "attribution_projection_applied": false,
+      "projection_max_adjustment_pp": 0.03069,
+      "deterministic_repairs": 0
+    }
+  }
+}

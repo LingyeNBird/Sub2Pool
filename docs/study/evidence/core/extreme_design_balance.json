@@ -1,0 +1,181 @@
+{
+  "cases": 768,
+  "design": "Full speed × scenario × quantizer grid with independently shuffled, globally balanced assignments for participant count, rights profile, sample interval, and target-progress band.",
+  "marginal_counts": {
+    "speed": {
+      "extreme_boundary_switch": 96,
+      "extreme_chirp": 96,
+      "extreme_double_reversal": 96,
+      "extreme_fast_full_sweep": 96,
+      "extreme_late_reversal": 96,
+      "extreme_monotone_full": 96,
+      "extreme_narrow_excursions": 96,
+      "extreme_random_fourier": 96
+    },
+    "scenario": {
+      "extreme_alternating_spikes": 96,
+      "extreme_first_day_whale": 96,
+      "extreme_micro_macro": 96,
+      "extreme_rights_mismatch": 96,
+      "extreme_sample_edge_bursts": 96,
+      "extreme_silent_then_burst": 96,
+      "extreme_simultaneous_spike": 96,
+      "extreme_v_opposed": 96
+    },
+    "sample_hours": {
+      "1.0": 256,
+      "3.0": 256,
+      "6.0": 256
+    },
+    "n_participants": {
+      "2": 256,
+      "4": 256,
+      "6": 256
+    },
+    "rights_profile": {
+      "balanced": 192,
+      "extreme_skew": 192,
+      "moderate_skew": 192,
+      "random": 192
+    },
+    "quantizer": {
+      "ceil": 256,
+      "floor": 256,
+      "nearest": 256
+    },
+    "progress_band": {
+      "high_88_99": 256,
+      "low_8_25": 256,
+      "medium_45_70": 256
+    }
+  },
+  "pairwise_cross_tables": {
+    "speed__scenario": {
+      "observed_cells": 64,
+      "possible_cells": 64,
+      "minimum_cell_count": 12,
+      "maximum_cell_count": 12
+    },
+    "speed__sample_hours": {
+      "observed_cells": 24,
+      "possible_cells": 24,
+      "minimum_cell_count": 25,
+      "maximum_cell_count": 38
+    },
+    "speed__n_participants": {
+      "observed_cells": 24,
+      "possible_cells": 24,
+      "minimum_cell_count": 24,
+      "maximum_cell_count": 41
+    },
+    "speed__rights_profile": {
+      "observed_cells": 32,
+      "possible_cells": 32,
+      "minimum_cell_count": 17,
+      "maximum_cell_count": 32
+    },
+    "speed__quantizer": {
+      "observed_cells": 24,
+      "possible_cells": 24,
+      "minimum_cell_count": 32,
+      "maximum_cell_count": 32
+    },
+    "speed__progress_band": {
+      "observed_cells": 24,
+      "possible_cells": 24,
+      "minimum_cell_count": 25,
+      "maximum_cell_count": 40
+    },
+    "scenario__sample_hours": {
+      "observed_cells": 24,
+      "possible_cells": 24,
+      "minimum_cell_count": 23,
+      "maximum_cell_count": 38
+    },
+    "scenario__n_participants": {
+      "observed_cells": 24,
+      "possible_cells": 24,
+      "minimum_cell_count": 23,
+      "maximum_cell_count": 40
+    },
+    "scenario__rights_profile": {
+      "observed_cells": 32,
+      "possible_cells": 32,
+      "minimum_cell_count": 19,
+      "maximum_cell_count": 31
+    },
+    "scenario__quantizer": {
+      "observed_cells": 24,
+      "possible_cells": 24,
+      "minimum_cell_count": 32,
+      "maximum_cell_count": 32
+    },
+    "scenario__progress_band": {
+      "observed_cells": 24,
+      "possible_cells": 24,
+      "minimum_cell_count": 21,
+      "maximum_cell_count": 43
+    },
+    "sample_hours__n_participants": {
+      "observed_cells": 9,
+      "possible_cells": 9,
+      "minimum_cell_count": 74,
+      "maximum_cell_count": 97
+    },
+    "sample_hours__rights_profile": {
+      "observed_cells": 12,
+      "possible_cells": 12,
+      "minimum_cell_count": 48,
+      "maximum_cell_count": 79
+    },
+    "sample_hours__quantizer": {
+      "observed_cells": 9,
+      "possible_cells": 9,
+      "minimum_cell_count": 77,
+      "maximum_cell_count": 91
+    },
+    "sample_hours__progress_band": {
+      "observed_cells": 9,
+      "possible_cells": 9,
+      "minimum_cell_count": 79,
+      "maximum_cell_count": 89
+    },
+    "n_participants__rights_profile": {
+      "observed_cells": 12,
+      "possible_cells": 12,
+      "minimum_cell_count": 58,
+      "maximum_cell_count": 68
+    },
+    "n_participants__quantizer": {
+      "observed_cells": 9,
+      "possible_cells": 9,
+      "minimum_cell_count": 81,
+      "maximum_cell_count": 92
+    },
+    "n_participants__progress_band": {
+      "observed_cells": 9,
+      "possible_cells": 9,
+      "minimum_cell_count": 69,
+      "maximum_cell_count": 101
+    },
+    "rights_profile__quantizer": {
+      "observed_cells": 12,
+      "possible_cells": 12,
+      "minimum_cell_count": 57,
+      "maximum_cell_count": 71
+    },
+    "rights_profile__progress_band": {
+      "observed_cells": 12,
+      "possible_cells": 12,
+      "minimum_cell_count": 57,
+      "maximum_cell_count": 69
+    },
+    "quantizer__progress_band": {
+      "observed_cells": 9,
+      "possible_cells": 9,
+      "minimum_cell_count": 82,
+      "maximum_cell_count": 88
+    }
+  },
+  "all_pairwise_combinations_observed": true
+}

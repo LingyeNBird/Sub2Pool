@@ -1,0 +1,110 @@
+{
+  "reportable": true,
+  "development_cases": 192,
+  "test_cases": 768,
+  "high_frequency_cases": 96,
+  "adversarial_pool_cases": 384,
+  "base_algorithms": 8,
+  "development_fallback_candidates": 77,
+  "selected_fallbacks": [
+    {
+      "mode": "conservative_on_risk",
+      "width_threshold": 0.35,
+      "disagreement_threshold": 0.18,
+      "name": "fallback_conservative_on_risk_w0p35_d0p18"
+    }
+  ],
+  "particle_count": 320,
+  "workers": 12,
+  "config": {
+    "name": "extreme_continuous_study",
+    "base_seed": 2026081001,
+    "horizon_hours": 168.0,
+    "dt_hours": 0.16666666666666666,
+    "selected_parameters_file": "results/selected_parameters.json",
+    "particle_count": 320,
+    "development_replicates": 1,
+    "test_replicates": 4,
+    "high_frequency_cases": 96,
+    "adversarial_pool_cases": 384,
+    "extreme_speeds": [
+      "extreme_fast_full_sweep",
+      "extreme_chirp",
+      "extreme_late_reversal",
+      "extreme_narrow_excursions",
+      "extreme_boundary_switch",
+      "extreme_random_fourier",
+      "extreme_monotone_full",
+      "extreme_double_reversal"
+    ],
+    "extreme_scenarios": [
+      "extreme_silent_then_burst",
+      "extreme_first_day_whale",
+      "extreme_alternating_spikes",
+      "extreme_simultaneous_spike",
+      "extreme_sample_edge_bursts",
+      "extreme_v_opposed",
+      "extreme_rights_mismatch",
+      "extreme_micro_macro"
+    ],
+    "participants": [
+      2,
+      4,
+      6
+    ],
+    "rights_profiles": [
+      "balanced",
+      "moderate_skew",
+      "extreme_skew",
+      "random"
+    ],
+    "sample_hours": [
+      1.0,
+      3.0,
+      6.0
+    ],
+    "high_frequency_sample_hours": 0.16666666666666666,
+    "quantizers": [
+      "floor",
+      "nearest",
+      "ceil"
+    ],
+    "target_progress_bands": [
+      [
+        8.0,
+        25.0
+      ],
+      [
+        45.0,
+        70.0
+      ],
+      [
+        88.0,
+        99.0
+      ]
+    ],
+    "fallback": {
+      "interval_width_ratio_thresholds": [
+        0.08,
+        0.12,
+        0.18,
+        0.25,
+        0.35
+      ],
+      "disagreement_ratio_thresholds": [
+        0.03,
+        0.05,
+        0.08,
+        0.12,
+        0.18
+      ],
+      "modes": [
+        "multiscale_on_risk",
+        "median_on_risk",
+        "conservative_on_risk"
+      ],
+      "max_mean_mae_penalty_usd": 1.0
+    }
+  },
+  "finite_sample_warning": "Adversarial-pool maxima are observed finite-pool maxima, not mathematical bounds."
+}

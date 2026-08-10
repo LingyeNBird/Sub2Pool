@@ -1,0 +1,7 @@
+{
+  "cases": 768,
+  "particle_filter_mean_mae_usd": 185.8343708516503,
+  "case_oracle_mean_mae_usd": 170.97491236971294,
+  "unrealizable_case_oracle_improvement_usd": 14.859458481937347,
+  "warning": "The case oracle uses hidden truth and is not a deployable fallback."
+}

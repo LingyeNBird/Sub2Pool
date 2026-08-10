@@ -1,0 +1,630 @@
+{
+  "source": "anonymized read-only replay of a copied SQLite snapshot",
+  "account_id_redacted": true,
+  "segments": 2,
+  "observations": 78,
+  "variants": [
+    {
+      "variant": {
+        "name": "legacy_1400_2100_p320",
+        "particles": 320,
+        "capacity_min_usd": 1400.0,
+        "capacity_max_usd": 2100.0,
+        "latent_sd": 0.78,
+        "sigma": 0.15,
+        "alpha": 0.8,
+        "seed_offset": 0,
+        "speed_taus_hours": [
+          6.0,
+          24.0,
+          72.0
+        ]
+      },
+      "segments": [
+        {
+          "observations": 49,
+          "displayed_percent": 71.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 2083.912699,
+          "capacity_hat_usd": 2098.2501166481366,
+          "capacity_interval_usd": [
+            2092.014655341558,
+            2099.535534377317
+          ],
+          "absolute_progress_hat": 100.0,
+          "display_compatible": false,
+          "progress_interval": [
+            100.0,
+            100.00000000000001
+          ],
+          "ess_fraction": 0.9182009523542703,
+          "resample_count": 11,
+          "charged_percent_by_subject": [
+            44.84232208398794,
+            23.86762543868481,
+            31.29005121261276
+          ],
+          "balance_usd_by_subject": [
+            318.04532251442674,
+            338.49818644561293,
+            0.0
+          ]
+        },
+        {
+          "observations": 29,
+          "displayed_percent": 16.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 464.448506,
+          "capacity_hat_usd": 2099.830120522251,
+          "capacity_interval_usd": [
+            2099.309320766005,
+            2099.951586317054
+          ],
+          "absolute_progress_hat": 22.118401724409,
+          "display_compatible": false,
+          "progress_interval": [
+            22.117675605779073,
+            22.121781039064388
+          ],
+          "ess_fraction": 0.675932267036325,
+          "resample_count": 4,
+          "charged_percent_by_subject": [
+            18.043504717524673,
+            4.074897006884329,
+            0.0
+          ],
+          "balance_usd_by_subject": [
+            881.0077933291108,
+            754.3636334541143,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "variant": {
+        "name": "expanded_1000_3500_p320",
+        "particles": 320,
+        "capacity_min_usd": 1000.0,
+        "capacity_max_usd": 3500.0,
+        "latent_sd": 0.78,
+        "sigma": 0.05,
+        "alpha": 0.8,
+        "seed_offset": 0,
+        "speed_taus_hours": [
+          6.0,
+          24.0,
+          72.0
+        ]
+      },
+      "segments": [
+        {
+          "observations": 49,
+          "displayed_percent": 71.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 2083.912699,
+          "capacity_hat_usd": 3499.7395050076434,
+          "capacity_interval_usd": [
+            3499.4628772365795,
+            3499.8697541398783
+          ],
+          "absolute_progress_hat": 89.0308741583369,
+          "display_compatible": false,
+          "progress_interval": [
+            89.03079862047002,
+            89.03104165957542
+          ],
+          "ess_fraction": 0.7684946544784357,
+          "resample_count": 26,
+          "charged_percent_by_subject": [
+            35.27188541475294,
+            29.17266390524823,
+            24.586323535714868
+          ],
+          "balance_usd_by_subject": [
+            865.4195644913373,
+            378.9284165622916,
+            0.0
+          ]
+        },
+        {
+          "observations": 29,
+          "displayed_percent": 16.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 464.448506,
+          "capacity_hat_usd": 2814.4271627822964,
+          "capacity_interval_usd": [
+            2405.828701852982,
+            3056.8710444644225
+          ],
+          "absolute_progress_hat": 15.811287075751636,
+          "display_compatible": true,
+          "progress_interval": [
+            15.642764266645852,
+            16.397762751757693
+          ],
+          "ess_fraction": 0.6162873159712614,
+          "resample_count": 5,
+          "charged_percent_by_subject": [
+            13.176390226968426,
+            2.602230821640564,
+            0.0
+          ],
+          "balance_usd_by_subject": [
+            1318.1425635771416,
+            1051.8611267817919,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "variant": {
+        "name": "expanded_1000_3500_p480",
+        "particles": 480,
+        "capacity_min_usd": 1000.0,
+        "capacity_max_usd": 3500.0,
+        "latent_sd": 0.78,
+        "sigma": 0.05,
+        "alpha": 0.8,
+        "seed_offset": 0,
+        "speed_taus_hours": [
+          6.0,
+          24.0,
+          72.0
+        ]
+      },
+      "segments": [
+        {
+          "observations": 49,
+          "displayed_percent": 71.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 2083.912699,
+          "capacity_hat_usd": 3499.736897405139,
+          "capacity_interval_usd": [
+            3499.448783178122,
+            3499.868800353567
+          ],
+          "absolute_progress_hat": 89.79528425078311,
+          "display_compatible": false,
+          "progress_interval": [
+            89.79520806994293,
+            89.79541010126985
+          ],
+          "ess_fraction": 0.5497570617429631,
+          "resample_count": 27,
+          "charged_percent_by_subject": [
+            35.70582850082806,
+            29.53124830434302,
+            24.558206333380504
+          ],
+          "balance_usd_by_subject": [
+            850.2320712572734,
+            366.37873533886795,
+            0.0
+          ]
+        },
+        {
+          "observations": 29,
+          "displayed_percent": 16.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 464.448506,
+          "capacity_hat_usd": 2755.012386603202,
+          "capacity_interval_usd": [
+            2360.0357431911657,
+            3096.3802574427514
+          ],
+          "absolute_progress_hat": 15.876523055591907,
+          "display_compatible": true,
+          "progress_interval": [
+            15.65658199888301,
+            16.356900485627165
+          ],
+          "ess_fraction": 0.5688863646294409,
+          "resample_count": 5,
+          "charged_percent_by_subject": [
+            13.281311199257521,
+            2.6060008349486212,
+            0.0
+          ],
+          "balance_usd_by_subject": [
+            1285.419591405151,
+            1028.8144111725521,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "variant": {
+        "name": "expanded_1000_3500_p960",
+        "particles": 960,
+        "capacity_min_usd": 1000.0,
+        "capacity_max_usd": 3500.0,
+        "latent_sd": 0.78,
+        "sigma": 0.05,
+        "alpha": 0.8,
+        "seed_offset": 0,
+        "speed_taus_hours": [
+          6.0,
+          24.0,
+          72.0
+        ]
+      },
+      "segments": [
+        {
+          "observations": 49,
+          "displayed_percent": 71.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 2083.912699,
+          "capacity_hat_usd": 3499.8457820676676,
+          "capacity_interval_usd": [
+            3499.5603369647856,
+            3499.9493493498167
+          ],
+          "absolute_progress_hat": 87.9409357259243,
+          "display_compatible": false,
+          "progress_interval": [
+            87.94087814131156,
+            87.94104784346499
+          ],
+          "ess_fraction": 0.4120617182444123,
+          "resample_count": 25,
+          "charged_percent_by_subject": [
+            34.470917897694605,
+            28.757080719893807,
+            24.712936778874052
+          ],
+          "balance_usd_by_subject": [
+            893.4783944939114,
+            393.48497443632607,
+            0.0
+          ]
+        },
+        {
+          "observations": 29,
+          "displayed_percent": 16.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 464.448506,
+          "capacity_hat_usd": 2805.5634571509636,
+          "capacity_interval_usd": [
+            2413.313453882314,
+            3097.340496159784
+          ],
+          "absolute_progress_hat": 15.84747793620151,
+          "display_compatible": true,
+          "progress_interval": [
+            15.648944512245707,
+            16.360487188372137
+          ],
+          "ess_fraction": 0.5711067229285247,
+          "resample_count": 5,
+          "charged_percent_by_subject": [
+            13.202019231130125,
+            2.693041273381685,
+            0.0
+          ],
+          "balance_usd_by_subject": [
+            1314.6123842428647,
+            1048.2539557644245,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "variant": {
+        "name": "expanded_1000_3500_p480_seed1",
+        "particles": 480,
+        "capacity_min_usd": 1000.0,
+        "capacity_max_usd": 3500.0,
+        "latent_sd": 0.78,
+        "sigma": 0.05,
+        "alpha": 0.8,
+        "seed_offset": 1,
+        "speed_taus_hours": [
+          6.0,
+          24.0,
+          72.0
+        ]
+      },
+      "segments": [
+        {
+          "observations": 49,
+          "displayed_percent": 71.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 2083.912699,
+          "capacity_hat_usd": 3499.8725786520804,
+          "capacity_interval_usd": [
+            3499.5849032178166,
+            3499.952646881089
+          ],
+          "absolute_progress_hat": 88.39706075846382,
+          "display_compatible": false,
+          "progress_interval": [
+            88.39702218499964,
+            88.39717111632675
+          ],
+          "ess_fraction": 0.46847309719483243,
+          "resample_count": 24,
+          "charged_percent_by_subject": [
+            35.08225486830533,
+            28.805419781964375,
+            24.50938334703477
+          ],
+          "balance_usd_by_subject": [
+            872.0893219622947,
+            391.79608785998954,
+            0.0
+          ]
+        },
+        {
+          "observations": 29,
+          "displayed_percent": 16.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 464.448506,
+          "capacity_hat_usd": 2761.2468029907236,
+          "capacity_interval_usd": [
+            2389.7396277366215,
+            3099.3682935816164
+          ],
+          "absolute_progress_hat": 15.856585182086055,
+          "display_compatible": true,
+          "progress_interval": [
+            15.649059990112065,
+            16.089902628675876
+          ],
+          "ess_fraction": 0.5364151925889018,
+          "resample_count": 5,
+          "charged_percent_by_subject": [
+            13.251366918937926,
+            2.5573389225786203,
+            0.0
+          ],
+          "balance_usd_by_subject": [
+            1288.6899393662889,
+            1031.6279419461894,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "variant": {
+        "name": "expanded_1000_3500_p480_seed2",
+        "particles": 480,
+        "capacity_min_usd": 1000.0,
+        "capacity_max_usd": 3500.0,
+        "latent_sd": 0.78,
+        "sigma": 0.05,
+        "alpha": 0.8,
+        "seed_offset": 2,
+        "speed_taus_hours": [
+          6.0,
+          24.0,
+          72.0
+        ]
+      },
+      "segments": [
+        {
+          "observations": 49,
+          "displayed_percent": 71.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 2083.912699,
+          "capacity_hat_usd": 3499.8529532267617,
+          "capacity_interval_usd": [
+            3499.5339972682964,
+            3499.9534665552933
+          ],
+          "absolute_progress_hat": 88.21423030655365,
+          "display_compatible": false,
+          "progress_interval": [
+            88.21417894734036,
+            88.21434180823934
+          ],
+          "ess_fraction": 0.874314339282497,
+          "resample_count": 24,
+          "charged_percent_by_subject": [
+            35.71288052783734,
+            28.419457978770694,
+            24.081888750376102
+          ],
+          "balance_usd_by_subject": [
+            850.0133431239802,
+            405.30212810723776,
+            0.0
+          ]
+        },
+        {
+          "observations": 29,
+          "displayed_percent": 16.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 464.448506,
+          "capacity_hat_usd": 2829.5195416557035,
+          "capacity_interval_usd": [
+            2424.946607638742,
+            3127.8026300614692
+          ],
+          "absolute_progress_hat": 15.823851749479678,
+          "display_compatible": true,
+          "progress_interval": [
+            15.627087986692866,
+            16.378980083974756
+          ],
+          "ess_fraction": 0.5260801644533324,
+          "resample_count": 5,
+          "charged_percent_by_subject": [
+            13.22394554524019,
+            2.6362299953111856,
+            0.0
+          ],
+          "balance_usd_by_subject": [
+            1320.4736380482775,
+            1051.5302944359391,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "variant": {
+        "name": "expanded_1000_3500_p480_seed3",
+        "particles": 480,
+        "capacity_min_usd": 1000.0,
+        "capacity_max_usd": 3500.0,
+        "latent_sd": 0.78,
+        "sigma": 0.05,
+        "alpha": 0.8,
+        "seed_offset": 3,
+        "speed_taus_hours": [
+          6.0,
+          24.0,
+          72.0
+        ]
+      },
+      "segments": [
+        {
+          "observations": 49,
+          "displayed_percent": 71.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 2083.912699,
+          "capacity_hat_usd": 3499.6744667566218,
+          "capacity_interval_usd": [
+            3499.389136915386,
+            3499.843781790021
+          ],
+          "absolute_progress_hat": 88.97983131662696,
+          "display_compatible": false,
+          "progress_interval": [
+            88.97975336783426,
+            88.97997225545356
+          ],
+          "ess_fraction": 0.47105721806231887,
+          "resample_count": 27,
+          "charged_percent_by_subject": [
+            35.47509903886247,
+            29.012744142336867,
+            24.491984356512127
+          ],
+          "balance_usd_by_subject": [
+            858.2921733974706,
+            384.5183855628685,
+            0.0
+          ]
+        },
+        {
+          "observations": 29,
+          "displayed_percent": 16.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 464.448506,
+          "capacity_hat_usd": 2790.3765886712413,
+          "capacity_interval_usd": [
+            2259.882196648167,
+            3098.0963388387195
+          ],
+          "absolute_progress_hat": 15.88091401985382,
+          "display_compatible": true,
+          "progress_interval": [
+            15.674423716759387,
+            16.467834126678657
+          ],
+          "ess_fraction": 0.5886877673391221,
+          "resample_count": 5,
+          "charged_percent_by_subject": [
+            13.231903012050743,
+            2.7125877984130526,
+            0.0
+          ],
+          "balance_usd_by_subject": [
+            1304.83310232325,
+            1040.2837673411245,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "variant": {
+        "name": "expanded_1000_3500_p480_long_taus",
+        "particles": 480,
+        "capacity_min_usd": 1000.0,
+        "capacity_max_usd": 3500.0,
+        "latent_sd": 0.78,
+        "sigma": 0.05,
+        "alpha": 0.8,
+        "seed_offset": 0,
+        "speed_taus_hours": [
+          6.0,
+          24.0,
+          72.0,
+          168.0,
+          336.0
+        ]
+      },
+      "segments": [
+        {
+          "observations": 49,
+          "displayed_percent": 71.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 2083.912699,
+          "capacity_hat_usd": 3499.003742261359,
+          "capacity_interval_usd": [
+            3498.5031166704744,
+            3499.2756563745875
+          ],
+          "absolute_progress_hat": 90.08719420406297,
+          "display_compatible": false,
+          "progress_interval": [
+            90.08708232239458,
+            90.08737434324107
+          ],
+          "ess_fraction": 0.6282953727220032,
+          "resample_count": 27,
+          "charged_percent_by_subject": [
+            35.05904269825355,
+            30.512778616050728,
+            24.515370897776688
+          ],
+          "balance_usd_by_subject": [
+            872.6848010393534,
+            331.9581079135779,
+            0.0
+          ]
+        },
+        {
+          "observations": 29,
+          "displayed_percent": 16.0,
+          "baseline_display_percent": 0.0,
+          "selected_total_cost_usd": 464.448506,
+          "capacity_hat_usd": 2817.365019010969,
+          "capacity_interval_usd": [
+            2486.92178461227,
+            2999.6127800938148
+          ],
+          "absolute_progress_hat": 15.806032592304522,
+          "display_compatible": true,
+          "progress_interval": [
+            15.631673439211742,
+            16.040821076280185
+          ],
+          "ess_fraction": 0.6584745840378744,
+          "resample_count": 5,
+          "charged_percent_by_subject": [
+            13.140453400281631,
+            2.739007236458523,
+            0.0
+          ],
+          "balance_usd_by_subject": [
+            1319.4331353139937,
+            1050.2308077975324,
+            0.0
+          ]
+        }
+      ]
+    }
+  ],
+  "expanded_p480_seed_sensitivity": {
+    "capacity_range_usd": 74.50715505250173,
+    "max_subject_charged_range_pp": 0.18166831387990268
+  }
+}

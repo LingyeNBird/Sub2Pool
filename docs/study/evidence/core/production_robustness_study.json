@@ -1,0 +1,86 @@
+{
+  "study": "production projection, expanded interval calibration, and particle-count sensitivity",
+  "production_source": "backend",
+  "continuous_capacity_paths": true,
+  "regimes": [
+    "upper_return_mild",
+    "upper_return_extreme",
+    "lower_return_mild",
+    "lower_return_extreme",
+    "upper_rebound",
+    "lower_rebound",
+    "upper_persistent",
+    "lower_persistent",
+    "in_range_upper",
+    "in_range_lower"
+  ],
+  "particle_counts": [
+    120,
+    240,
+    320,
+    480,
+    960,
+    1920
+  ],
+  "inflation_factors": [
+    1.0,
+    1.15,
+    1.3,
+    1.5,
+    1.75,
+    2.0,
+    2.5,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    16.0,
+    24.0
+  ],
+  "development_cases": 300,
+  "confirmation_cases": 600,
+  "stability_cases": 30,
+  "stability_replicates": 6,
+  "nominal_global_inflation": null,
+  "conservative_global_inflation": null,
+  "conditional_inflations": {
+    "stage1_upper": "deterministic",
+    "stage1_lower": 1.3,
+    "stage2plus_upper": 1.0,
+    "stage2plus_lower": 1.0
+  },
+  "conditional_development": {
+    "split": "development",
+    "cases": 213,
+    "covered": 45352,
+    "total": 48716,
+    "coverage": 0.9309467115526726,
+    "coverage_ci95_low": 0.9069981719320436,
+    "coverage_ci95_high": 0.9490913494060531,
+    "mean_width_usd": 448.4265427719779
+  },
+  "conditional_confirmation": {
+    "split": "confirmation",
+    "cases": 413,
+    "covered": 101356,
+    "total": 106648,
+    "coverage": 0.9503788162928513,
+    "coverage_ci95_low": 0.9419947899424451,
+    "coverage_ci95_high": 0.9581393421018266,
+    "mean_width_usd": 441.52756585524037
+  },
+  "selection_rule": "nominal global and conditional factors are the smallest development factors with >=90% pooled coverage; conservative global additionally requires the case-cluster bootstrap 95% lower bound >=90% in all eligible expansion groups",
+  "projection_comparison": {
+    "cases": 600,
+    "mean_difference_usd": 0.03629425005220101,
+    "ci95_low_usd": -0.014569715065741586,
+    "ci95_high_usd": 0.0898179041229027
+  },
+  "random_salts": {
+    "development": "production-robustness-development-20260810",
+    "confirmation": "production-robustness-confirmation-20260810"
+  }
+}

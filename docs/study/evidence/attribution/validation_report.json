@@ -1,0 +1,93 @@
+{
+  "status": "PASS",
+  "checks": {
+    "main_fast": {
+      "cycles": 100000,
+      "algorithms": 8,
+      "rows": 800000,
+      "success_rate": 1.0
+    },
+    "main_lp": {
+      "cycles": 10000,
+      "algorithms": 8,
+      "rows": 80000,
+      "success_rate": 1.0
+    },
+    "ood_fast": {
+      "cycles": 10000,
+      "algorithms": 8,
+      "rows": 80000,
+      "success_rate": 1.0
+    },
+    "ood_lp": {
+      "cycles": 2000,
+      "algorithms": 8,
+      "rows": 16000,
+      "success_rate": 1.0
+    },
+    "center_audit": {
+      "rows": 480,
+      "cycles": 120,
+      "nonunique_cycle_fraction": 0.975
+    },
+    "timestamp_ties": {
+      "cycles": 1000,
+      "exact_coverage": 1.0,
+      "legacy_coverage": 1.0,
+      "legacy_is_outer_envelope_all": true
+    },
+    "strict_delay": {
+      "rows": 81000,
+      "full_cycles": 600,
+      "target_fractions": [
+        0.25,
+        0.5,
+        0.75
+      ],
+      "requested_lags_minutes": [
+        0,
+        360,
+        720,
+        1440,
+        2880
+      ]
+    },
+    "quantizer_stress": {
+      "rows": 15000,
+      "cycles": 3750,
+      "generator_quantizers": [
+        "fixed_offset",
+        "floor",
+        "irregular",
+        "nearest",
+        "switching_offset"
+      ]
+    },
+    "history_rows": 7200,
+    "reconciliation_rows": 3600,
+    "boundary_rows": 1000,
+    "phase_interaction": {
+      "scenario_files": 10,
+      "rows": 108900,
+      "audit_cycles": 30,
+      "configurations_per_cycle": 3630
+    },
+    "active_search": {
+      "algorithm_rows": 96,
+      "independent_search_runs": 16,
+      "targets": [
+        "adaptive",
+        "global",
+        "moving",
+        "phase"
+      ],
+      "max_found_over_attribution_pp": 11.29201297387413
+    },
+    "final_summary": {
+      "set_coverage": 1.0,
+      "phase_vs_single_window_mae_improvement_pct": 13.826428438271222
+    },
+    "required_figures": 20,
+    "paper_pdf_bytes": 675299
+  }
+}

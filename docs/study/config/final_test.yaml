@@ -1,0 +1,34 @@
+name: final_test
+base_seed: 202608800
+horizon_hours: 168.0
+dt_hours: 0.16666666666666666
+speeds: [slow, medium, fast]
+participants: [2, 4, 6]
+rights_profiles: [balanced, moderate_skew, extreme_skew]
+scenarios:
+  - uniform
+  - front_loaded
+  - back_loaded
+  - single_burst
+  - multi_burst
+  - one_steady_others_burst
+  - staggered
+  - overlapping
+  - skewed_heavy
+  - v_high_corr
+  - v_low_corr
+challenging_second_replicate:
+  - single_burst
+  - staggered
+  - v_high_corr
+sample_hours: [1.0, 3.0, 6.0]
+quantizers: [floor, nearest, ceil]
+target_progress: [70.0, 92.0]
+stress_speeds:
+  - stress_monotone_down
+  - stress_monotone_up
+  - stress_oscillatory
+  - stress_endpoint_reversal
+stress_scenarios: [staggered, overlapping]
+selected_parameters_file: results/selected_parameters.json
+particle_count: 320

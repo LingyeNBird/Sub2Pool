@@ -1,0 +1,51 @@
+version: 2.4-final-rebuild
+model:
+  closed_event_log: true
+  shared_time_varying_rate: true
+  V_range:
+  - 1400
+  - 2100
+  main_quantizer: fixed_offset_unknown_theta
+  sample_period_days: 7
+seeds:
+  phase_development: 20261001
+  phase_validation: 20261002
+  main_fast: 20261003
+  main_lp: 20261004
+  ood_fast: 20261005
+  ood_lp: 20261006
+  tie: 20261007
+  delay: 20261008
+  quantizer: 20261009
+  history: 20261010
+  adversarial: 20261011
+sample_sizes:
+  phase_screen_per_family: 40
+  phase_validation_per_family: 80
+  main_fast_per_family: 10000
+  main_lp_per_family: 1000
+  ood_fast_per_family: 2000
+  ood_lp_per_family: 400
+  tie_cycles: 1000
+  delay_cycles_per_family: 100
+  quantizer_cycles_per_cell: 250
+  history_sequences_per_regime: 100
+  adversarial_restarts: 4
+reporting:
+  bootstrap_replicates: 1000
+  quantiles:
+  - 0.95
+  - 0.99
+  scenario_weighting: equal
+  maxima_label: observed maximum
+selected_phase_configuration:
+  width: 15.0
+  n_phases: 10
+  phase_scheme: uniform
+  aggregation: trimmed
+selected_adaptive_configuration:
+  threshold: 0.05
+  max_width: 20
+  n_phases: 2
+  phase_scheme: halfshift
+  aggregation: huber
