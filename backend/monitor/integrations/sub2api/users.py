@@ -57,6 +57,52 @@ class UserResourceMixin:
             if page > 100:
                 raise Sub2APIError("Sub2API 用户数量异常，已停止读取")
         return users
+    def list_user_api_keys(self, user_id: int) -> list[dict[str, Any]]:
+        """分页读取指定用户的 API 密钥元数据，不返回密钥内容。"""
+        api_keys: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            data = self._get(
+                f"api/v1/admin/users/{user_id}/api-keys",
+                params={
+                    "page": page,
+                    "page_size": 100,
+                    "sort_by": "created_at",
+                    "sort_order": "asc",
+                },
+            )
+            if not isinstance(data, dict) or not isinstance(
+                data.get("items"),
+                list,
+            ):
+                raise Sub2APIError("Sub2API API 密钥列表响应结构错误")
+            for raw in data["items"]:
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    api_key_id = int(raw.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                if api_key_id <= 0:
+                    continue
+                api_keys.append(
+                    {
+                        "id": api_key_id,
+                        "name": str(raw.get("name") or "").strip(),
+                        "status": str(raw.get("status") or "").strip(),
+                    }
+                )
+            try:
+                pages = max(1, int(data.get("pages") or 1))
+            except (TypeError, ValueError) as exc:
+                raise Sub2APIError("Sub2API API 密钥列表分页字段无效") from exc
+            if page >= pages:
+                break
+            page += 1
+            if page > 100:
+                raise Sub2APIError("Sub2API API 密钥数量异常，已停止读取")
+        return api_keys
+
 
     def user_balance(self, user_id: int) -> UserBalance:
         """读取用户全局余额；只调用详情 GET 接口，不会修改余额。"""

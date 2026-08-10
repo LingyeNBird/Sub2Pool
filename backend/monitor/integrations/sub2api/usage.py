@@ -14,6 +14,20 @@ from .dto import (
 )
 
 
+def _positive_int(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
+
+
+def _api_key_name(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    return str(value.get("name") or "").strip()
+
+
 class UsageResourceMixin:
     def all_user_usage_stats(
         self,
@@ -122,6 +136,7 @@ class UsageResourceMixin:
         started_at: datetime | None,
         ended_at: datetime,
         timezone_name: str,
+        user_id: int | None = None,
     ) -> list[Sub2APIUsageLog]:
         """分页只读请求日志，并在本地收紧到精确的半开时间区间。
 
@@ -156,6 +171,8 @@ class UsageResourceMixin:
             params["start_date"] = (
                 start_utc.astimezone(location).date().isoformat()
             )
+        if user_id is not None:
+            params["user_id"] = user_id
 
         rows: list[Sub2APIUsageLog] = []
         seen_ids: set[int] = set()
@@ -173,16 +190,18 @@ class UsageResourceMixin:
                     continue
                 try:
                     log_id = int(raw.get("id"))
-                    user_id = int(raw.get("user_id"))
+                    returned_user_id = int(raw.get("user_id"))
                     returned_account_id = int(raw.get("account_id"))
                 except (TypeError, ValueError):
                     continue
                 if (
                     log_id <= 0
-                    or user_id <= 0
+                    or returned_user_id <= 0
                     or returned_account_id != account_id
                     or log_id in seen_ids
                 ):
+                    continue
+                if user_id is not None and returned_user_id != user_id:
                     continue
                 created_at = _timestamp(raw.get("created_at"), "created_at")
                 if created_at >= end_utc or (
@@ -193,7 +212,7 @@ class UsageResourceMixin:
                 rows.append(
                     Sub2APIUsageLog(
                         id=log_id,
-                        user_id=user_id,
+                        user_id=returned_user_id,
                         account_id=returned_account_id,
                         created_at=created_at,
                         service_tier=str(raw.get("service_tier") or "")
@@ -204,6 +223,8 @@ class UsageResourceMixin:
                             raw.get("actual_cost"),
                             "actual_cost",
                         ),
+                        api_key_id=_positive_int(raw.get("api_key_id")),
+                        api_key_name=_api_key_name(raw.get("api_key")),
                     )
                 )
 

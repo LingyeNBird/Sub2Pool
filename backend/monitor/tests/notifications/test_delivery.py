@@ -29,6 +29,7 @@ from monitor.models import (
     Sub2APIUserUsageSample,
 )
 from monitor.notifications import send_notification
+from monitor.sampling.notifications import send_observation_notifications
 from monitor.replay import (
     RATE_METHOD,
     exclude_observation,
@@ -173,6 +174,67 @@ def test_resend_retries_one_transient_transport_failure(monkeypatch):
     assert requests[0]["headers"]["Idempotency-Key"] == requests[1]["headers"]["Idempotency-Key"]
     assert requests[0]["json"] == requests[1]["json"]
 
+
+@pytest.mark.django_db
+def test_exhausted_balance_with_remaining_rights_emails_top_up_notice(
+    monkeypatch,
+):
+    config = AppSettings.load()
+    config.notify_on_limit_exhausted = True
+    config.limit_warning_usd = Decimal("1")
+    config.save()
+    participant = Participant.objects.create(
+        name="待补额车友",
+        email="rider@example.com",
+        sub2api_user_id=51,
+        share_percent=50,
+    )
+    now = timezone.now()
+    observation = Observation.objects.create(
+        account_id=7,
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=3),
+        attribution_started_at=now - timedelta(days=4),
+        upstream_used_percent=Decimal("20"),
+        interval_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("400"),
+        selected_total_cost=Decimal("400"),
+        total_standard_cost=Decimal("400"),
+        total_actual_cost=Decimal("400"),
+        effective_usd_per_percent=Decimal("20"),
+    )
+    ParticipantSnapshot.objects.create(
+        observation=observation,
+        participant=participant,
+        raw_selected_cost=Decimal("200"),
+        selected_cost=Decimal("200"),
+        current_balance_usd=Decimal("0"),
+        charged_cycle_percent=Decimal("40"),
+        remaining_share_percent=Decimal("10"),
+        recommended_balance_usd=Decimal("190"),
+        needs_manual_update=True,
+    )
+    captured = []
+
+    def fake_send_notification(**kwargs):
+        captured.append(kwargs)
+
+    monkeypatch.setattr(
+        "monitor.sampling.notifications.send_notification",
+        fake_send_notification,
+    )
+
+    send_observation_notifications(config, observation, None)
+
+    assert len(captured) == 1
+    assert captured[0]["event_type"] == "limit_exhausted"
+    assert captured[0]["participant"] == participant
+    assert "需要手动补充余额" in captured[0]["subject"]
+    assert "剩余百分比权益：10.00000%" in captured[0]["body"]
+    assert "建议手动把用户余额设置为：$190.0000" in captured[0]["body"]
+
+
 @pytest.mark.django_db
 def test_usage_logs_are_paginated_and_filtered_to_exact_interval():
     config = AppSettings.load()
@@ -190,6 +252,7 @@ def test_usage_logs_are_paginated_and_filtered_to_exact_interval():
         account_id: int = 7,
         user_id: int = 51,
         service_tier: str = "priority",
+        api_key_id: int = 91,
     ):
         return {
             "id": log_id,
@@ -199,6 +262,8 @@ def test_usage_logs_are_paginated_and_filtered_to_exact_interval():
             "service_tier": service_tier,
             "total_cost": "4.00",
             "actual_cost": "3.00",
+            "api_key_id": api_key_id,
+            "api_key": {"id": api_key_id, "name": "主密钥"},
         }
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -207,6 +272,7 @@ def test_usage_logs_are_paginated_and_filtered_to_exact_interval():
         assert request.url.params["account_id"] == "7"
         assert request.url.params["page_size"] == "1000"
         assert request.url.params["sort_order"] == "asc"
+        assert request.url.params["user_id"] == "51"
         page = int(request.url.params["page"])
         requested_pages.append(page)
         items = (
@@ -241,10 +307,13 @@ def test_usage_logs_are_paginated_and_filtered_to_exact_interval():
             started_at=started_at,
             ended_at=ended_at,
             timezone_name="Asia/Shanghai",
+            user_id=51,
         )
 
     assert requested_pages == [1, 2]
-    assert [row.id for row in rows] == [2, 4]
-    assert [row.user_id for row in rows] == [51, 52]
+    assert [row.id for row in rows] == [2]
+    assert [row.user_id for row in rows] == [51]
     assert rows[0].total_cost == Decimal("4.00")
     assert rows[0].actual_cost == Decimal("3.00")
+    assert rows[0].api_key_id == 91
+    assert rows[0].api_key_name == "主密钥"

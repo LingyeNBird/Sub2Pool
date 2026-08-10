@@ -6,6 +6,7 @@ import { ApiError, api } from "@/services/api";
 import type { CapacityPoint, StatisticsData } from "@/types";
 
 import CapacityBasisDialog from "./components/CapacityBasisDialog.vue";
+import APIUsageBreakdownDialog from "./components/APIUsageBreakdownDialog.vue";
 import CapacityOverviewCard from "./components/CapacityOverviewCard.vue";
 import DailyClosingBasisDialog from "./components/DailyClosingBasisDialog.vue";
 import ParticipantUsageCard from "./components/ParticipantUsageCard.vue";
@@ -18,6 +19,10 @@ interface ClosingBasisDialogHandle {
   open: (point: CapacityPoint, kind: "cycle" | "daily") => void;
 }
 
+interface APIUsageDialogHandle {
+  open: (participantId: number, participantName: string) => void;
+}
+
 const data = ref<StatisticsData | null>(null);
 const loading = ref(true);
 const message = ref("");
@@ -27,6 +32,7 @@ const usageDays = ref(7);
 const usagePrecision = ref<"raw" | "hour" | "day">("hour");
 const basisDialog = ref<BasisDialogHandle | null>(null);
 const closingBasisDialog = ref<ClosingBasisDialogHandle | null>(null);
+const apiUsageDialog = ref<APIUsageDialogHandle | null>(null);
 
 async function load() {
   loading.value = true;
@@ -48,6 +54,10 @@ async function load() {
 
 function showClosingBasis(point: CapacityPoint, kind: "cycle" | "daily") {
   closingBasisDialog.value?.open(point, kind);
+}
+
+function showApiUsage(participantId: number, participantName: string) {
+  apiUsageDialog.value?.open(participantId, participantName);
 }
 
 watch([capacityPeriod, capacityDays, usageDays, usagePrecision], load);
@@ -87,10 +97,12 @@ onMounted(load);
     v-model:precision="usagePrecision"
     :data="data"
     :loading="loading"
+    @show-api-usage="showApiUsage"
   />
   <CapacityBasisDialog v-if="data" ref="basisDialog" :data="data" />
   <DailyClosingBasisDialog
     ref="closingBasisDialog"
     :fast-correction-enabled="data?.fast_correction_enabled ?? false"
   />
+  <APIUsageBreakdownDialog ref="apiUsageDialog" />
 </template>

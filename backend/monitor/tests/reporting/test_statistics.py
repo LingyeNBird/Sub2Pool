@@ -338,3 +338,139 @@ def test_statistics_endpoint_formula_is_independent_of_quota_model():
     )
     assert time_varying["capacity_summary"]["cycle"]["estimate_usd"] == 3000.0
     assert time_varying["capacity_series"][-1]["weekly_total_usd"] == 3000.0
+
+
+
+@pytest.mark.django_db
+def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
+    monkeypatch,
+):
+    User = get_user_model()
+    User.objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    viewer = User.objects.create_user(
+        username="viewer",
+        password="Viewer-Access-2026!secure",
+        email="viewer@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.cost_basis = "actual"
+    config.save()
+    participant = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=22,
+        share_percent=50,
+    )
+    participant.authorized_users.add(viewer)
+    hidden = Participant.objects.create(
+        name="未授权车友",
+        sub2api_user_id=23,
+        share_percent=50,
+    )
+    now = timezone.now()
+    starts_at = now - timedelta(days=2)
+    Observation.objects.create(
+        account_id=7,
+        observed_at=now - timedelta(minutes=5),
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=5),
+        attribution_started_at=starts_at,
+        upstream_used_percent=Decimal("20"),
+        interval_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("400"),
+        selected_total_cost=Decimal("400"),
+        total_standard_cost=Decimal("500"),
+        total_actual_cost=Decimal("400"),
+        effective_usd_per_percent=Decimal("20"),
+    )
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def list_user_api_keys(self, user_id):
+            assert user_id == 22
+            return [
+                {"id": 1, "name": "主密钥", "status": "active"},
+                {"id": 3, "name": "尚未使用", "status": "active"},
+            ]
+
+        def usage_logs(self, **kwargs):
+            assert kwargs["account_id"] == 7
+            assert kwargs["user_id"] == 22
+            assert kwargs["started_at"] == starts_at
+            assert kwargs["ended_at"] >= now
+            return [
+                Sub2APIUsageLog(
+                    id=1,
+                    user_id=22,
+                    account_id=7,
+                    created_at=now - timedelta(hours=2),
+                    service_tier="",
+                    total_cost=Decimal("75"),
+                    actual_cost=Decimal("60"),
+                    api_key_id=1,
+                    api_key_name="主密钥",
+                ),
+                Sub2APIUsageLog(
+                    id=2,
+                    user_id=22,
+                    account_id=7,
+                    created_at=now - timedelta(hours=1),
+                    service_tier="",
+                    total_cost=Decimal("50"),
+                    actual_cost=Decimal("40"),
+                    api_key_id=2,
+                    api_key_name="已删除密钥",
+                ),
+            ]
+
+    monkeypatch.setattr("monitor.views.statistics.Sub2APIClient", FakeClient)
+    client = Client()
+    headers, _ = jwt_login(
+        client,
+        username="viewer",
+        password="Viewer-Access-2026!secure",
+    )
+    response = client.get(
+        f"/api/statistics/participants/{participant.id}/api-usage",
+        **headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["starts_at"] == starts_at.isoformat()
+    assert data["cost_basis"] == "actual"
+    assert data["participant_total_usd"] == 100.0
+    assert data["weekly_total_estimate_usd"] == 2000.0
+    assert data["participant_weekly_percent"] == 5.0
+    assert [
+        (
+            item["name"],
+            item["usage_usd"],
+            item["participant_usage_percent"],
+            item["weekly_quota_percent"],
+        )
+        for item in data["api_keys"]
+    ] == [
+        ("主密钥", 60.0, 60.0, 3.0),
+        ("尚未使用", 0.0, 0.0, 0.0),
+        ("已删除密钥", 40.0, 40.0, 2.0),
+    ]
+    assert (
+        client.get(
+            f"/api/statistics/participants/{hidden.id}/api-usage",
+            **headers,
+        ).status_code
+        == 404
+    )

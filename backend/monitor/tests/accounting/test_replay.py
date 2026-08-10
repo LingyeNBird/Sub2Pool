@@ -1493,3 +1493,73 @@ def test_replay_repairs_cumulative_cost_rollback_without_double_counting():
         ]
         == 0.0
     )
+
+
+@pytest.mark.django_db
+def test_dynamic_model_removes_safety_factor_for_only_remaining_participant(
+    monkeypatch,
+):
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.safety_factor = Decimal("0.5")
+    config.save()
+    exhausted = Participant.objects.create(
+        name="已跑完",
+        sub2api_user_id=1,
+        share_percent=10,
+    )
+    remaining = Participant.objects.create(
+        name="唯一剩余",
+        sub2api_user_id=2,
+        share_percent=90,
+    )
+    reset_at = timezone.now() + timedelta(days=4)
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def query_weekly_window(self, _account_id, _mode):
+            return WeeklyWindow(
+                Decimal("20"),
+                604800,
+                345600,
+                int(reset_at.timestamp()),
+                "passive_snapshot",
+            )
+
+        def usage_stats(self, *, user_id=None, **_kwargs):
+            costs = {
+                None: Decimal("400"),
+                1: Decimal("400"),
+                2: Decimal("0"),
+            }
+            return UsageStats(costs[user_id], costs[user_id])
+
+        def user_balance(self, _user_id):
+            return UserBalance(Decimal("0"), Decimal("0"))
+
+    monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+
+    run_monitor(force_upstream=True, source="manual")
+
+    observation = Observation.objects.get()
+    snapshots = {
+        item.participant_id: item for item in ParticipantSnapshot.objects.all()
+    }
+    assert snapshots[exhausted.id].remaining_share_percent == Decimal("0")
+    remaining_snapshot = snapshots[remaining.id]
+    expected = (
+        remaining_snapshot.remaining_share_percent
+        * observation.effective_usd_per_percent
+    ).quantize(Decimal("0.01"))
+    assert remaining_snapshot.recommended_balance_usd == expected
+    assert remaining_snapshot.recommended_balance_usd > expected * Decimal(
+        "0.9"
+    )

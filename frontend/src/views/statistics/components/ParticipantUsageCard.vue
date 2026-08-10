@@ -12,6 +12,10 @@ const props = defineProps<{
   loading: boolean;
 }>();
 
+const emit = defineEmits<{
+  showApiUsage: [participantId: number, participantName: string];
+}>();
+
 const usageDays = defineModel<number>("days", { required: true });
 const usagePrecision = defineModel<"raw" | "hour" | "day">("precision", {
   required: true,
@@ -138,6 +142,19 @@ const usageIntervalLabel = computed(
                   formatCurrency(series.points.at(-1)?.balance_usd)
                 }}
               </div>
+              <button
+                type="button"
+                class="btn mt-2 btn-outline btn-xs"
+                @click="
+                  emit(
+                    'showApiUsage',
+                    series.participant_id,
+                    series.participant_name,
+                  )
+                "
+              >
+                <AppIcon name="chart-pie" class="size-4" />API 用量构成
+              </button>
             </div>
           </div>
           <p class="mt-4 text-xs font-medium opacity-60">

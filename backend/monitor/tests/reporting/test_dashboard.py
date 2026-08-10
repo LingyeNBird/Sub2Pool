@@ -2,7 +2,7 @@ import json
 import sqlite3
 from io import BytesIO, StringIO
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from decimal import Decimal
 
 from zoneinfo import ZoneInfo
@@ -83,6 +83,82 @@ def test_dashboard_only_lists_participants_that_need_manual_adjustment():
     assert [
         item["id"] for item in dashboard.json()["data"]["participants"]
     ] == [actionable.id]
+
+
+@pytest.mark.django_db
+def test_dashboard_warns_only_when_overuse_interval_clears_contract_share():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.weekly_quota_model = "time_varying"
+    config.save()
+    confirmed = Participant.objects.create(
+        name="确认超用",
+        sub2api_user_id=61,
+        share_percent=40,
+    )
+    uncertain = Participant.objects.create(
+        name="尚不确定",
+        sub2api_user_id=62,
+        share_percent=40,
+    )
+    now = timezone.now()
+    observation = Observation.objects.create(
+        account_id=7,
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=3),
+        attribution_started_at=now - timedelta(days=4),
+        upstream_used_percent=Decimal("50"),
+        interval_used_percent=Decimal("50"),
+        raw_selected_total_cost=Decimal("1000"),
+        selected_total_cost=Decimal("1000"),
+        total_standard_cost=Decimal("1000"),
+        total_actual_cost=Decimal("1000"),
+        effective_usd_per_percent=Decimal("20"),
+    )
+    ParticipantSnapshot.objects.create(
+        observation=observation,
+        participant=confirmed,
+        raw_selected_cost=Decimal("860"),
+        selected_cost=Decimal("860"),
+        charged_cycle_percent=Decimal("43"),
+        charged_percent_lower=Decimal("41"),
+        charged_percent_upper=Decimal("45"),
+        remaining_share_percent=Decimal("0"),
+        needs_manual_update=False,
+    )
+    ParticipantSnapshot.objects.create(
+        observation=observation,
+        participant=uncertain,
+        raw_selected_cost=Decimal("820"),
+        selected_cost=Decimal("820"),
+        charged_cycle_percent=Decimal("41"),
+        charged_percent_lower=Decimal("39"),
+        charged_percent_upper=Decimal("43"),
+        remaining_share_percent=Decimal("0"),
+        needs_manual_update=False,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    data = client.get("/api/dashboard", **headers).json()["data"]
+
+    assert [item["id"] for item in data["participants"]] == [confirmed.id]
+    snapshot = data["participants"][0]["snapshot"]
+    assert snapshot["is_overused"] is True
+    assert snapshot["overused_percent"] == 3.0
+    assert snapshot["overused_percent_min"] == 1.0
+    assert snapshot["overused_percent_max"] == 5.0
+    visible = client.get("/api/participants", **headers).json()["data"]
+    uncertain_snapshot = next(
+        item["snapshot"] for item in visible if item["id"] == uncertain.id
+    )
+    assert uncertain_snapshot["is_overused"] is False
 
 
 
@@ -428,7 +504,7 @@ def test_initial_observation_respects_capacity_bounds_and_builds_recommendations
     config.save()
     owner = Participant.objects.create(name="车主", sub2api_user_id=1, share_percent=50, is_owner=True)
     rider = Participant.objects.create(name="车友", sub2api_user_id=2, share_percent=50)
-    reset_at = timezone.now() + timedelta(days=4)
+    reset_at = datetime(2026, 8, 14, tzinfo=datetime_timezone.utc)
 
     class FakeClient:
         def __init__(self, _config):
@@ -463,10 +539,10 @@ def test_initial_observation_respects_capacity_bounds_and_builds_recommendations
     owner_snapshot = snapshots[owner.id]
     rider_snapshot = snapshots[rider.id]
     assert owner_snapshot.charged_cycle_percent > rider_snapshot.charged_cycle_percent
-    assert float(owner_snapshot.charged_cycle_percent) == pytest.approx(
-        float(rider_snapshot.charged_cycle_percent) * 3,
-        rel=0.08,
-    )
+    assert float(
+        owner_snapshot.charged_cycle_percent
+        + rider_snapshot.charged_cycle_percent
+    ) == pytest.approx(40, abs=1)
     assert (
         owner_snapshot.charged_percent_lower
         <= owner_snapshot.charged_cycle_percent
@@ -480,3 +556,71 @@ def test_initial_observation_respects_capacity_bounds_and_builds_recommendations
     assert owner_snapshot.recommended_balance_usd is not None
     assert rider_snapshot.recommended_balance_usd is not None
     assert ParticipantUsageSample.objects.count() == 2
+
+
+@pytest.mark.django_db
+def test_constant_average_removes_safety_factor_for_only_remaining_participant():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.weekly_quota_model = "constant_average"
+    config.safety_factor = Decimal("0.5")
+    config.save()
+    exhausted = Participant.objects.create(
+        name="已跑完",
+        sub2api_user_id=71,
+        share_percent=50,
+    )
+    remaining = Participant.objects.create(
+        name="唯一剩余",
+        sub2api_user_id=72,
+        share_percent=50,
+    )
+    now = timezone.now()
+    observation = Observation.objects.create(
+        account_id=7,
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=3),
+        attribution_started_at=now - timedelta(days=4),
+        upstream_used_percent=Decimal("80"),
+        interval_used_percent=Decimal("80"),
+        raw_selected_total_cost=Decimal("400"),
+        selected_total_cost=Decimal("400"),
+        total_standard_cost=Decimal("400"),
+        total_actual_cost=Decimal("400"),
+        effective_usd_per_percent=Decimal("5"),
+    )
+    ParticipantSnapshot.objects.create(
+        observation=observation,
+        participant=exhausted,
+        raw_selected_cost=Decimal("300"),
+        selected_cost=Decimal("300"),
+        current_balance_usd=Decimal("0"),
+    )
+    ParticipantSnapshot.objects.create(
+        observation=observation,
+        participant=remaining,
+        raw_selected_cost=Decimal("100"),
+        selected_cost=Decimal("100"),
+        current_balance_usd=Decimal("0"),
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    rows = client.get("/api/participants", **headers).json()["data"]
+    snapshot = next(
+        item["snapshot"] for item in rows if item["id"] == remaining.id
+    )
+
+    assert snapshot["remaining_share_percent"] == 30.0
+    assert snapshot["recommended_balance_min_usd"] == 147.22
+    assert snapshot["recommended_balance_max_usd"] == 150.0
+    assert snapshot["recommended_balance_usd"] == 148.61
+    assert snapshot["reason"] == (
+        "当前 Sub2API 用户余额接近耗尽，但仍有百分比权益"
+    )

@@ -49,6 +49,12 @@ class Sub2APIUsageLog:
     service_tier: str
     total_cost: Decimal
     actual_cost: Decimal
+    api_key_id: int = 0
+    api_key_name: str = ""
+
+    def selected(self, basis: str) -> Decimal:
+        return self.actual_cost if basis == "actual" else self.total_cost
+
 
 
 @dataclass(frozen=True)

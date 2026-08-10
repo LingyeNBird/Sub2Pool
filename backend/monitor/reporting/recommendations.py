@@ -14,6 +14,39 @@ PCT_PRECISION = Decimal("0.00001")
 TRUNCATED_PERCENT_TAIL = Decimal("0.9")
 HUNDRED = Decimal("100")
 
+def _overuse_values(
+    *,
+    share_percent: Decimal,
+    charged_percent: Decimal,
+    charged_lower: Decimal | None,
+    charged_upper: Decimal | None,
+) -> dict[str, Decimal | bool]:
+    """用概率区间下界确认超用，避免把边界不确定性误报为违约。"""
+    point = max(ZERO, charged_percent - share_percent)
+    if charged_lower is None or charged_upper is None:
+        return {
+            "is_overused": point > ZERO,
+            "overused_percent": point,
+            "overused_percent_min": point,
+            "overused_percent_max": point,
+        }
+    return {
+        "is_overused": charged_lower > share_percent,
+        "overused_percent": point,
+        "overused_percent_min": max(ZERO, charged_lower - share_percent),
+        "overused_percent_max": max(ZERO, charged_upper - share_percent),
+    }
+
+
+def _overuse_reason(values: dict[str, Decimal | bool]) -> str:
+    return (
+        "本上游周期已确认超出合同百分比权益，不再建议补充余额"
+        if values["is_overused"]
+        else ""
+    )
+
+
+
 
 def display_cycle_rates(
     observation: Observation,
@@ -36,6 +69,12 @@ def display_cycle_rates(
 
 def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
     """序列化持久化的时变归属结论。"""
+    overuse = _overuse_values(
+        share_percent=snapshot.participant.share_percent,
+        charged_percent=snapshot.charged_cycle_percent,
+        charged_lower=snapshot.charged_percent_lower,
+        charged_upper=snapshot.charged_percent_upper,
+    )
     return {
         "participant_id": snapshot.participant_id,
         "participant_name": (
@@ -93,9 +132,13 @@ def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
             if snapshot.balance_difference_usd is not None
             else None
         ),
+        "is_overused": bool(overuse["is_overused"]),
+        "overused_percent": float(overuse["overused_percent"]),
+        "overused_percent_min": float(overuse["overused_percent_min"]),
+        "overused_percent_max": float(overuse["overused_percent_max"]),
         "needs_manual_update": snapshot.needs_manual_update,
         "recommendation_applied": snapshot.recommendation_applied,
-        "reason": snapshot.reason,
+        "reason": _overuse_reason(overuse) or snapshot.reason,
         "allocation_model": "time_varying",
     }
 
@@ -110,12 +153,49 @@ def latest_snapshot(participant: Participant) -> ParticipantSnapshot | None:
     )
 
 
+def _constant_average_charged(
+    snapshot: ParticipantSnapshot,
+) -> Decimal:
+    observation = snapshot.observation
+    selected_cost = max(ZERO, snapshot.selected_cost)
+    denominator = max(
+        ZERO,
+        observation.selected_total_cost,
+        selected_cost,
+    )
+    return (
+        observation.interval_used_percent * selected_cost / denominator
+        if denominator > 0
+        else ZERO
+    ).quantize(PCT_PRECISION, rounding=ROUND_HALF_UP)
+
+
+def _is_only_remaining_constant_participant(
+    snapshot: ParticipantSnapshot,
+) -> bool:
+    siblings = list(
+        snapshot.observation.participant_snapshots.select_related(
+            "participant"
+        )
+    )
+    if len(siblings) <= 1:
+        return False
+    remaining_ids = [
+        item.participant_id
+        for item in siblings
+        if item.participant.share_percent - _constant_average_charged(item)
+        > ZERO
+    ]
+    return remaining_ids == [snapshot.participant_id]
+
+
 def _constant_average_recommendation_bounds(
     snapshot: ParticipantSnapshot,
     config: AppSettings,
     *,
     selected_cost: Decimal,
     remaining_share_percent: Decimal,
+    safety_factor: Decimal,
 ) -> tuple[Decimal, Decimal]:
     """按截尾整数百分比反推容量区间，再换算参与者的剩余余额区间。"""
     observation = snapshot.observation
@@ -123,7 +203,7 @@ def _constant_average_recommendation_bounds(
     if used_percent_min <= 0:
         display_rate, _raw_rate = display_cycle_rates(observation, config)
         fallback = (
-            remaining_share_percent * display_rate * config.safety_factor
+            remaining_share_percent * display_rate * safety_factor
         ).quantize(CENT, rounding=ROUND_HALF_UP)
         return fallback, fallback
 
@@ -139,11 +219,11 @@ def _constant_average_recommendation_bounds(
     share_ratio = snapshot.participant.share_percent / HUNDRED
     recommended_min = (
         max(ZERO, capacity_min * share_ratio - selected_cost)
-        * config.safety_factor
+        * safety_factor
     ).quantize(CENT, rounding=ROUND_HALF_UP)
     recommended_max = (
         max(ZERO, capacity_max * share_ratio - selected_cost)
-        * config.safety_factor
+        * safety_factor
     ).quantize(CENT, rounding=ROUND_HALF_UP)
     return recommended_min, recommended_max
 
@@ -153,28 +233,21 @@ def _constant_average_values(
     config: AppSettings,
 ) -> dict:
     """用起点至当前的累计成本比例生成只读展示值，不改写时变账本。"""
-    observation = snapshot.observation
     selected_cost = max(ZERO, snapshot.selected_cost)
-    denominator = max(
-        ZERO,
-        observation.selected_total_cost,
-        selected_cost,
-    )
-    charged = (
-        observation.interval_used_percent * selected_cost / denominator
-        if denominator > 0
-        else ZERO
-    ).quantize(PCT_PRECISION, rounding=ROUND_HALF_UP)
+    charged = _constant_average_charged(snapshot)
     remaining = max(
         ZERO,
         snapshot.participant.share_percent - charged,
     ).quantize(PCT_PRECISION, rounding=ROUND_HALF_UP)
+    only_remaining = _is_only_remaining_constant_participant(snapshot)
+    safety_factor = Decimal("1") if only_remaining else config.safety_factor
     recommended_min, recommended_max = (
         _constant_average_recommendation_bounds(
             snapshot,
             config,
             selected_cost=selected_cost,
             remaining_share_percent=remaining,
+            safety_factor=safety_factor,
         )
     )
     recommended = (
@@ -199,6 +272,12 @@ def _constant_average_values(
         )
     else:
         difference = ZERO
+    overuse = _overuse_values(
+        share_percent=snapshot.participant.share_percent,
+        charged_percent=charged,
+        charged_lower=None,
+        charged_upper=None,
+    )
     exhausted = bool(
         balance is not None and balance <= config.limit_warning_usd
     )
@@ -209,10 +288,16 @@ def _constant_average_values(
             or (exhausted and recommended_max > 0)
         )
     )
-    if remaining <= 0:
+    if overuse["is_overused"]:
+        needs_update = False
+    if overuse["is_overused"]:
+        reason = _overuse_reason(overuse)
+    elif remaining <= 0:
         reason = "本上游周期的百分比权益已用尽"
     elif exhausted:
         reason = "当前 Sub2API 用户余额接近耗尽，但仍有百分比权益"
+    elif only_remaining:
+        reason = "其他参与者权益均已用尽，建议按完整剩余权益计算"
     elif needs_update:
         reason = "当前用户余额与平均恒定模型建议区间差异较大"
     else:
@@ -227,6 +312,10 @@ def _constant_average_values(
         "recommended_balance_max_usd": recommended_max,
         "balance_difference_usd": difference,
         "needs_manual_update": needs_update,
+        "is_overused": overuse["is_overused"],
+        "overused_percent": overuse["overused_percent"],
+        "overused_percent_min": overuse["overused_percent_min"],
+        "overused_percent_max": overuse["overused_percent_max"],
         "reason": reason,
     }
 
@@ -276,6 +365,10 @@ def display_snapshot_data(
             if values["balance_difference_usd"] is not None
             else None
         ),
+        "is_overused": bool(values["is_overused"]),
+        "overused_percent": float(values["overused_percent"]),
+        "overused_percent_min": float(values["overused_percent_min"]),
+        "overused_percent_max": float(values["overused_percent_max"]),
         "needs_manual_update": values["needs_manual_update"],
         "recommendation_applied": snapshot.recommendation_applied,
         "reason": values["reason"],

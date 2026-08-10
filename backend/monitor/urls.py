@@ -46,7 +46,7 @@ from .views.settings import (
     TestEmailView,
     TestSub2APIView,
 )
-from .views.statistics import StatisticsView
+from .views.statistics import ParticipantAPIUsageView, StatisticsView
 from .views.users import SystemUserDetailView, SystemUserListView
 
 urlpatterns = [
@@ -67,6 +67,10 @@ urlpatterns = [
         ApplyParticipantRecommendationView.as_view(),
     ),
     path("statistics", StatisticsView.as_view()),
+    path(
+        "statistics/participants/<int:participant_id>/api-usage",
+        ParticipantAPIUsageView.as_view(),
+    ),
     path("database/export", DatabaseExportView.as_view()),
     path("database/import", DatabaseImportView.as_view()),
     path("participants/sub2api-users", Sub2APIUserListView.as_view()),

@@ -201,17 +201,21 @@ function edit() {
                   <span
                     class="badge badge-sm"
                     :class="
-                      participant.snapshot?.needs_manual_update
-                        ? 'badge-warning'
-                        : 'badge-success'
+                      participant.snapshot?.is_overused
+                        ? 'badge-error'
+                        : participant.snapshot?.needs_manual_update
+                          ? 'badge-warning'
+                          : 'badge-success'
                     "
                   >
                     {{
                       !participant.snapshot
                         ? "等待测算"
-                        : participant.snapshot.needs_manual_update
-                          ? "建议调整"
-                          : "无需调整"
+                        : participant.snapshot.is_overused
+                          ? `已超用 ${formatCompactPercent(participant.snapshot.overused_percent)}`
+                          : participant.snapshot.needs_manual_update
+                            ? "建议调整"
+                            : "无需调整"
                     }}
                   </span>
                   <span class="text-sm opacity-60">

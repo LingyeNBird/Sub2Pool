@@ -18,6 +18,7 @@ from ..fast_correction.prefix import FastCorrectionPrefix
 from ..models import AppSettings, Observation, ParticipantSnapshot
 
 ZERO = Decimal("0")
+ONE = Decimal("1")
 CENT = Decimal("0.01")
 MONEY_PRECISION = Decimal("0.0001")
 PERCENT_PRECISION = Decimal("0.00001")
@@ -351,6 +352,25 @@ def replay_dynamic_segment(
         )
 
         snapshots = list(observation.participant_snapshots.all())
+        remaining_participant_ids = [
+            item.participant_id
+            for item in snapshots
+            if (
+                float(item.participant.share_percent)
+                - projected_attribution[
+                    row,
+                    replay_input.participant_subject_indices[
+                        item.participant_id
+                    ],
+                ]
+            )
+            > 1e-8
+        ]
+        sole_remaining_participant_id = (
+            remaining_participant_ids[0]
+            if len(snapshots) > 1 and len(remaining_participant_ids) == 1
+            else None
+        )
         for snapshot in snapshots:
             subject = replay_input.participant_subject_indices[snapshot.participant_id]
             old = previous_snapshots.get(snapshot.participant_id)
@@ -427,15 +447,20 @@ def replay_dynamic_segment(
 
             probability_min = min(probability_min, point_balance)
             probability_max = max(probability_max, point_balance)
-            recommended = (point_balance * config.safety_factor).quantize(
+            recommendation_factor = (
+                ONE
+                if snapshot.participant_id == sole_remaining_participant_id
+                else config.safety_factor
+            )
+            recommended = (point_balance * recommendation_factor).quantize(
                 CENT,
                 rounding=ROUND_HALF_UP,
             )
             recommended_min = (
-                probability_min * config.safety_factor
+                probability_min * recommendation_factor
             ).quantize(CENT, rounding=ROUND_HALF_UP)
             recommended_max = (
-                probability_max * config.safety_factor
+                probability_max * recommendation_factor
             ).quantize(CENT, rounding=ROUND_HALF_UP)
             current = snapshot.current_balance_usd
             difference = (
@@ -453,10 +478,19 @@ def replay_dynamic_segment(
                     or (exhausted and remaining > ZERO)
                 )
             )
-            if remaining <= ZERO:
+            overused = charged_lower > snapshot.participant.share_percent
+            if overused:
+                needs_update = False
+            if overused:
+                reason = (
+                    "本上游周期已确认超出合同百分比权益，不再建议补充余额"
+                )
+            elif remaining <= ZERO:
                 reason = "本上游周期的百分比权益已用尽"
             elif exhausted:
                 reason = "当前 Sub2API 用户余额接近耗尽，但仍有百分比权益"
+            elif snapshot.participant_id == sole_remaining_participant_id:
+                reason = "其他参与者权益均已用尽，建议按完整剩余权益计算"
             elif needs_update:
                 reason = "当前用户余额与最新测算建议差异较大"
             else:

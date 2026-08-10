@@ -15,6 +15,10 @@ export interface Snapshot {
   deterministic_balance_min_usd: number | null;
   deterministic_balance_max_usd: number | null;
   balance_difference_usd: number | null;
+  is_overused: boolean;
+  overused_percent: number;
+  overused_percent_min: number;
+  overused_percent_max: number;
   needs_manual_update: boolean;
   recommendation_applied: boolean;
   reason: string;
@@ -416,6 +420,28 @@ export interface ParticipantUsageSeries {
   participant_name: string;
   sub2api_user_id: number;
   points: UsagePoint[];
+}
+
+export interface APIKeyUsageItem {
+  api_key_id: number | null;
+  name: string;
+  status: string;
+  usage_usd: number;
+  participant_usage_percent: number;
+  weekly_quota_percent: number;
+}
+
+export interface APIUsageBreakdown {
+  participant_id: number;
+  participant_name: string;
+  sub2api_user_id: number;
+  starts_at: string;
+  observed_to: string;
+  cost_basis: "actual" | "standard";
+  participant_total_usd: number;
+  weekly_total_estimate_usd: number | null;
+  participant_weekly_percent: number;
+  api_keys: APIKeyUsageItem[];
 }
 
 export interface StatisticsData {

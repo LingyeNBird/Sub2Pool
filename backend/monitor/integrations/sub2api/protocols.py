@@ -44,8 +44,11 @@ class Sub2APIReader(Protocol):
         started_at: datetime | None,
         ended_at: datetime,
         timezone_name: str,
+        user_id: int | None = None,
     ) -> list[Sub2APIUsageLog]: ...
     def user_balance(self, user_id: int) -> UserBalance: ...
+    def list_user_api_keys(self, user_id: int) -> list[dict[str, Any]]: ...
+
 
 
 class RecommendationBalanceWriter(Protocol):
