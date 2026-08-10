@@ -69,7 +69,7 @@ defineExpose({ open, close });
         </h2>
         <span
           class="responsive-help-tooltip tooltip tooltip-bottom"
-          data-tip="只统计当前上游周期。各 API 的金额直接汇总 Sub2API 请求日志，不参与粒子滤波；占总周限比例使用本周期累计端点折算值。"
+          data-tip="只统计当前上游周期。各 API 金额由 Sub2API 请求日志按密钥汇总；启用 FAST 修正时，priority 请求会按官方 2.5 倍相对 Sub2API 2 倍补足。该结论不参与粒子滤波，最多每小时刷新一次。"
         >
           <button
             type="button"
@@ -172,7 +172,9 @@ defineExpose({ open, close });
           统计区间：{{ dateTime(data.starts_at) }} 至
           {{ dateTime(data.observed_to) }}；成本口径：{{
             data.cost_basis === "actual" ? "实际扣费" : "标准扣费"
-          }}。
+          }}；FAST 修正：{{
+            data.fast_correction_enabled ? "已应用" : "未应用"
+          }}。结论生成时间：{{ dateTime(data.observed_to) }}。
         </p>
       </template>
 

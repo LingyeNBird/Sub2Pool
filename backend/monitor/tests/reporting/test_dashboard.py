@@ -86,7 +86,7 @@ def test_dashboard_only_lists_participants_that_need_manual_adjustment():
 
 
 @pytest.mark.django_db
-def test_dashboard_warns_only_when_overuse_interval_clears_contract_share():
+def test_usage_deviation_is_not_a_dashboard_suggestion_and_can_clear():
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
@@ -97,7 +97,7 @@ def test_dashboard_warns_only_when_overuse_interval_clears_contract_share():
     config.weekly_quota_model = "time_varying"
     config.save()
     confirmed = Participant.objects.create(
-        name="确认超用",
+        name="确认偏差",
         sub2api_user_id=61,
         share_percent=40,
     )
@@ -107,12 +107,13 @@ def test_dashboard_warns_only_when_overuse_interval_clears_contract_share():
         share_percent=40,
     )
     now = timezone.now()
+    starts_at = now - timedelta(days=4)
     observation = Observation.objects.create(
         account_id=7,
         observed_at=now,
         window_seconds=604800,
         upstream_resets_at=now + timedelta(days=3),
-        attribution_started_at=now - timedelta(days=4),
+        attribution_started_at=starts_at,
         upstream_used_percent=Decimal("50"),
         interval_used_percent=Decimal("50"),
         raw_selected_total_cost=Decimal("1000"),
@@ -146,19 +147,54 @@ def test_dashboard_warns_only_when_overuse_interval_clears_contract_share():
     client = Client()
     headers, _ = jwt_login(client)
 
-    data = client.get("/api/dashboard", **headers).json()["data"]
-
-    assert [item["id"] for item in data["participants"]] == [confirmed.id]
-    snapshot = data["participants"][0]["snapshot"]
-    assert snapshot["is_overused"] is True
-    assert snapshot["overused_percent"] == 3.0
-    assert snapshot["overused_percent_min"] == 1.0
-    assert snapshot["overused_percent_max"] == 5.0
+    dashboard = client.get("/api/dashboard", **headers).json()["data"]
+    assert dashboard["participants"] == []
     visible = client.get("/api/participants", **headers).json()["data"]
+    confirmed_snapshot = next(
+        item["snapshot"] for item in visible if item["id"] == confirmed.id
+    )
     uncertain_snapshot = next(
         item["snapshot"] for item in visible if item["id"] == uncertain.id
     )
+    assert confirmed_snapshot["is_overused"] is True
+    assert confirmed_snapshot["overused_percent"] == 3.0
+    assert confirmed_snapshot["overused_percent_min"] == 1.0
+    assert confirmed_snapshot["overused_percent_max"] == 5.0
     assert uncertain_snapshot["is_overused"] is False
+
+    revised = Observation.objects.create(
+        account_id=7,
+        observed_at=now + timedelta(minutes=5),
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=3),
+        attribution_started_at=starts_at,
+        upstream_used_percent=Decimal("51"),
+        interval_used_percent=Decimal("51"),
+        raw_selected_total_cost=Decimal("1020"),
+        selected_total_cost=Decimal("1020"),
+        total_standard_cost=Decimal("1020"),
+        total_actual_cost=Decimal("1020"),
+        effective_usd_per_percent=Decimal("21"),
+    )
+    ParticipantSnapshot.objects.create(
+        observation=revised,
+        participant=confirmed,
+        raw_selected_cost=Decimal("870"),
+        selected_cost=Decimal("870"),
+        charged_cycle_percent=Decimal("39"),
+        charged_percent_lower=Decimal("38"),
+        charged_percent_upper=Decimal("40"),
+        remaining_share_percent=Decimal("1"),
+        needs_manual_update=False,
+    )
+
+    revised_visible = client.get("/api/participants", **headers).json()["data"]
+    revised_snapshot = next(
+        item["snapshot"]
+        for item in revised_visible
+        if item["id"] == confirmed.id
+    )
+    assert revised_snapshot["is_overused"] is False
 
 
 

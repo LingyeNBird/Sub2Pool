@@ -8,6 +8,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from monitor.engine import run_monitor
+from monitor.api_usage import refresh_due_api_usage_snapshots
 from monitor.models import AppSettings
 
 
@@ -54,6 +55,21 @@ class Command(BaseCommand):
             except Exception as exc:
                 # 引擎已经记录错误并按配置发邮件；命令保持运行，等待配置修复或上游恢复。
                 self.stderr.write(f"监控失败：{exc}")
+            else:
+                try:
+                    api_usage = refresh_due_api_usage_snapshots(
+                        AppSettings.load()
+                    )
+                    if api_usage["refreshed"]:
+                        self.stdout.write(
+                            "API 用量结论已刷新："
+                            f"{api_usage['refreshed']} 名参与者"
+                        )
+                except Exception as exc:
+                    # 附加统计刷新失败不能中断核心额度监控。
+                    self.stderr.write(
+                        f"API 用量结论刷新失败：{exc}"
+                    )
             close_old_connections()
             # 重新读取设置，确保本轮结束前修改的间隔会在下一轮生效。
             # 若执行超过一个间隔，则跳过已错过的时隙，不并发补跑也不额外再等完整间隔。

@@ -125,13 +125,8 @@ class DashboardView(AdminAPIView):
                 item
                 for item in participant_rows
                 if item["snapshot"]
-                and (
-                    item["snapshot"]["is_overused"]
-                    or (
-                        item["snapshot"]["needs_manual_update"]
-                        and not item["snapshot"]["recommendation_applied"]
-                    )
-                )
+                and item["snapshot"]["needs_manual_update"]
+                and not item["snapshot"]["recommendation_applied"]
             ],
             "needs_manual_update_count": sum(
                 1

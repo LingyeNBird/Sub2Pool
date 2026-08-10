@@ -438,6 +438,7 @@ export interface APIUsageBreakdown {
   starts_at: string;
   observed_to: string;
   cost_basis: "actual" | "standard";
+  fast_correction_enabled: boolean;
   participant_total_usd: number;
   weekly_total_estimate_usd: number | null;
   participant_weekly_percent: number;

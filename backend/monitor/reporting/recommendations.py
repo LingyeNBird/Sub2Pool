@@ -40,7 +40,7 @@ def _overuse_values(
 
 def _overuse_reason(values: dict[str, Decimal | bool]) -> str:
     return (
-        "本上游周期已确认超出合同百分比权益，不再建议补充余额"
+        "本上游周期已确认存在合同权益偏差，不再建议补充余额"
         if values["is_overused"]
         else ""
     )

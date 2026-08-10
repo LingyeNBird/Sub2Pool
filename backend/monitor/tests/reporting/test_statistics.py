@@ -14,6 +14,7 @@ from django.core.management import call_command
 from django.test import Client
 from django.utils import timezone
 
+from monitor.api_usage import refresh_due_api_usage_snapshots
 from monitor.engine import run_monitor
 from monitor.management.commands.runmonitor import schedule_next_run
 from monitor.models import (
@@ -24,6 +25,7 @@ from monitor.models import (
     Observation,
     ObservationFastCorrection,
     Participant,
+    ParticipantAPIUsageSnapshot,
     ParticipantSnapshot,
     ParticipantUsageSample,
     Sub2APIUserUsageSample,
@@ -359,6 +361,7 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
     config = AppSettings.load()
     config.openai_account_id = 7
     config.cost_basis = "actual"
+    config.fast_correction_enabled = True
     config.save()
     participant = Participant.objects.create(
         name="车友",
@@ -388,6 +391,8 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
         effective_usd_per_percent=Decimal("20"),
     )
 
+    calls = {"keys": 0, "logs": 0}
+
     class FakeClient:
         def __init__(self, _config):
             pass
@@ -399,6 +404,7 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
             pass
 
         def list_user_api_keys(self, user_id):
+            calls["keys"] += 1
             assert user_id == 22
             return [
                 {"id": 1, "name": "主密钥", "status": "active"},
@@ -406,6 +412,7 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
             ]
 
         def usage_logs(self, **kwargs):
+            calls["logs"] += 1
             assert kwargs["account_id"] == 7
             assert kwargs["user_id"] == 22
             assert kwargs["started_at"] == starts_at
@@ -416,7 +423,7 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
                     user_id=22,
                     account_id=7,
                     created_at=now - timedelta(hours=2),
-                    service_tier="",
+                    service_tier="priority",
                     total_cost=Decimal("75"),
                     actual_cost=Decimal("60"),
                     api_key_id=1,
@@ -435,7 +442,7 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
                 ),
             ]
 
-    monkeypatch.setattr("monitor.views.statistics.Sub2APIClient", FakeClient)
+    monkeypatch.setattr("monitor.api_usage.Sub2APIClient", FakeClient)
     client = Client()
     headers, _ = jwt_login(
         client,
@@ -449,11 +456,12 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
 
     assert response.status_code == 200
     data = response.json()["data"]
+    assert data["fast_correction_enabled"] is True
     assert data["starts_at"] == starts_at.isoformat()
     assert data["cost_basis"] == "actual"
-    assert data["participant_total_usd"] == 100.0
+    assert data["participant_total_usd"] == 115.0
     assert data["weekly_total_estimate_usd"] == 2000.0
-    assert data["participant_weekly_percent"] == 5.0
+    assert data["participant_weekly_percent"] == 5.75
     assert [
         (
             item["name"],
@@ -463,10 +471,27 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
         )
         for item in data["api_keys"]
     ] == [
-        ("主密钥", 60.0, 60.0, 3.0),
+        ("主密钥", 75.0, 65.2174, 3.75),
         ("尚未使用", 0.0, 0.0, 0.0),
-        ("已删除密钥", 40.0, 40.0, 2.0),
+        ("已删除密钥", 40.0, 34.7826, 2.0),
     ]
+    cached = client.get(
+        f"/api/statistics/participants/{participant.id}/api-usage",
+        **headers,
+    ).json()["data"]
+    assert cached == data
+    assert calls == {"keys": 1, "logs": 1}
+    assert ParticipantAPIUsageSnapshot.objects.count() == 1
+    config.fast_correction_enabled = False
+    config.save(update_fields=["fast_correction_enabled"])
+    uncorrected = client.get(
+        f"/api/statistics/participants/{participant.id}/api-usage",
+        **headers,
+    ).json()["data"]
+    assert uncorrected["fast_correction_enabled"] is False
+    assert uncorrected["participant_total_usd"] == 100.0
+    assert calls == {"keys": 2, "logs": 2}
+    assert ParticipantAPIUsageSnapshot.objects.count() == 2
     assert (
         client.get(
             f"/api/statistics/participants/{hidden.id}/api-usage",
@@ -474,3 +499,65 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
         ).status_code
         == 404
     )
+
+
+@pytest.mark.django_db
+def test_background_api_usage_refreshes_each_participant_at_most_hourly(
+    monkeypatch,
+):
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.monitoring_enabled = True
+    config.save()
+    participant = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=22,
+        share_percent=50,
+    )
+    now = timezone.now()
+    Observation.objects.create(
+        account_id=7,
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=5),
+        attribution_started_at=now - timedelta(days=2),
+        upstream_used_percent=Decimal("20"),
+        interval_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("400"),
+        selected_total_cost=Decimal("400"),
+        total_standard_cost=Decimal("400"),
+        total_actual_cost=Decimal("400"),
+        effective_usd_per_percent=Decimal("20"),
+    )
+    calls = {"keys": 0, "logs": 0}
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def list_user_api_keys(self, user_id):
+            calls["keys"] += 1
+            assert user_id == participant.sub2api_user_id
+            return [{"id": 1, "name": "主密钥", "status": "active"}]
+
+        def usage_logs(self, **kwargs):
+            calls["logs"] += 1
+            return []
+
+    monkeypatch.setattr("monitor.api_usage.Sub2APIClient", FakeClient)
+
+    first = refresh_due_api_usage_snapshots(config)
+    second = refresh_due_api_usage_snapshots(config)
+
+    assert first == {"refreshed": 1, "skipped": 0}
+    assert second == {"refreshed": 0, "skipped": 1}
+    assert calls == {"keys": 1, "logs": 1}
+    assert ParticipantAPIUsageSnapshot.objects.filter(
+        participant=participant
+    ).count() == 1

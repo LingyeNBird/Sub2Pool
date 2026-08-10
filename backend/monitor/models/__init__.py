@@ -11,6 +11,7 @@ from .observations import (
     Sub2APIUserUsageSample,
 )
 from .fast_correction import ObservationFastCorrection
+from .api_usage import ParticipantAPIUsageSnapshot
 from .audit import BlockedIPAddress, LoginEvent, NotificationEvent
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "NotificationEvent",
     "Observation",
     "ObservationFastCorrection",
+    "ParticipantAPIUsageSnapshot",
     "Participant",
     "ParticipantSnapshot",
     "ParticipantUsageSample",

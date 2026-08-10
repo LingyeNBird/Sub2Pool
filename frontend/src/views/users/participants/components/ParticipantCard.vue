@@ -202,7 +202,7 @@ function edit() {
                     class="badge badge-sm"
                     :class="
                       participant.snapshot?.is_overused
-                        ? 'badge-error'
+                        ? 'badge-warning'
                         : participant.snapshot?.needs_manual_update
                           ? 'badge-warning'
                           : 'badge-success'
@@ -212,7 +212,7 @@ function edit() {
                       !participant.snapshot
                         ? "等待测算"
                         : participant.snapshot.is_overused
-                          ? `已超用 ${formatCompactPercent(participant.snapshot.overused_percent)}`
+                          ? `权益偏差 ${formatCompactPercent(participant.snapshot.overused_percent)}`
                           : participant.snapshot.needs_manual_update
                             ? "建议调整"
                             : "无需调整"
