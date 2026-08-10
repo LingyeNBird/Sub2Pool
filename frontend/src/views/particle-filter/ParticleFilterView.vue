@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { useDateTime } from "@/composables/useDateTime";
@@ -12,16 +12,20 @@ import type {
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 import ParticleTrajectoryChart from "./components/ParticleTrajectoryChart.vue";
+import { trajectoryFrame } from "./trajectory";
+
+const PLAYBACK_DURATION_MS = 12_000;
 
 const data = ref<ParticleTrajectoryData | null>(null);
 const loading = ref(true);
 const message = ref("");
-const activeIndex = ref(0);
+const playbackProgress = ref(0);
 const playing = ref(false);
 const playbackSpeed = ref<1 | 2 | 4>(2);
 const reducedMotion = ref(false);
 const dateTime = useDateTime();
-let playbackTimer: number | undefined;
+let playbackFrame: number | undefined;
+let lastFrameTime: number | null = null;
 let motionQuery: MediaQueryList | null = null;
 
 const points = computed<ParticleTrajectoryPoint[]>(
@@ -30,12 +34,14 @@ const points = computed<ParticleTrajectoryPoint[]>(
 const promotions = computed<ParticleRangePromotion[]>(
   () => data.value?.promotions ?? [],
 );
-const activePoint = computed(() => points.value[activeIndex.value] ?? null);
-const progress = computed(() =>
-  points.value.length <= 1
-    ? 100
-    : (activeIndex.value / (points.value.length - 1)) * 100,
+const frame = computed(() =>
+  trajectoryFrame(points.value, playbackProgress.value),
 );
+const activePoint = computed(() => frame.value?.point ?? null);
+const activeObservationNumber = computed(() =>
+  frame.value ? Math.min(points.value.length, frame.value.rightIndex + 1) : 0,
+);
+const progress = computed(() => playbackProgress.value * 100);
 const sourceLabel = computed(() => {
   const labels: Record<string, string> = {
     scheduled: "定时观测",
@@ -48,53 +54,72 @@ const sourceLabel = computed(() => {
     : "—";
 });
 
-function clearPlaybackTimer() {
-  window.clearTimeout(playbackTimer);
-  playbackTimer = undefined;
+function cancelPlaybackFrame() {
+  if (playbackFrame !== undefined) {
+    window.cancelAnimationFrame(playbackFrame);
+  }
+  playbackFrame = undefined;
+  lastFrameTime = null;
 }
 
-function schedulePlayback() {
-  clearPlaybackTimer();
-  if (!playing.value || points.value.length <= 1) return;
-  playbackTimer = window.setTimeout(() => {
-    if (activeIndex.value >= points.value.length - 1) {
-      playing.value = false;
-      return;
-    }
-    activeIndex.value += 1;
-    schedulePlayback();
-  }, 900 / playbackSpeed.value);
+function stopPlayback() {
+  playing.value = false;
+  cancelPlaybackFrame();
+}
+
+function advancePlayback(now: number) {
+  if (!playing.value) return;
+  if (lastFrameTime === null) lastFrameTime = now;
+  const elapsed = Math.min(64, Math.max(0, now - lastFrameTime));
+  lastFrameTime = now;
+  playbackProgress.value = Math.min(
+    1,
+    playbackProgress.value +
+      (elapsed * playbackSpeed.value) / PLAYBACK_DURATION_MS,
+  );
+  if (playbackProgress.value >= 1) {
+    stopPlayback();
+    return;
+  }
+  playbackFrame = window.requestAnimationFrame(advancePlayback);
+}
+
+function startPlayback() {
+  cancelPlaybackFrame();
+  if (reducedMotion.value || points.value.length <= 1) return;
+  playing.value = true;
+  playbackFrame = window.requestAnimationFrame(advancePlayback);
 }
 
 function togglePlayback() {
   if (playing.value) {
-    playing.value = false;
+    stopPlayback();
     return;
   }
-  if (activeIndex.value >= points.value.length - 1) activeIndex.value = 0;
-  playing.value = true;
+  if (playbackProgress.value >= 1) playbackProgress.value = 0;
+  startPlayback();
 }
 
 function restartPlayback() {
-  activeIndex.value = 0;
-  playing.value = !reducedMotion.value && points.value.length > 1;
+  stopPlayback();
+  playbackProgress.value = 0;
+  startPlayback();
 }
 
-function selectPoint(index: number) {
-  activeIndex.value = Math.max(0, Math.min(index, points.value.length - 1));
-  playing.value = false;
+function selectProgress(rawValue: number) {
+  stopPlayback();
+  playbackProgress.value = Math.min(1, Math.max(0, rawValue / 1000));
 }
 
 async function load() {
   loading.value = true;
   message.value = "";
-  playing.value = false;
-  clearPlaybackTimer();
+  stopPlayback();
   try {
     data.value = await api<ParticleTrajectoryData>("particle-trajectory");
     if (points.value.length) {
-      activeIndex.value = reducedMotion.value ? points.value.length - 1 : 0;
-      playing.value = !reducedMotion.value && points.value.length > 1;
+      playbackProgress.value = reducedMotion.value ? 1 : 0;
+      startPlayback();
     }
   } catch (error) {
     message.value =
@@ -107,12 +132,10 @@ async function load() {
 function syncReducedMotion(event: MediaQueryList | MediaQueryListEvent) {
   reducedMotion.value = event.matches;
   if (event.matches && points.value.length) {
-    activeIndex.value = points.value.length - 1;
-    playing.value = false;
+    stopPlayback();
+    playbackProgress.value = 1;
   }
 }
-
-watch([playing, playbackSpeed], schedulePlayback);
 
 onMounted(() => {
   motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -122,7 +145,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  clearPlaybackTimer();
+  stopPlayback();
   motionQuery?.removeEventListener("change", syncReducedMotion);
 });
 </script>
@@ -167,7 +190,9 @@ onBeforeUnmount(() => {
   </section>
 
   <template v-else-if="activePoint && data?.segment">
-    <section class="card col-span-12 bg-base-200 shadow-xs">
+    <section
+      class="card col-span-12 bg-base-200 shadow-xs [overflow-anchor:none]"
+    >
       <div class="card-body gap-5 p-4 sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -256,7 +281,7 @@ onBeforeUnmount(() => {
           <div class="stat">
             <div class="stat-title">观测进度</div>
             <div class="stat-value text-2xl">
-              {{ activeIndex + 1 }} / {{ points.length }}
+              {{ activeObservationNumber }} / {{ points.length }}
             </div>
             <div class="stat-desc">
               {{ sourceLabel }} · {{ dateTime(activePoint.observed_at) }}
@@ -264,26 +289,30 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="rounded-box border border-base-300 bg-base-100 p-2 sm:p-4">
+        <div
+          class="rounded-box border border-base-300 bg-base-100 p-2 [overflow-anchor:none] sm:p-4"
+        >
           <ParticleTrajectoryChart
             :points="points"
-            :active-index="activeIndex"
-            @select="selectPoint"
+            :progress="playbackProgress"
           />
         </div>
 
-        <div class="flex items-center gap-3">
+        <div
+          class="flex items-center gap-3 [overflow-anchor:none]"
+          @pointerdown="stopPlayback"
+        >
           <span class="hidden text-xs opacity-50 sm:inline">起点</span>
           <input
-            :value="activeIndex"
+            :value="playbackProgress * 1000"
             type="range"
-            class="range grow range-primary range-xs"
+            class="range grow [touch-action:none] range-primary [overflow-anchor:none] range-xs"
             min="0"
-            :max="Math.max(0, points.length - 1)"
+            max="1000"
             step="1"
-            aria-label="选择观测点"
+            aria-label="选择重放进度"
             @input="
-              selectPoint(Number(($event.target as HTMLInputElement).value))
+              selectProgress(Number(($event.target as HTMLInputElement).value))
             "
           />
           <span class="hidden text-xs opacity-50 sm:inline">当前</span>

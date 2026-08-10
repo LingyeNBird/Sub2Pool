@@ -4,19 +4,25 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useDateTime } from "@/composables/useDateTime";
 import type { ParticleTrajectoryPoint } from "@/types";
 import { formatCurrency } from "@/utils/formatters";
+import {
+  pointTime,
+  trajectoryFrame,
+  type TrajectoryFrame,
+} from "../trajectory";
 
 const props = defineProps<{
   points: ParticleTrajectoryPoint[];
-  activeIndex: number;
-}>();
-
-const emit = defineEmits<{
-  select: [index: number];
+  progress: number;
 }>();
 
 interface PlotPoint {
   x: number;
   y: number;
+}
+
+interface TimelineSample {
+  timeMs: number;
+  point: ParticleTrajectoryPoint;
 }
 
 const mobile = ref(false);
@@ -30,9 +36,30 @@ const padding = computed(() =>
     ? { top: 68, right: 32, bottom: 52, left: 66 }
     : { top: 48, right: 42, bottom: 72, left: 78 },
 );
-const activePoints = computed(() =>
-  props.points.slice(0, Math.max(0, props.activeIndex) + 1),
+const activeFrame = computed<TrajectoryFrame | null>(() =>
+  trajectoryFrame(props.points, props.progress),
 );
+const pointTimes = computed(() =>
+  props.points.map((point, index) => pointTime(point, index)),
+);
+const firstTime = computed(() => pointTimes.value[0] ?? 0);
+const lastTime = computed(
+  () => pointTimes.value[pointTimes.value.length - 1] ?? firstTime.value,
+);
+const activeSamples = computed<TimelineSample[]>(() => {
+  const frame = activeFrame.value;
+  if (!frame) return [];
+  const completed = props.points
+    .slice(0, frame.leftIndex + 1)
+    .map((point, index) => ({
+      timeMs: pointTimes.value[index] ?? index,
+      point,
+    }));
+  if (frame.mix > 0) {
+    completed.push({ timeMs: frame.timeMs, point: frame.point });
+  }
+  return completed;
+});
 const capacityMinimum = computed(() =>
   Math.min(...props.points.map((point) => point.range_min_usd)),
 );
@@ -43,107 +70,146 @@ const capacitySpan = computed(() =>
   Math.max(1, capacityMaximum.value - capacityMinimum.value),
 );
 
-function timeRatio(index: number): number {
-  if (props.points.length <= 1) return 0.5;
-  return index / (props.points.length - 1);
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function timeRatio(timeMs: number): number {
+  const span = lastTime.value - firstTime.value;
+  if (span <= 0) return 0.5;
+  return clamp((timeMs - firstTime.value) / span, 0, 1);
 }
 
 function capacityRatio(value: number): number {
   return (value - capacityMinimum.value) / capacitySpan.value;
 }
 
-function coordinate(index: number, capacity: number): PlotPoint {
+function coordinate(timeMs: number, capacity: number): PlotPoint {
   const box = padding.value;
   const plotWidth = width.value - box.left - box.right;
   const plotHeight = height.value - box.top - box.bottom;
   if (mobile.value) {
     return {
       x: box.left + capacityRatio(capacity) * plotWidth,
-      y: box.top + timeRatio(index) * plotHeight,
+      y: box.top + timeRatio(timeMs) * plotHeight,
     };
   }
   return {
-    x: box.left + timeRatio(index) * plotWidth,
+    x: box.left + timeRatio(timeMs) * plotWidth,
     y: box.top + (1 - capacityRatio(capacity)) * plotHeight,
   };
 }
 
+function smoothCoordinates(points: PlotPoint[]): string {
+  if (!points.length) return "";
+  const first = points[0];
+  let path = `M ${first.x.toFixed(2)} ${first.y.toFixed(2)}`;
+  if (points.length === 1) return path;
+  if (points.length === 2) {
+    const last = points[1];
+    return `${path} L ${last.x.toFixed(2)} ${last.y.toFixed(2)}`;
+  }
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const before = points[Math.max(0, index - 1)];
+    const start = points[index];
+    const end = points[index + 1];
+    const after = points[Math.min(points.length - 1, index + 2)];
+    const factor = 0.13;
+    const minimumX = Math.min(start.x, end.x);
+    const maximumX = Math.max(start.x, end.x);
+    const minimumY = Math.min(start.y, end.y);
+    const maximumY = Math.max(start.y, end.y);
+    const firstControl = {
+      x: clamp(start.x + (end.x - before.x) * factor, minimumX, maximumX),
+      y: clamp(start.y + (end.y - before.y) * factor, minimumY, maximumY),
+    };
+    const secondControl = {
+      x: clamp(end.x - (after.x - start.x) * factor, minimumX, maximumX),
+      y: clamp(end.y - (after.y - start.y) * factor, minimumY, maximumY),
+    };
+    path +=
+      ` C ${firstControl.x.toFixed(2)} ${firstControl.y.toFixed(2)}` +
+      ` ${secondControl.x.toFixed(2)} ${secondControl.y.toFixed(2)}` +
+      ` ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
+  }
+  return path;
+}
+
 function linePath(
-  points: ParticleTrajectoryPoint[],
+  samples: TimelineSample[],
   value: (point: ParticleTrajectoryPoint) => number,
 ): string {
-  return points
-    .map((point, index) => {
-      const plotted = coordinate(index, value(point));
-      return `${index === 0 ? "M" : "L"} ${plotted.x.toFixed(2)} ${plotted.y.toFixed(2)}`;
-    })
-    .join(" ");
+  return smoothCoordinates(
+    samples.map((sample) => coordinate(sample.timeMs, value(sample.point))),
+  );
 }
 
 const estimatePath = computed(() =>
-  linePath(activePoints.value, (point) => point.capacity_usd),
+  linePath(activeSamples.value, (point) => point.capacity_usd),
 );
 const lowerPath = computed(() =>
-  linePath(activePoints.value, (point) => point.capacity_lower_usd),
+  linePath(activeSamples.value, (point) => point.capacity_lower_usd),
 );
 const upperPath = computed(() =>
-  linePath(activePoints.value, (point) => point.capacity_upper_usd),
+  linePath(activeSamples.value, (point) => point.capacity_upper_usd),
 );
 const rangeMinimumPath = computed(() =>
-  linePath(activePoints.value, (point) => point.range_min_usd),
+  linePath(activeSamples.value, (point) => point.range_min_usd),
 );
 const rangeMaximumPath = computed(() =>
-  linePath(activePoints.value, (point) => point.range_max_usd),
+  linePath(activeSamples.value, (point) => point.range_max_usd),
 );
 const credibleBandPath = computed(() => {
-  const upper = activePoints.value.map((point, index) =>
-    coordinate(index, point.capacity_upper_usd),
+  const upper = activeSamples.value.map((sample) =>
+    coordinate(sample.timeMs, sample.point.capacity_upper_usd),
   );
-  const lower = activePoints.value
-    .map((point, index) => coordinate(index, point.capacity_lower_usd))
+  const lower = activeSamples.value
+    .map((sample) => coordinate(sample.timeMs, sample.point.capacity_lower_usd))
     .reverse();
-  return [...upper, ...lower]
-    .map(
-      (point, index) =>
-        `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`,
-    )
-    .join(" ")
-    .concat(" Z");
+  const upperPathValue = smoothCoordinates(upper);
+  const lowerPathValue = smoothCoordinates(lower).replace(/^M/, "L");
+  return `${upperPathValue} ${lowerPathValue} Z`;
 });
 
 const quantileIndices = [7, 15, 23, 31, 39, 47, 55, 63, 71, 79, 87];
 const quantilePaths = computed(() =>
   quantileIndices.map((particleIndex) =>
     linePath(
-      activePoints.value,
+      activeSamples.value,
       (point) => point.particles_usd[particleIndex] ?? point.capacity_usd,
     ),
   ),
 );
-const activePoint = computed(() => props.points[props.activeIndex]);
+const activePoint = computed(() => activeFrame.value?.point ?? null);
 const activeCoordinate = computed(() =>
-  activePoint.value
-    ? coordinate(props.activeIndex, activePoint.value.capacity_usd)
+  activeFrame.value && activePoint.value
+    ? coordinate(activeFrame.value.timeMs, activePoint.value.capacity_usd)
     : { x: 0, y: 0 },
 );
-const activeParticles = computed(() =>
-  (activePoint.value?.particles_usd ?? []).map((capacity, index) => {
-    const plotted = coordinate(props.activeIndex, capacity);
+const activeParticles = computed(() => {
+  const frame = activeFrame.value;
+  if (!frame) return [];
+  return (frame.point.particles_usd ?? []).map((capacity, index) => {
+    const plotted = coordinate(frame.timeMs, capacity);
     const jitter = Math.sin((index + 1) * 12.9898) * 8;
     return {
       x: plotted.x + (mobile.value ? 0 : jitter),
       y: plotted.y + (mobile.value ? jitter : 0),
       delay: `${-((index % 12) * 0.12).toFixed(2)}s`,
     };
-  }),
-);
+  });
+});
 const capacityTicks = computed(() =>
   Array.from({ length: 5 }, (_, index) => {
     const ratio = index / 4;
     const value = capacityMinimum.value + capacitySpan.value * ratio;
     const plotted = mobile.value
-      ? coordinate(0, value)
-      : coordinate(0, capacityMaximum.value - capacitySpan.value * ratio);
+      ? coordinate(firstTime.value, value)
+      : coordinate(
+          firstTime.value,
+          capacityMaximum.value - capacitySpan.value * ratio,
+        );
     return {
       value: mobile.value
         ? value
@@ -187,7 +253,7 @@ onBeforeUnmount(() => {
 
 <template>
   <svg
-    class="block w-full overflow-visible"
+    class="block w-full overflow-hidden [overflow-anchor:none]"
     :viewBox="`0 0 ${width} ${height}`"
     role="img"
     aria-label="粒子滤波容量轨迹、可信区间与后验粒子点云"
@@ -250,8 +316,16 @@ onBeforeUnmount(() => {
       <text
         v-for="index in timeTickIndices"
         :key="`time-${index}`"
-        :x="mobile ? padding.left - 14 : coordinate(index, capacityMinimum).x"
-        :y="mobile ? coordinate(index, capacityMinimum).y + 4 : height - 34"
+        :x="
+          mobile
+            ? padding.left - 14
+            : coordinate(pointTimes[index] ?? index, capacityMinimum).x
+        "
+        :y="
+          mobile
+            ? coordinate(pointTimes[index] ?? index, capacityMinimum).y + 4
+            : height - 34
+        "
         :text-anchor="
           mobile
             ? 'end'
@@ -330,13 +404,12 @@ onBeforeUnmount(() => {
       <circle
         v-for="(particle, index) in activeParticles"
         :key="index"
-        class="particle-breathe cursor-pointer"
+        class="particle-breathe"
         :cx="particle.x"
         :cy="particle.y"
         :r="index % 7 === 0 ? 3.2 : 2.2"
         fill="var(--color-primary)"
         :style="{ animationDelay: particle.delay }"
-        @click="emit('select', activeIndex)"
       />
     </g>
     <circle
