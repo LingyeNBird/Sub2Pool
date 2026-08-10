@@ -7,14 +7,20 @@ import {
   ref,
   watch,
 } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
-import { navigation, type NavigationGroup } from "@/config/navigation";
+import {
+  navigation,
+  type NavigationChild,
+  type NavigationGroup,
+  type NavigationLink,
+} from "@/config/navigation";
 import { useAuthStore } from "@/stores/auth";
 
 import SidebarAccountMenu from "./SidebarAccountMenu.vue";
 
 const route = useRoute();
+const router = useRouter();
 const auth = useAuthStore();
 const visibleNavigation = computed(() =>
   navigation.filter((item) => auth.isStaff || !item.adminOnly),
@@ -25,8 +31,17 @@ const scrollStorageKey = "dashboard:sidebar-scroll-top";
 let layoutObserver: ResizeObserver | null = null;
 let gutterTimer: number | undefined;
 
-function isActive(path: string) {
-  return route.path === path;
+function isActive(target: string, exactQuery = false) {
+  const resolved = router.resolve(target);
+  if (route.path !== resolved.path) {
+    return false;
+  }
+
+  return exactQuery ? route.fullPath === resolved.fullPath : true;
+}
+
+function isNavigationLink(item: NavigationChild): item is NavigationLink {
+  return "to" in item;
 }
 
 function isGroupActive(group: NavigationGroup) {
@@ -34,7 +49,11 @@ function isGroupActive(group: NavigationGroup) {
     return isActive(group.to);
   }
 
-  return Boolean(group.children?.some((item) => route.path === item.to));
+  return Boolean(
+    group.children?.some(
+      (item) => isNavigationLink(item) && isActive(item.to, item.exactQuery),
+    ),
+  );
 }
 
 function saveScroll() {
@@ -140,11 +159,35 @@ onBeforeUnmount(() => {
               >
             </summary>
             <ul>
-              <li v-for="item in group.children" :key="item.to">
-                <RouterLink :to="item.to">
+              <template
+                v-for="item in group.children"
+                :key="
+                  isNavigationLink(item) ? item.to : `section:${item.label}`
+                "
+              >
+                <li
+                  v-if="!isNavigationLink(item)"
+                  class="pointer-events-none mt-3 cursor-default px-3 py-1 text-xs font-semibold opacity-40 select-none first:mt-0"
+                >
                   {{ item.label }}
-                </RouterLink>
-              </li>
+                </li>
+                <li v-else>
+                  <RouterLink v-slot="{ href, navigate }" custom :to="item.to">
+                    <a
+                      :href="href"
+                      :aria-current="
+                        isActive(item.to, item.exactQuery) ? 'page' : undefined
+                      "
+                      :class="{
+                        'menu-active': isActive(item.to, item.exactQuery),
+                      }"
+                      @click="navigate"
+                    >
+                      {{ item.label }}
+                    </a>
+                  </RouterLink>
+                </li>
+              </template>
             </ul>
           </details>
         </li>
