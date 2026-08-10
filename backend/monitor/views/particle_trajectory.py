@@ -1,11 +1,11 @@
 """粒子滤波历史周期轨迹接口。"""
 
-from .base import AdminAPIView, error, ok
+from .base import AuthenticatedAPIView, error, ok
 from ..models import AppSettings
 from ..particle_trajectory import particle_trajectory_data
 
 
-class ParticleTrajectoryView(AdminAPIView):
+class ParticleTrajectoryView(AuthenticatedAPIView):
     def get(self, request):
         raw_period_id = request.query_params.get("period")
         try:

@@ -202,7 +202,7 @@ def test_particle_trajectory_selects_historical_period():
 
 
 @pytest.mark.django_db
-def test_particle_trajectory_requires_admin():
+def test_particle_trajectory_allows_authenticated_system_user():
     get_user_model().objects.create_user(
         username="viewer",
         password="very-strong-password",
@@ -212,7 +212,18 @@ def test_particle_trajectory_requires_admin():
 
     response = client.get("/api/particle-trajectory", **headers)
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "available": False,
+        "message": "尚未配置 OpenAI 上游账号",
+    }
+
+
+@pytest.mark.django_db
+def test_particle_trajectory_requires_authentication():
+    response = Client().get("/api/particle-trajectory")
+
+    assert response.status_code == 401
 
 
 @pytest.mark.django_db

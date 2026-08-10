@@ -46,7 +46,6 @@ export const navigation: NavigationGroup[] = [
     label: "粒子轨迹",
     icon: "sparkles",
     to: "/particle-filter",
-    adminOnly: true,
   },
   {
     label: "额度统计",

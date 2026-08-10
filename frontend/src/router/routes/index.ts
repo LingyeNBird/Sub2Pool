@@ -29,7 +29,7 @@ export const appRoutes: RouteRecordRaw[] = [
     path: "particle-filter",
     name: "particle-filter",
     component: () => import("@/views/particle-filter/ParticleFilterView.vue"),
-    meta: { title: "粒子轨迹", adminOnly: true },
+    meta: { title: "粒子轨迹" },
   },
   {
     path: "statistics",
