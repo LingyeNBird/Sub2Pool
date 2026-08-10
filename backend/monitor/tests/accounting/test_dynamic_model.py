@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from monitor.accounting.adaptive_range import run_adaptive_range_filter
 from monitor.accounting.deterministic_bounds import (
     project_attribution_to_bounds,
     run_deterministic_bounds,
@@ -51,6 +52,63 @@ def test_particle_filter_is_repeatable_and_tracks_constant_case():
     np.testing.assert_allclose(first.speed_probabilities.sum(axis=1), 1.0)
     assert np.all(first.capacity_lower_usd <= first.capacity_hat_usd)
     assert np.all(first.capacity_hat_usd <= first.capacity_upper_usd)
+
+
+def test_adaptive_range_keeps_standard_support_without_dual_evidence():
+    output = run_adaptive_range_filter(
+        _constant_capacity_input(),
+        seed=20260809,
+    )
+
+    assert output.direction is None
+    assert output.promotions == ()
+    np.testing.assert_array_equal(output.capacity_min_usd, 1400.0)
+    np.testing.assert_array_equal(output.capacity_max_usd, 4000.0)
+
+
+def test_adaptive_range_replays_upper_stages_when_evidence_persists():
+    model_input = DynamicModelInput(
+        times_hours=np.asarray([0.0, 12.0, 24.0, 36.0]),
+        costs_usd=np.asarray([[0.0], [800.0], [1600.0], [2400.0]]),
+        displayed_percent=np.asarray([0.0, 10.0, 20.0, 30.0]),
+        rights_percent=np.asarray([100.0]),
+    )
+
+    output = run_adaptive_range_filter(model_input, seed=81)
+
+    assert output.direction == "upper"
+    assert output.capacity_max_usd[-1] == 10000.0
+    assert [item.to_max_usd for item in output.promotions] == [
+        6000.0,
+        10000.0,
+    ]
+    assert output.capacity_min_usd[-1] == 1400.0
+    assert np.all(np.diff(output.stage) >= 0)
+    assert output.capacity_max_usd[-1] >= 6000.0
+    assert output.capacity_min_usd[-1] == 1400.0
+
+
+def test_adaptive_range_replays_lower_stages_when_evidence_persists():
+    model_input = DynamicModelInput(
+        times_hours=np.asarray([0.0, 12.0, 24.0, 36.0]),
+        costs_usd=np.asarray([[0.0], [20.0], [40.0], [60.0]]),
+        displayed_percent=np.asarray([0.0, 10.0, 20.0, 30.0]),
+        rights_percent=np.asarray([100.0]),
+    )
+
+    output = run_adaptive_range_filter(model_input, seed=91)
+
+    assert output.direction == "lower"
+    assert output.promotions
+    assert output.capacity_min_usd[-1] == 50.0
+    assert [item.to_min_usd for item in output.promotions] == [
+        700.0,
+        250.0,
+        50.0,
+    ]
+    assert output.capacity_max_usd[-1] == 4000.0
+    assert output.capacity_min_usd[-1] <= 700.0
+    assert output.capacity_max_usd[-1] == 4000.0
 
 
 def test_expanded_capacity_support_tracks_values_above_legacy_ceiling():

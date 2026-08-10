@@ -68,6 +68,8 @@ class ParticleFilterOutput:
     speed_probabilities: np.ndarray
     ess_fraction: np.ndarray
     resampled: np.ndarray
+    lower_boundary_mass: np.ndarray
+    upper_boundary_mass: np.ndarray
 
 
 @dataclass(frozen=True)

@@ -5,17 +5,15 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 import numpy as np
 
+from .adaptive_range import AdaptiveRangeOutput, run_adaptive_range_filter
 from .contracts import ReplaySegment
-from .deterministic_bounds import (
-    project_attribution_to_bounds,
-    run_deterministic_bounds,
-)
+from .deterministic_bounds import project_attribution_to_bounds
 from .model_inputs import (
     ALGORITHM_VERSION,
     build_dynamic_replay_input,
     stable_segment_seed,
 )
-from .particle_filter import QUANTIZER_NAMES, ParticleFilterConfig, run_particle_filter
+from .particle_filter import QUANTIZER_NAMES, ParticleFilterConfig
 from ..fast_correction.prefix import FastCorrectionPrefix
 from ..models import AppSettings, Observation, ParticipantSnapshot
 
@@ -46,6 +44,7 @@ def _diagnostics(
     cost_monotonic_repair_subjects: int,
     total_cost_monotonic_repair: Decimal,
     filter_config: ParticleFilterConfig,
+    adaptive: AdaptiveRangeOutput,
 ) -> dict:
     progress_lower = max(
         float(particle.total_percent_lower[row]),
@@ -142,9 +141,40 @@ def _diagnostics(
             5,
         ),
         "capacity_range_usd": [
-            filter_config.capacity_min_usd,
-            filter_config.capacity_max_usd,
+            float(adaptive.capacity_min_usd[row]),
+            float(adaptive.capacity_max_usd[row]),
         ],
+        "capacity_range_stage": int(adaptive.stage[row]),
+        "capacity_range_direction": (
+            adaptive.direction if adaptive.stage[row] > 0 else None
+        ),
+        "capacity_range_promotions": [
+            {
+                "stage": index,
+                "direction": promotion.direction,
+                "model_row": promotion.row,
+                "model_time_hours": round(promotion.time_hours, 8),
+                "from_range_usd": [
+                    promotion.from_min_usd,
+                    promotion.from_max_usd,
+                ],
+                "to_range_usd": [
+                    promotion.to_min_usd,
+                    promotion.to_max_usd,
+                ],
+                "boundary_mass": round(promotion.boundary_mass, 8),
+                "display_residual_pp": round(
+                    promotion.display_residual_pp,
+                    8,
+                ),
+            }
+            for index, promotion in enumerate(adaptive.promotions, start=1)
+            if promotion.row <= row
+        ],
+        "boundary_mass": {
+            "lower": round(float(particle.lower_boundary_mass[row]), 8),
+            "upper": round(float(particle.upper_boundary_mass[row]), 8),
+        },
         "balance_interval_inflation": (
             filter_config.balance_interval_inflation
         ),
@@ -176,12 +206,13 @@ def replay_dynamic_segment(
             else None
         )
     )
-    particle = run_particle_filter(
+    adaptive = run_adaptive_range_filter(
         replay_input.model_input,
         seed=seed,
         config=filter_config,
     )
-    bounds = run_deterministic_bounds(replay_input.model_input)
+    particle = adaptive.particle
+    bounds = adaptive.bounds
     (
         projected_attribution,
         projection_repaired_rows,
@@ -258,7 +289,7 @@ def replay_dynamic_segment(
         )
         observation.valid_sample = sample_rate is not None
         observation.sample_note = (
-            "累计成本与整数百分比仅作原始比值；时变归属采用混合粒子滤波"
+            "累计成本与整数百分比仅作原始比值；时变归属采用自适应混合粒子滤波"
             if sample_rate is not None
             else "等待足够的成本与百分比观测"
         )
@@ -285,6 +316,7 @@ def replay_dynamic_segment(
                 replay_input.total_cost_monotonic_repairs[observation_index]
             ),
             filter_config=filter_config,
+            adaptive=adaptive,
         )
         raw_window = dict(observation.raw_window)
         raw_window.pop("conservative_percentile", None)

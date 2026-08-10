@@ -106,8 +106,8 @@ def test_replay_is_idempotent_preserves_raw_facts_and_model_intervals():
     for observation in (first, second):
         observation.refresh_from_db()
         snapshots = list(observation.participant_snapshots.all())
-        assert observation.raw_window["rate_method"] == "particle_filter_v3"
-        assert observation.model_diagnostics["algorithm"] == "particle_filter_v3"
+        assert observation.raw_window["rate_method"] == "particle_filter_v4"
+        assert observation.model_diagnostics["algorithm"] == "particle_filter_v4"
         assert observation.capacity_lower_usd <= (
             observation.effective_usd_per_percent * Decimal("100")
         )
@@ -130,6 +130,45 @@ def test_replay_is_idempotent_preserves_raw_facts_and_model_intervals():
             flat=True,
         )
     ) == raw_before
+
+@pytest.mark.django_db
+def test_staged_expansion_is_persisted_in_observation_diagnostics():
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save(update_fields=["openai_account_id"])
+    participant = Participant.objects.create(
+        name="高容量参与者",
+        sub2api_user_id=1,
+        share_percent=100,
+        is_owner=True,
+    )
+    now = timezone.now().replace(microsecond=0)
+    reset_at = now + timedelta(days=7)
+    _raw_observation(
+        participant_costs={participant: Decimal("0")},
+        observed_at=now,
+        reset_at=reset_at,
+        used_percent=Decimal("0"),
+        total_cost=Decimal("0"),
+    )
+    latest = _raw_observation(
+        participant_costs={participant: Decimal("800")},
+        observed_at=now + timedelta(hours=12),
+        reset_at=reset_at,
+        used_percent=Decimal("10"),
+        total_cost=Decimal("800"),
+    )
+
+    rebuild_account(7, config)
+
+    latest.refresh_from_db()
+    diagnostics = latest.model_diagnostics
+    assert diagnostics["capacity_range_usd"] == [1400.0, 10000.0]
+    assert diagnostics["capacity_range_stage"] == 2
+    assert diagnostics["capacity_range_direction"] == "upper"
+    assert [
+        item["to_range_usd"] for item in diagnostics["capacity_range_promotions"]
+    ] == [[1400.0, 6000.0], [1400.0, 10000.0]]
 
 
 @pytest.mark.django_db

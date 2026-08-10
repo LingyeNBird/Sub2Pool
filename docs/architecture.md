@@ -45,4 +45,3 @@ Sub2API 只读用量 ─┐
 - [统计口径](statistics.md)
 - [额度模型](quota-models.md)
 - [粒子滤波](particle-filter.md)
-- [算法迁移](algorithm-migration.md)

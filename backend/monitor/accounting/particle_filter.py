@@ -169,6 +169,8 @@ def run_particle_filter(
     )
     ess_fraction = np.zeros(observation_count)
     resampled = np.zeros(observation_count, dtype=bool)
+    lower_boundary_mass = np.zeros(observation_count)
+    upper_boundary_mass = np.zeros(observation_count)
 
     tail = (1.0 - cfg.credible_mass) / 2.0
     interval_probabilities = (tail, 0.5, 1.0 - tail)
@@ -181,6 +183,15 @@ def run_particle_filter(
         capacity_particles = (
             capacity_mid + capacity_half * np.tanh(latent_capacity)
         )
+        boundary_band = 0.05 * (
+            cfg.capacity_max_usd - cfg.capacity_min_usd
+        )
+        lower_boundary_mass[index] = weights[
+            capacity_particles <= cfg.capacity_min_usd + boundary_band
+        ].sum()
+        upper_boundary_mass[index] = weights[
+            capacity_particles >= cfg.capacity_max_usd - boundary_band
+        ].sum()
         total_particles = attributed_particles.sum(axis=1)
         remaining_percent = np.maximum(
             model_input.rights_percent[None, :] - attributed_particles,
@@ -373,4 +384,6 @@ def run_particle_filter(
         speed_probabilities=speed_probabilities,
         ess_fraction=ess_fraction,
         resampled=resampled,
+        lower_boundary_mass=lower_boundary_mass,
+        upper_boundary_mass=upper_boundary_mass,
     )

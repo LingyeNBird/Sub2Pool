@@ -89,6 +89,23 @@ export interface ModelDiagnostics {
   residual_cost_usd: number;
   aggregate_cost_difference_usd: number;
   prior_capacity_usd: number | null;
+  capacity_range_usd: [number, number];
+  capacity_range_stage: number;
+  capacity_range_direction: "upper" | "lower" | null;
+  capacity_range_promotions: Array<{
+    stage: number;
+    direction: "upper" | "lower";
+    model_row: number;
+    model_time_hours: number;
+    from_range_usd: [number, number];
+    to_range_usd: [number, number];
+    boundary_mass: number;
+    display_residual_pp: number;
+  }>;
+  boundary_mass: {
+    lower: number;
+    upper: number;
+  };
 }
 export interface DashboardData {
   configured: boolean;

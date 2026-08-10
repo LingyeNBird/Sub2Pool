@@ -114,7 +114,6 @@ docker compose up -d --build
 - [统计口径](docs/statistics.md)
 - [额度模型](docs/quota-models.md)
 - [时变额度粒子滤波](docs/particle-filter.md)
-- [算法迁移](docs/algorithm-migration.md)
 
 ## CI 与镜像标签
 

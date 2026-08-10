@@ -130,6 +130,19 @@ defineExpose({ open, close });
               {{ formatCurrency(data.cycle.capacity_lower_usd) }} –
               {{ formatCurrency(data.cycle.capacity_upper_usd) }}
             </p>
+            <p class="text-center text-sm opacity-70">
+              当前推断范围
+              {{ formatCurrency(diagnostics.capacity_range_usd[0]) }} –
+              {{ formatCurrency(diagnostics.capacity_range_usd[1]) }}
+              <span v-if="diagnostics.capacity_range_stage > 0">
+                ·
+                {{
+                  diagnostics.capacity_range_direction === "upper"
+                    ? "向上"
+                    : "向下"
+                }}扩张第 {{ diagnostics.capacity_range_stage }} 级
+              </span>
+            </p>
           </div>
           <div class="grid gap-3 sm:grid-cols-2">
             <div class="rounded-box bg-base-300/40 p-3">

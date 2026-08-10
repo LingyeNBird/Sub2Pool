@@ -7,9 +7,6 @@ import numpy as np
 from .dynamic_contracts import DeterministicBoundsOutput, DynamicModelInput
 from .particle_filter import V_MAX, V_MIN
 
-DOLLARS_PER_PERCENT_MIN = V_MIN / 100.0
-DOLLARS_PER_PERCENT_MAX = V_MAX / 100.0
-
 
 def _unknown_quantizer_cell(displayed: int) -> tuple[float, float]:
     """返回 floor、四舍五入、ceil 三种固定规则的并集外包络。"""
@@ -19,10 +16,19 @@ def _unknown_quantizer_cell(displayed: int) -> tuple[float, float]:
 
 def run_deterministic_bounds(
     model_input: DynamicModelInput,
+    *,
+    capacity_min_usd: float = V_MIN,
+    capacity_max_usd: float = V_MAX,
 ) -> DeterministicBoundsOutput:
     """计算任何满足硬约束的真实路径都不能越过的因果边界。"""
 
     model_input.validate()
+    if capacity_min_usd <= 0:
+        raise ValueError("容量下界必须大于 0")
+    if capacity_min_usd >= capacity_max_usd:
+        raise ValueError("容量下界必须小于容量上界")
+    dollars_per_percent_min = capacity_min_usd / 100.0
+    dollars_per_percent_max = capacity_max_usd / 100.0
     observation_count, subject_count = model_input.costs_usd.shape
 
     attributed_lower = np.zeros((observation_count, subject_count))
@@ -50,8 +56,8 @@ def run_deterministic_bounds(
         )
         cost_lower = np.maximum(cost_delta - 0.01, 0.0)
         cost_upper = cost_delta + 0.01
-        progress_lower = cost_lower / DOLLARS_PER_PERCENT_MAX
-        progress_upper = cost_upper / DOLLARS_PER_PERCENT_MIN
+        progress_lower = cost_lower / dollars_per_percent_max
+        progress_upper = cost_upper / dollars_per_percent_min
         increment_lower = float(progress_lower.sum())
         increment_upper = float(progress_upper.sum())
 
@@ -133,8 +139,8 @@ def run_deterministic_bounds(
         model_input.rights_percent[None, :] - attributed_lower,
         0.0,
     )
-    balance_lower = DOLLARS_PER_PERCENT_MIN * remaining_lower
-    balance_upper = DOLLARS_PER_PERCENT_MAX * remaining_upper
+    balance_lower = dollars_per_percent_min * remaining_lower
+    balance_upper = dollars_per_percent_max * remaining_upper
 
     return DeterministicBoundsOutput(
         total_percent_lower=total_lower,
