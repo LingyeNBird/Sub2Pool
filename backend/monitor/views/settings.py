@@ -2,6 +2,7 @@
 
 from django.db import transaction
 from django.utils import timezone
+from ..api_auth import generate_readonly_api_key
 
 from rest_framework.serializers import ValidationError
 from .base import AdminAPIView, error, ok
@@ -129,3 +130,44 @@ class TestEmailView(AdminAPIView):
         if event is None or event.status != "sent":
             return error(event.error if event else "邮件未发送", 502)
         return ok({"event_id": event.id})
+
+
+class ReadOnlyAPIKeyView(AdminAPIView):
+    """Generate, rotate, or revoke the permanent external read-only API key."""
+
+    def post(self, _request):
+        config = AppSettings.load()
+        api_key, digest, hint = generate_readonly_api_key()
+        config.readonly_api_key_hash = digest
+        config.readonly_api_key_hint = hint
+        config.readonly_api_key_created_at = timezone.now()
+        config.save(
+            update_fields=[
+                "readonly_api_key_hash",
+                "readonly_api_key_hint",
+                "readonly_api_key_created_at",
+                "updated_at",
+            ]
+        )
+        return ok(
+            {
+                "api_key": api_key,
+                "hint": hint,
+                "created_at": config.readonly_api_key_created_at.isoformat(),
+            }
+        )
+
+    def delete(self, _request):
+        config = AppSettings.load()
+        config.readonly_api_key_hash = ""
+        config.readonly_api_key_hint = ""
+        config.readonly_api_key_created_at = None
+        config.save(
+            update_fields=[
+                "readonly_api_key_hash",
+                "readonly_api_key_hint",
+                "readonly_api_key_created_at",
+                "updated_at",
+            ]
+        )
+        return ok({"revoked": True})

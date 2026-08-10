@@ -137,6 +137,24 @@ watch(activePageId, async () => {
               </li>
             </ul>
 
+            <div v-if="section.codeBlocks" class="mt-5 max-w-4xl space-y-4">
+              <figure
+                v-for="block in section.codeBlocks"
+                :key="`${block.title ?? ''}:${block.code}`"
+                class="overflow-hidden rounded-box border border-base-300 bg-base-100"
+              >
+                <figcaption
+                  v-if="block.title"
+                  class="border-b border-base-300 px-4 py-2 text-xs font-semibold opacity-60"
+                >
+                  {{ block.title }}
+                </figcaption>
+                <pre
+                  class="overflow-x-auto p-4 text-xs leading-6"
+                  :data-language="block.language"
+                ><code>{{ block.code }}</code></pre>
+              </figure>
+            </div>
             <div
               v-for="note in section.notes"
               :key="note.title"

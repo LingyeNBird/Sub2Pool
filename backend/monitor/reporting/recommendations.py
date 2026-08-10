@@ -250,6 +250,10 @@ def _constant_average_values(
             safety_factor=safety_factor,
         )
     )
+    rights_exhausted = remaining <= ZERO
+    if rights_exhausted:
+        recommended_min = ZERO
+        recommended_max = ZERO
     recommended = (
         (recommended_min + recommended_max) / Decimal("2")
     ).quantize(CENT, rounding=ROUND_HALF_UP)
@@ -281,19 +285,26 @@ def _constant_average_values(
     exhausted = bool(
         balance is not None and balance <= config.limit_warning_usd
     )
-    needs_update = bool(
-        difference is not None
-        and (
-            abs(difference) >= config.recommendation_change_usd
-            or (exhausted and recommended_max > 0)
+    if rights_exhausted:
+        needs_update = bool(balance is not None and balance > ZERO)
+    else:
+        needs_update = bool(
+            difference is not None
+            and (
+                abs(difference) >= config.recommendation_change_usd
+                or (exhausted and recommended_max > 0)
+            )
         )
-    )
-    if overuse["is_overused"]:
+    if overuse["is_overused"] and not rights_exhausted:
         needs_update = False
-    if overuse["is_overused"]:
+    if rights_exhausted:
+        reason = (
+            "百分比权益已用尽，建议清零 Sub2API 用户余额"
+            if needs_update
+            else "本上游周期的百分比权益已用尽"
+        )
+    elif overuse["is_overused"]:
         reason = _overuse_reason(overuse)
-    elif remaining <= 0:
-        reason = "本上游周期的百分比权益已用尽"
     elif exhausted:
         reason = "当前 Sub2API 用户余额接近耗尽，但仍有百分比权益"
     elif only_remaining:

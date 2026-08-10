@@ -6,12 +6,19 @@ export interface TutorialNote {
   tone: TutorialNoteTone;
 }
 
+export interface TutorialCodeBlock {
+  title?: string;
+  language?: string;
+  code: string;
+}
+
 export interface TutorialSection {
   title: string;
   paragraphs?: string[];
   steps?: string[];
   bullets?: string[];
   notes?: TutorialNote[];
+  codeBlocks?: TutorialCodeBlock[];
 }
 
 export interface TutorialPage {
@@ -231,6 +238,7 @@ export const tutorialGroups: TutorialGroup[] = [
             title: "权益耗尽与偏差",
             bullets: [
               "参与者余额耗尽但仍有权益时，系统继续给出补充建议，并可按通知规则发送邮件。",
+              "百分比权益已经用尽但 Sub2API 余额仍大于 0 时，首页会建议把余额清零；Sub2API 原生调额接口不接受 0，因此需要跳转管理后台手动处理。",
               "已确认超过合同权益时，参与者页面显示“权益偏差”；后续容量估计改变后，偏差会按最新结果重新计算，不会永久锁死。",
               "当其他参与者权益均耗尽、只剩最后一人时，剩余权益归该参与者，建议不再额外扣安全系数。",
             ],
@@ -446,6 +454,216 @@ export const tutorialGroups: TutorialGroup[] = [
           },
         ],
         action: { label: "打开数据维护", to: "/settings" },
+      },
+    ],
+  },
+  {
+    label: "API 文档",
+    pages: [
+      {
+        id: "readonly-api",
+        group: "API 文档",
+        title: "只读数据 API",
+        summary:
+          "使用永久 API Key 读取参与者表格、额度统计和当前周期 API 用量构成。",
+        icon: "code-bracket",
+        sections: [
+          {
+            title: "生成和保存 API Key",
+            steps: [
+              "由管理员进入“系统设置 → 只读 API”，点击“生成 API Key”。",
+              "完整 Key 只在生成后的模态框中显示一次，请立即复制到调用方的密钥管理系统。",
+              "关闭模态框后，页面只显示尾部四位。服务端只保存 SHA-256 摘要，无法找回原 Key。",
+              "Key 没有到期时间。重新生成会立即使旧 Key 失效；点击“废弃”会关闭全部外部只读访问。",
+            ],
+            notes: [
+              {
+                tone: "warning",
+                title: "仅通过 HTTPS 传输",
+                text: "API Key 等同于读取权限凭据。不要放在 URL、查询参数、日志或前端公开代码中。",
+              },
+            ],
+          },
+          {
+            title: "认证与响应格式",
+            paragraphs: [
+              "每次请求都把完整 Key 放入标准 HTTP Authorization 请求头，认证方案为 Bearer。外部接口统一位于 /api/v1 下，并且只允许 GET、HEAD 和 OPTIONS。",
+              '成功响应固定为 { ok: true, data: ... }。失败响应固定为 { ok: false, message: "..." }，字段校验失败时还可能包含 details。',
+            ],
+            codeBlocks: [
+              {
+                title: "认证请求",
+                language: "bash",
+                code: `curl --request GET \\
+  --url https://sub2pool.example.com/api/v1/participants \\
+  --header 'Accept: application/json' \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey'`,
+              },
+              {
+                title: "常见状态码",
+                language: "text",
+                code: `200  请求成功
+401  未提供 Key、Key 无效、已重新生成或已废弃
+404  参与者不存在
+405  该只读端点不允许写入
+409  尚未形成当前上游周期或尚未配置上游账号
+502  读取 Sub2API 数据失败`,
+              },
+            ],
+          },
+          {
+            title: "GET /api/v1/participants",
+            paragraphs: [
+              "返回参与者页面表格所需的全部参与者。该接口没有分页和查询参数，因为参与者通常只有少量记录。",
+              "每个数组项的 id 是 Sub2Pool 参与者 ID；sub2api_user_id 是绑定的 Sub2API 用户 ID。sub2api_identity 按“用户名、邮箱、账号 ID”的顺序选择可读标识。",
+            ],
+            bullets: [
+              "基础字段：id、name、email、notes、enabled、is_owner、share_percent。",
+              "Sub2API 映射：sub2api_user_id、sub2api_username、sub2api_email、sub2api_identity。",
+              "最近事实：latest_balance_usd、latest_selected_cost、last_checked_at。",
+              "snapshot：当前展示模型的归属比例、剩余权益、余额建议区间、调整状态和原因；尚无测算时为 null。",
+            ],
+            codeBlocks: [
+              {
+                title: "响应示例",
+                language: "json",
+                code: `{
+  "ok": true,
+  "data": [
+    {
+      "id": 1,
+      "name": "车友",
+      "sub2api_user_id": 22001,
+      "sub2api_identity": "rider@example.com",
+      "share_percent": 40.0,
+      "enabled": true,
+      "latest_balance_usd": 320.0,
+      "latest_selected_cost": 480.0,
+      "last_checked_at": "2026-08-11T09:20:00+00:00",
+      "snapshot": {
+        "charged_cycle_percent": 24.0,
+        "remaining_share_percent": 16.0,
+        "recommended_balance_usd": 315.2,
+        "recommended_balance_min_usd": 286.9,
+        "recommended_balance_max_usd": 348.7,
+        "needs_manual_update": false,
+        "reason": "当前用户余额无需调整"
+      }
+    }
+  ]
+}`,
+              },
+            ],
+          },
+          {
+            title: "GET /api/v1/statistics",
+            paragraphs: [
+              "返回额度统计页面的容量历史、当前折算摘要和参与者用量序列。日期时间均为带时区的 ISO 8601 字符串，金额单位为美元。",
+              "capacity_series 是按天或按月的周限等效额度历史；capacity_summary 包含本周期累计折算、今日折算及其计算依据；participant_series 是各参与者在请求时间范围内的用量和余额序列。",
+            ],
+            bullets: [
+              "capacity_period：day 或 month，默认 day。",
+              "capacity_days：容量历史回看天数。按天默认 90，按月默认 365，最大 730。",
+              "usage_days：参与者用量回看天数，默认 7，最大 90。",
+              "usage_precision：raw、hour 或 day，默认 hour。",
+              "响应同时返回 fast_correction_enabled、sample_interval_minutes 和实际采用的查询参数。",
+            ],
+            codeBlocks: [
+              {
+                title: "按天读取最近 30 天容量，并按小时读取最近 7 天用量",
+                language: "bash",
+                code: `curl --get \\
+  --url 'https://sub2pool.example.com/api/v1/statistics' \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey' \\
+  --data-urlencode 'capacity_period=day' \\
+  --data-urlencode 'capacity_days=30' \\
+  --data-urlencode 'usage_days=7' \\
+  --data-urlencode 'usage_precision=hour'`,
+              },
+              {
+                title: "响应骨架",
+                language: "json",
+                code: `{
+  "ok": true,
+  "data": {
+    "capacity_period": "day",
+    "capacity_series": [],
+    "fast_correction_enabled": true,
+    "capacity_summary": {
+      "cycle": {},
+      "today": {}
+    },
+    "usage_days": 7,
+    "usage_precision": "hour",
+    "sample_interval_minutes": 10,
+    "participant_series": []
+  }
+}`,
+              },
+            ],
+          },
+          {
+            title:
+              "GET /api/v1/statistics/participants/{participant_id}/api-usage",
+            paragraphs: [
+              "返回一个参与者在当前上游周期内的 API Key 用量构成。路径中的 participant_id 使用参与者接口返回的 id，而不是 sub2api_user_id。",
+              "结论包含统计起止时间、成本口径、FAST 修正状态、参与者周期用量、周限估计、参与者占总周限比例，以及每个 API Key 的美元用量和两种百分比。",
+              "服务优先返回一小时内的数据库结论。缓存过期时会向 Sub2API 执行一次只读日志查询并保存新的汇总结论，不会调用 OpenAI 官方额度接口，也不会修改任何额度。",
+            ],
+            bullets: [
+              "participant_usage_percent：该 API Key 用量占此参与者当前周期总用量的比例。",
+              "weekly_quota_percent：该 API Key 用量占当前估算总周限的比例。",
+              "api_keys 中仅列出当前周期存在或产生过用量的密钥；历史已删除但有用量的密钥仍会保留汇总项。",
+            ],
+            codeBlocks: [
+              {
+                title: "读取参与者 1 的 API 用量构成",
+                language: "bash",
+                code: `curl --request GET \\
+  --url https://sub2pool.example.com/api/v1/statistics/participants/1/api-usage \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey'`,
+              },
+              {
+                title: "响应示例",
+                language: "json",
+                code: `{
+  "ok": true,
+  "data": {
+    "participant_id": 1,
+    "participant_name": "车友",
+    "sub2api_user_id": 22001,
+    "starts_at": "2026-08-05T00:00:00+00:00",
+    "observed_to": "2026-08-11T09:20:00+00:00",
+    "cost_basis": "actual",
+    "fast_correction_enabled": true,
+    "participant_total_usd": 480.0,
+    "weekly_total_estimate_usd": 2000.0,
+    "participant_weekly_percent": 24.0,
+    "api_keys": [
+      {
+        "api_key_id": 8,
+        "name": "主密钥",
+        "status": "active",
+        "usage_usd": 360.0,
+        "participant_usage_percent": 75.0,
+        "weekly_quota_percent": 18.0
+      }
+    ]
+  }
+}`,
+              },
+            ],
+          },
+          {
+            title: "权限边界",
+            bullets: [
+              "只读 API Key 不能访问系统设置、登录记录、通知记录、原始观测或数据库备份。",
+              "只读 API Key 不能新增、编辑或删除参与者，也不能触发测算、一键调额或任何维护操作。",
+              "系统管理员的 JWT 与只读 API Key 相互独立；重新生成或废弃 API Key 不会影响网页登录。",
+            ],
+          },
+        ],
+        action: { label: "管理只读 API Key", to: "/settings" },
       },
     ],
   },

@@ -111,6 +111,7 @@ class AppSettingsSerializer(serializers.ModelSerializer):
     fast_correction_rebuild_recommended = serializers.SerializerMethodField()
     fast_correction_missing_intervals = serializers.SerializerMethodField()
 
+    readonly_api_key_configured = serializers.SerializerMethodField()
     class Meta:
         model = AppSettings
         fields = (
@@ -126,6 +127,9 @@ class AppSettingsSerializer(serializers.ModelSerializer):
             "resend_api_key_configured",
             "fast_correction_rebuild_recommended",
             "fast_correction_missing_intervals",
+            "readonly_api_key_configured",
+            "readonly_api_key_hint",
+            "readonly_api_key_created_at",
             "last_local_check_at",
             "last_upstream_check_at",
             "last_success_at",
@@ -134,6 +138,9 @@ class AppSettingsSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "fast_correction_rebuild_recommended",
             "fast_correction_missing_intervals",
+            "readonly_api_key_configured",
+            "readonly_api_key_hint",
+            "readonly_api_key_created_at",
             "last_local_check_at",
             "last_upstream_check_at",
             "last_success_at",
@@ -148,6 +155,9 @@ class AppSettingsSerializer(serializers.ModelSerializer):
 
     def get_resend_api_key_configured(self, obj) -> bool:
         return bool(obj.resend_api_key_encrypted)
+
+    def get_readonly_api_key_configured(self, obj) -> bool:
+        return bool(obj.readonly_api_key_hash)
 
     @staticmethod
     def _fast_missing_count(obj: AppSettings) -> int:

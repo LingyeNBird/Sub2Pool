@@ -1542,8 +1542,9 @@ def test_dynamic_model_removes_safety_factor_for_only_remaining_participant(
             }
             return UsageStats(costs[user_id], costs[user_id])
 
-        def user_balance(self, _user_id):
-            return UserBalance(Decimal("0"), Decimal("0"))
+        def user_balance(self, user_id):
+            balance = Decimal("5") if user_id == exhausted.sub2api_user_id else Decimal("0")
+            return UserBalance(balance, balance)
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
 
@@ -1554,6 +1555,14 @@ def test_dynamic_model_removes_safety_factor_for_only_remaining_participant(
         item.participant_id: item for item in ParticipantSnapshot.objects.all()
     }
     assert snapshots[exhausted.id].remaining_share_percent == Decimal("0")
+    exhausted_snapshot = snapshots[exhausted.id]
+    assert exhausted_snapshot.recommended_balance_usd == Decimal("0")
+    assert exhausted_snapshot.recommended_balance_min_usd == Decimal("0")
+    assert exhausted_snapshot.recommended_balance_max_usd == Decimal("0")
+    assert exhausted_snapshot.needs_manual_update is True
+    assert exhausted_snapshot.reason == (
+        "百分比权益已用尽，建议清零 Sub2API 用户余额"
+    )
     remaining_snapshot = snapshots[remaining.id]
     expected = (
         remaining_snapshot.remaining_share_percent

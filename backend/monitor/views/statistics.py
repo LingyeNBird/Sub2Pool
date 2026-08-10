@@ -6,10 +6,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 
 
 from .base import AuthenticatedAPIView, error, ok
 from .query_params import bounded_query_int
+from ..api_auth import ReadOnlyAPIKeyAuthentication
 from ..api_usage import (
     api_usage_snapshot_data,
     get_participant_api_usage,
@@ -83,6 +85,14 @@ class StatisticsView(AuthenticatedAPIView):
         )
 
 
+class ReadOnlyStatisticsView(StatisticsView):
+    """External API-key view exposing the statistics-page payload."""
+
+    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "head", "options"]
+
+
 class ParticipantAPIUsageView(AuthenticatedAPIView):
     """按当前归属周期只读聚合一个参与者的 Sub2API API 密钥用量。"""
 
@@ -108,3 +118,11 @@ class ParticipantAPIUsageView(AuthenticatedAPIView):
         except (Sub2APIError, ValueError) as exc:
             return error(str(exc), status.HTTP_502_BAD_GATEWAY)
         return ok(api_usage_snapshot_data(snapshot))
+
+
+class ReadOnlyParticipantAPIUsageView(ParticipantAPIUsageView):
+    """External API-key view exposing one participant's API usage breakdown."""
+
+    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "head", "options"]

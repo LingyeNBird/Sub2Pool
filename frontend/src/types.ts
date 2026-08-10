@@ -512,10 +512,19 @@ export interface AppSettingsData {
   resend_api_key_configured: boolean;
   sub2api_token_configured: boolean;
   smtp_password_configured: boolean;
+  readonly_api_key_configured: boolean;
+  readonly_api_key_hint: string;
+  readonly_api_key_created_at: string | null;
   last_local_check_at: string | null;
   last_upstream_check_at: string | null;
   last_success_at: string | null;
   last_error: string;
+}
+
+export interface ReadOnlyAPIKeyGenerated {
+  api_key: string;
+  hint: string;
+  created_at: string;
 }
 
 export interface HistoricalUsageMaintenancePreview {

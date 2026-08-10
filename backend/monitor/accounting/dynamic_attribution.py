@@ -462,6 +462,11 @@ def replay_dynamic_segment(
             recommended_max = (
                 probability_max * recommendation_factor
             ).quantize(CENT, rounding=ROUND_HALF_UP)
+            rights_exhausted = remaining <= ZERO
+            if rights_exhausted:
+                recommended = ZERO
+                recommended_min = ZERO
+                recommended_max = ZERO
             current = snapshot.current_balance_usd
             difference = (
                 (recommended - current).quantize(CENT, rounding=ROUND_HALF_UP)
@@ -471,22 +476,29 @@ def replay_dynamic_segment(
             exhausted = bool(
                 current is not None and current <= config.limit_warning_usd
             )
-            needs_update = bool(
-                difference is not None
-                and (
-                    abs(difference) >= config.recommendation_change_usd
-                    or (exhausted and remaining > ZERO)
+            if rights_exhausted:
+                needs_update = bool(current is not None and current > ZERO)
+            else:
+                needs_update = bool(
+                    difference is not None
+                    and (
+                        abs(difference) >= config.recommendation_change_usd
+                        or (exhausted and remaining > ZERO)
+                    )
                 )
-            )
             overused = charged_lower > snapshot.participant.share_percent
-            if overused:
+            if overused and not rights_exhausted:
                 needs_update = False
-            if overused:
+            if rights_exhausted:
+                reason = (
+                    "百分比权益已用尽，建议清零 Sub2API 用户余额"
+                    if needs_update
+                    else "本上游周期的百分比权益已用尽"
+                )
+            elif overused:
                 reason = (
                     "本上游周期已确认存在合同权益偏差，不再建议补充余额"
                 )
-            elif remaining <= ZERO:
-                reason = "本上游周期的百分比权益已用尽"
             elif exhausted:
                 reason = "当前 Sub2API 用户余额接近耗尽，但仍有百分比权益"
             elif snapshot.participant_id == sole_remaining_participant_id:

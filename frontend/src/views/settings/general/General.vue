@@ -13,6 +13,7 @@ import FastCorrectionRebuildDialog, {
   type FastCorrectionRebuildScope,
 } from "./components/FastCorrectionRebuildDialog.vue";
 import LoginSecurityCard from "./components/LoginSecurityCard.vue";
+import ReadOnlyAPIKeyCard from "./components/ReadOnlyAPIKeyCard.vue";
 import NotificationRulesCard from "./components/NotificationRulesCard.vue";
 import SamplingStrategyCard from "./components/SamplingStrategyCard.vue";
 import Sub2APIConnectionCard from "./components/Sub2APIConnectionCard.vue";
@@ -40,6 +41,8 @@ const {
   importingDatabase,
   rebuildingFastCorrection,
   historyPreview,
+  generatingReadOnlyApiKey,
+  revokingReadOnlyApiKey,
   checkingHistoricalUsage,
   backfillingHistoricalUsage,
   rebuildingAllParticles,
@@ -63,6 +66,8 @@ const {
   previewCostHistory,
   repairCostHistory,
   test,
+  generateReadOnlyApiKey,
+  revokeReadOnlyApiKey,
   changePassword,
 } = useSettingsPage(confirmAction);
 
@@ -80,6 +85,41 @@ async function handleFastCorrectionRebuild(scope: FastCorrectionRebuildScope) {
   if (await rebuildFastCorrection(scope)) {
     fastCorrectionDialog.value?.close();
   }
+}
+
+const readOnlyAPIKeyCard = ref<InstanceType<typeof ReadOnlyAPIKeyCard> | null>(
+  null,
+);
+
+async function handleGenerateReadOnlyAPIKey() {
+  if (
+    settings.value?.readonly_api_key_configured &&
+    !(await confirmAction({
+      title: "重新生成只读 API Key？",
+      message:
+        "重新生成后，原 API Key 会立即失效，所有调用方都必须改用新 Key。",
+      confirmLabel: "重新生成",
+      tone: "warning",
+    }))
+  ) {
+    return;
+  }
+  const apiKey = await generateReadOnlyApiKey();
+  if (apiKey) readOnlyAPIKeyCard.value?.reveal(apiKey);
+}
+
+async function handleRevokeReadOnlyAPIKey() {
+  if (
+    !(await confirmAction({
+      title: "废弃只读 API Key？",
+      message: "废弃后，当前 API Key 会立即失效，外部只读接口将无法访问。",
+      confirmLabel: "确认废弃",
+      tone: "error",
+    }))
+  ) {
+    return;
+  }
+  await revokeReadOnlyApiKey();
 }
 </script>
 
@@ -173,6 +213,16 @@ async function handleFastCorrectionRebuild(scope: FastCorrectionRebuildScope) {
       @import="importDatabase"
     />
     <LoginSecurityCard v-model:form="passwordForm" @change="changePassword" />
+    <ReadOnlyAPIKeyCard
+      ref="readOnlyAPIKeyCard"
+      :configured="settings.readonly_api_key_configured"
+      :hint="settings.readonly_api_key_hint"
+      :created-at="settings.readonly_api_key_created_at"
+      :generating="generatingReadOnlyApiKey"
+      :revoking="revokingReadOnlyApiKey"
+      @generate="handleGenerateReadOnlyAPIKey"
+      @revoke="handleRevokeReadOnlyAPIKey"
+    />
   </div>
   <FastCorrectionRebuildDialog
     ref="fastCorrectionDialog"

@@ -2,6 +2,7 @@
 
 from rest_framework import status
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from ..api_auth import ReadOnlyAPIKeyAuthentication
 
 from .base import AdminAPIView, AuthenticatedAPIView, error, ok
 from ..reporting import participant_data
@@ -65,7 +66,6 @@ class ParticipantListView(AuthenticatedAPIView):
         return ok(
             [participant_data(item, config) for item in participants]
         )
-
     def post(self, request):
         serializer = ParticipantWriteSerializer(data=request.data)
         if not serializer.is_valid():
@@ -75,6 +75,14 @@ class ParticipantListView(AuthenticatedAPIView):
             participant_data(participant, AppSettings.load()),
             status.HTTP_201_CREATED,
         )
+
+
+class ReadOnlyParticipantListView(ParticipantListView):
+    """External API-key view exposing only participant table data."""
+
+    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    http_method_names = ["get", "head", "options"]
+
 
 
 class ParticipantDetailView(AdminAPIView):

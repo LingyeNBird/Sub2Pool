@@ -25,6 +25,7 @@ from .views.monitoring import RunMonitorView
 from .views.participants import (
     ParticipantDetailView,
     ParticipantListView,
+    ReadOnlyParticipantListView,
     Sub2APIUserListView,
 )
 from .views.particle_trajectory import ParticleTrajectoryView
@@ -46,10 +47,16 @@ from .views.security import (
 from .views.settings import (
     OpenAIAccountListView,
     SettingsView,
+    ReadOnlyAPIKeyView,
     TestEmailView,
     TestSub2APIView,
 )
-from .views.statistics import ParticipantAPIUsageView, StatisticsView
+from .views.statistics import (
+    ParticipantAPIUsageView,
+    ReadOnlyParticipantAPIUsageView,
+    ReadOnlyStatisticsView,
+    StatisticsView,
+)
 from .views.users import SystemUserDetailView, SystemUserListView
 
 urlpatterns = [
@@ -73,6 +80,12 @@ urlpatterns = [
     path(
         "statistics/participants/<int:participant_id>/api-usage",
         ParticipantAPIUsageView.as_view(),
+    ),
+    path("v1/participants", ReadOnlyParticipantListView.as_view()),
+    path("v1/statistics", ReadOnlyStatisticsView.as_view()),
+    path(
+        "v1/statistics/participants/<int:participant_id>/api-usage",
+        ReadOnlyParticipantAPIUsageView.as_view(),
     ),
     path("database/export", DatabaseExportView.as_view()),
     path("database/import", DatabaseImportView.as_view()),
@@ -105,6 +118,7 @@ urlpatterns = [
     path("settings/openai-accounts", OpenAIAccountListView.as_view()),
     path("settings/test-sub2api", TestSub2APIView.as_view()),
     path("settings/test-email", TestEmailView.as_view()),
+    path("settings/readonly-api-key", ReadOnlyAPIKeyView.as_view()),
     path(
         "settings/fast-correction/rebuild",
         FastCorrectionRebuildView.as_view(),

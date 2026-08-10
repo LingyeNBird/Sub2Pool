@@ -636,7 +636,7 @@ def test_constant_average_removes_safety_factor_for_only_remaining_participant()
         participant=exhausted,
         raw_selected_cost=Decimal("300"),
         selected_cost=Decimal("300"),
-        current_balance_usd=Decimal("0"),
+        current_balance_usd=Decimal("5"),
     )
     ParticipantSnapshot.objects.create(
         observation=observation,
@@ -649,6 +649,17 @@ def test_constant_average_removes_safety_factor_for_only_remaining_participant()
     headers, _ = jwt_login(client)
 
     rows = client.get("/api/participants", **headers).json()["data"]
+    exhausted_snapshot = next(
+        item["snapshot"] for item in rows if item["id"] == exhausted.id
+    )
+    assert exhausted_snapshot["remaining_share_percent"] == 0.0
+    assert exhausted_snapshot["recommended_balance_usd"] == 0.0
+    assert exhausted_snapshot["recommended_balance_min_usd"] == 0.0
+    assert exhausted_snapshot["recommended_balance_max_usd"] == 0.0
+    assert exhausted_snapshot["needs_manual_update"] is True
+    assert exhausted_snapshot["reason"] == (
+        "百分比权益已用尽，建议清零 Sub2API 用户余额"
+    )
     snapshot = next(
         item["snapshot"] for item in rows if item["id"] == remaining.id
     )

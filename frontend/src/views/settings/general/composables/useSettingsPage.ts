@@ -18,6 +18,7 @@ import type {
   FullParticleReplayResult,
   HistoricalUsageBackfillResult,
   HistoricalUsageMaintenancePreview,
+  ReadOnlyAPIKeyGenerated,
   OpenAIAccountOption,
 } from "@/types";
 
@@ -53,6 +54,8 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   const checkingCostHistory = ref(false);
   const repairingCostHistory = ref(false);
   const savedFastCorrectionEnabled = ref(true);
+  const generatingReadOnlyApiKey = ref(false);
+  const revokingReadOnlyApiKey = ref(false);
   const passwordForm = reactive<PasswordForm>({
     old_password: "",
     new_password: "",
@@ -478,6 +481,51 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     }
   }
 
+  async function generateReadOnlyApiKey(): Promise<string | null> {
+    if (!settings.value) return null;
+    generatingReadOnlyApiKey.value = true;
+    message.value = "";
+    success.value = "";
+    try {
+      const generated = await api<ReadOnlyAPIKeyGenerated>(
+        "settings/readonly-api-key",
+        { method: "POST" },
+      );
+      settings.value.readonly_api_key_configured = true;
+      settings.value.readonly_api_key_hint = generated.hint;
+      settings.value.readonly_api_key_created_at = generated.created_at;
+      success.value = "只读 API Key 已生成";
+      return generated.api_key;
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "生成只读 API Key 失败";
+      return null;
+    } finally {
+      generatingReadOnlyApiKey.value = false;
+    }
+  }
+
+  async function revokeReadOnlyApiKey(): Promise<boolean> {
+    if (!settings.value) return false;
+    revokingReadOnlyApiKey.value = true;
+    message.value = "";
+    success.value = "";
+    try {
+      await api("settings/readonly-api-key", { method: "DELETE" });
+      settings.value.readonly_api_key_configured = false;
+      settings.value.readonly_api_key_hint = "";
+      settings.value.readonly_api_key_created_at = null;
+      success.value = "只读 API Key 已废弃";
+      return true;
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "废弃只读 API Key 失败";
+      return false;
+    } finally {
+      revokingReadOnlyApiKey.value = false;
+    }
+  }
+
   async function test(kind: "sub2api" | "email") {
     testing.value = kind;
     message.value = "";
@@ -548,6 +596,8 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     costHistoryPreview,
     checkingCostHistory,
     repairingCostHistory,
+    generatingReadOnlyApiKey,
+    revokingReadOnlyApiKey,
     passwordForm,
     loadOpenAIAccounts,
     saveConnection,
@@ -566,5 +616,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     repairCostHistory,
     test,
     changePassword,
+    generateReadOnlyApiKey,
+    revokeReadOnlyApiKey,
   };
 }
