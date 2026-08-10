@@ -29,6 +29,8 @@ class LocalBundle:
     participants: list[LocalParticipantData]
     users: list[Sub2APIUserUsage]
     checked_at: datetime
+    cost_window_started_at: datetime
+    cost_window_ended_at: datetime
 
 
 @dataclass(frozen=True)

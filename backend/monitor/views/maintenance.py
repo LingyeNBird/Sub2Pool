@@ -1,5 +1,10 @@
 """管理员历史用量补全与全量粒子重建 API。"""
 
+from ..cost_history import (
+    CostHistoryRepairError,
+    inspect_cost_history,
+    repair_cost_history,
+)
 from ..integrations.sub2api import Sub2APIError
 from ..models import AppSettings
 from ..usage_history import (
@@ -14,7 +19,10 @@ from .base import AdminAPIView, error, ok
 def _maintenance_error(exc: Exception, *, conflict: bool = False):
     details = (
         exc.details
-        if isinstance(exc, HistoricalUsageBackfillError)
+        if isinstance(
+            exc,
+            (HistoricalUsageBackfillError, CostHistoryRepairError),
+        )
         else None
     )
     return error(str(exc), 409 if conflict else 502, details)
@@ -40,6 +48,32 @@ class HistoricalUsageBackfillView(AdminAPIView):
         try:
             result = backfill_historical_user_usage(AppSettings.load())
         except HistoricalUsageBackfillError as exc:
+            return _maintenance_error(exc, conflict=True)
+        except (Sub2APIError, ValueError) as exc:
+            return _maintenance_error(exc)
+        return ok(result)
+
+
+class CostHistoryPreviewView(AdminAPIView):
+    """只读检查历史请求日志可重建的成本区间。"""
+
+    def post(self, _request):
+        try:
+            plan = inspect_cost_history(AppSettings.load())
+        except CostHistoryRepairError as exc:
+            return _maintenance_error(exc, conflict=True)
+        except (Sub2APIError, ValueError) as exc:
+            return _maintenance_error(exc)
+        return ok(plan.public_data())
+
+
+class CostHistoryRepairView(AdminAPIView):
+    """重取区间增量并全量重建，不覆盖原始累计快照。"""
+
+    def post(self, _request):
+        try:
+            result = repair_cost_history(AppSettings.load())
+        except CostHistoryRepairError as exc:
             return _maintenance_error(exc, conflict=True)
         except (Sub2APIError, ValueError) as exc:
             return _maintenance_error(exc)

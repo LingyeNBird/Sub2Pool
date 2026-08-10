@@ -36,6 +36,7 @@ def observed_baseline_segment(
     *,
     reason: str,
     percent_baseline: Decimal,
+    cost_basis: str,
 ) -> ReplaySegment:
     """复用“以真实观测建立基线”之后的全部区间初始化逻辑。"""
 
@@ -45,13 +46,13 @@ def observed_baseline_segment(
         first_observed_at=observation.observed_at,
         resets_at=observation.upstream_resets_at,
         reason=reason,
-        total_baseline=observation.raw_selected_total_cost,
+        total_baseline=observation.normalized_cost(cost_basis),
         participant_baselines=participant_raw_costs(observation),
         percent_baseline=percent_baseline,
     )
 
 
-def official_segment(observation: Observation) -> ReplaySegment:
+def official_segment(observation: Observation, cost_basis: str) -> ReplaySegment:
     """建立官方窗口区间，并优先采用首个 0% 观测的累计成本基线。
 
     Sub2API 的聚合用量接口按自然日统计。官方窗口若在当天零点之后重置，
@@ -65,6 +66,7 @@ def official_segment(observation: Observation) -> ReplaySegment:
             observation,
             reason="official_zero_observation",
             percent_baseline=ZERO,
+            cost_basis=cost_basis,
         )
     return ReplaySegment(
         observations=[],
@@ -78,13 +80,14 @@ def official_segment(observation: Observation) -> ReplaySegment:
     )
 
 
-def manual_start_segment(observation: Observation) -> ReplaySegment:
+def manual_start_segment(observation: Observation, cost_basis: str) -> ReplaySegment:
     """管理员起点以该观测的累计成本和百分比作为新的零基线。"""
 
     return observed_baseline_segment(
         observation,
         reason="manual_override",
         percent_baseline=observation.upstream_used_percent,
+        cost_basis=cost_basis,
     )
 
 
@@ -162,6 +165,7 @@ def mark_automatic_exclusion(
 
 def infer_segments(
     observations: list[Observation],
+    cost_basis: str,
 ) -> tuple[list[ReplaySegment], list[Observation]]:
     """按“管理员起点 > 官方窗口 > 异常检测”识别派生区间。
 
@@ -180,7 +184,7 @@ def infer_segments(
         if observation.is_manual_start:
             if current is not None and current.observations:
                 segments.append(current)
-            current = manual_start_segment(observation)
+            current = manual_start_segment(observation, cost_basis)
             current.observations.append(observation)
             index += 1
             continue
@@ -191,7 +195,7 @@ def infer_segments(
         ):
             if current is not None and current.observations:
                 segments.append(current)
-            current = official_segment(observation)
+            current = official_segment(observation, cost_basis)
             current.observations.append(observation)
             index += 1
             continue

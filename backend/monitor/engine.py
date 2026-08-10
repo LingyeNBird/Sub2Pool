@@ -17,6 +17,7 @@ from .models import AppSettings, Participant
 from .notifications import notify_collection_error
 from .replay import RESET_ROLLBACK_TOLERANCE, rebuild_observation_suffix
 from .sampling.local_usage import (
+    fetch_interval_bridge_logs as _fetch_interval_bridge_logs,
     fetch_local as _fetch_local,
     save_local_bundle as _save_local_bundle,
 )
@@ -74,6 +75,13 @@ def _run_monitor_locked(
             )
             reference = _window_reference(account_id, window)
             local = _fetch_local(client, config, reference, participants, now)
+            interval_logs = _fetch_interval_bridge_logs(
+                client,
+                config,
+                reference,
+                local,
+                None,
+            )
             fast_interval, fast_error = _fetch_fast_correction(
                 client,
                 config,
@@ -81,13 +89,21 @@ def _run_monitor_locked(
                 None,
                 local.checked_at,
             )
-            _save_local_bundle(config, reference, local, None)
+            _save_local_bundle(
+                config,
+                reference,
+                local,
+                None,
+                interval_logs=interval_logs,
+            )
             observation = _create_raw_observation(
                 config=config,
                 reference=reference,
                 window=window,
                 local=local,
                 source=requested_source,
+                latest_raw=None,
+                interval_logs=interval_logs,
                 fast_interval=fast_interval,
                 fast_error=fast_error,
             )
@@ -138,11 +154,19 @@ def _run_monitor_locked(
         due = trigger.due
 
         if not due:
+            interval_logs = _fetch_interval_bridge_logs(
+                client,
+                config,
+                current_reference,
+                local,
+                latest_raw,
+            )
             _save_local_bundle(
                 config,
                 current_reference,
                 local,
                 previous,
+                interval_logs=interval_logs,
             )
             AppSettings.objects.filter(pk=config.pk).update(
                 last_local_check_at=now,
@@ -189,6 +213,13 @@ def _run_monitor_locked(
         elif reset_near and not force_upstream:
             source = "reset"
 
+        interval_logs = _fetch_interval_bridge_logs(
+            client,
+            config,
+            reference,
+            local,
+            latest_raw,
+        )
         fast_interval, fast_error = _fetch_fast_correction(
             client,
             config,
@@ -196,13 +227,21 @@ def _run_monitor_locked(
             latest_raw,
             local.checked_at,
         )
-        _save_local_bundle(config, reference, local, previous)
+        _save_local_bundle(
+            config,
+            reference,
+            local,
+            previous,
+            interval_logs=interval_logs,
+        )
         observation = _create_raw_observation(
             config=config,
             reference=reference,
             window=window,
             local=local,
             source=source,
+            latest_raw=latest_raw,
+            interval_logs=interval_logs,
             fast_interval=fast_interval,
             fast_error=fast_error,
         )

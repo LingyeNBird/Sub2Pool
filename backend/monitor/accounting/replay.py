@@ -19,14 +19,15 @@ from .boundaries import (
     same_official_reset as _same_official_reset,
 )
 from .contracts import ReplayResult, ReplaySegment
+from .cost_ledger import normalize_cost_history
 from .dynamic_attribution import replay_dynamic_segment
 from ..fast_correction.prefix import FastCorrectionPrefix
-
 from ..models import (
     AppSettings,
     Observation,
     Participant,
     ParticipantUsageSample,
+    Sub2APIUserUsageSample,
 )
 
 ZERO = Decimal("0")
@@ -62,13 +63,23 @@ def _replay_usage_samples(
     segments: list[ReplaySegment],
     replay_from: datetime | None,
     correction_prefix: FastCorrectionPrefix,
+    cost_basis: str,
 ) -> None:
     if not segments:
         return
-    queryset = ParticipantUsageSample.objects.filter(account_id=account_id)
+    queryset = ParticipantUsageSample.objects.select_related(
+        "participant"
+    ).filter(account_id=account_id)
     if replay_from is not None:
         queryset = queryset.filter(observed_at__gte=replay_from)
     samples = list(queryset.order_by("observed_at", "id"))
+    normalized_by_key = {
+        (row.sub2api_user_id, row.observed_at): row.normalized_cost(cost_basis)
+        for row in Sub2APIUserUsageSample.objects.filter(
+            account_id=account_id,
+            observed_at__in=[sample.observed_at for sample in samples],
+        )
+    }
     for sample in samples:
         segment = segments[0]
         for candidate in segments:
@@ -77,10 +88,26 @@ def _replay_usage_samples(
             else:
                 break
         sample.attribution_started_at = segment.started_at
+        raw_cost = normalized_by_key.get(
+            (sample.participant.sub2api_user_id, sample.observed_at),
+            sample.raw_selected_cost,
+        )
+        baseline = segment.participant_baselines.get(
+            sample.participant_id,
+            ZERO,
+        )
+        if segment.reason in {"manual_override", "official_zero_observation"}:
+            baseline = normalized_by_key.get(
+                (
+                    sample.participant.sub2api_user_id,
+                    segment.first_observed_at,
+                ),
+                baseline,
+            )
         sample.selected_cost = max(
             ZERO,
-            sample.raw_selected_cost
-            - segment.participant_baselines.get(sample.participant_id, ZERO)
+            raw_cost
+            - baseline
             + correction_prefix.user_between(
                 sample.participant.sub2api_user_id,
                 segment.started_at,
@@ -178,16 +205,18 @@ def rebuild_account(
     """从最早受影响的边界向后重放；``None`` 仅供升级或修复时全量重放。"""
 
     config = config or AppSettings.load()
-    queryset = Observation.objects.select_for_update().filter(
-        account_id=account_id
+    all_observations = list(
+        Observation.objects.select_for_update()
+        .filter(account_id=account_id)
+        .prefetch_related("participant_snapshots__participant")
+        .order_by("observed_at", "id")
     )
-    if replay_from is not None:
-        queryset = queryset.filter(observed_at__gte=replay_from)
-    observations = list(
-        queryset.prefetch_related(
-            "participant_snapshots__participant"
-        ).order_by("observed_at", "id")
-    )
+    normalize_cost_history(account_id, all_observations)
+    observations = [
+        observation
+        for observation in all_observations
+        if replay_from is None or observation.observed_at >= replay_from
+    ]
     if not observations:
         latest = (
             Observation.objects.filter(
@@ -232,7 +261,7 @@ def rebuild_account(
         for observation in observations
         if observation.exclusion_source != "manual"
     ]
-    segments, automatic = _infer_segments(candidates)
+    segments, automatic = _infer_segments(candidates, config.cost_basis)
     if automatic:
         Observation.objects.bulk_update(
             automatic,
@@ -272,6 +301,7 @@ def rebuild_account(
         segments,
         replay_from,
         correction_prefix,
+        config.cost_basis,
     )
     _update_participant_latest(account_id)
     latest = (

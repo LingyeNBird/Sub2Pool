@@ -85,6 +85,22 @@ class ObservationListView(AdminAPIView):
                         item.raw_selected_total_cost
                     ),
                     "selected_total_cost": float(item.selected_total_cost),
+                    "cost_window_started_at": iso(
+                        item.cost_window_started_at
+                    ),
+                    "cost_window_ended_at": iso(item.cost_window_ended_at),
+                    "interval_cost_started_at": iso(
+                        item.interval_cost_started_at
+                    ),
+                    "interval_cost": (
+                        float(item.interval_cost(config.cost_basis))
+                        if item.interval_cost(config.cost_basis) is not None
+                        else None
+                    ),
+                    "interval_cost_source": item.interval_cost_source,
+                    "normalized_total_cost": float(
+                        item.normalized_cost(config.cost_basis)
+                    ),
                     "delta_percent": (
                         float(item.delta_percent)
                         if item.delta_percent is not None

@@ -15,6 +15,8 @@ from .views.dashboard import (
 from .views.database import DatabaseExportView, DatabaseImportView
 from .views.fast_correction import FastCorrectionRebuildView
 from .views.maintenance import (
+    CostHistoryPreviewView,
+    CostHistoryRepairView,
     HistoricalUsageBackfillView,
     HistoricalUsagePreviewView,
     ParticleReplayAllView,
@@ -114,6 +116,14 @@ urlpatterns = [
     path(
         "settings/data-maintenance/history-backfill",
         HistoricalUsageBackfillView.as_view(),
+    ),
+    path(
+        "settings/data-maintenance/cost-history-preview",
+        CostHistoryPreviewView.as_view(),
+    ),
+    path(
+        "settings/data-maintenance/cost-history-repair",
+        CostHistoryRepairView.as_view(),
     ),
     path(
         "settings/data-maintenance/rebuild-all",

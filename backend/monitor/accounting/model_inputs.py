@@ -39,11 +39,7 @@ def stable_segment_seed(account_id: int, segment: ReplaySegment) -> int:
     return int.from_bytes(hashlib.sha256(material).digest()[:8], "big")
 
 def _selected_total_fact(observation, cost_basis: str) -> Decimal:
-    return (
-        observation.total_actual_cost
-        if cost_basis == "actual"
-        else observation.total_standard_cost
-    )
+    return observation.normalized_cost(cost_basis)
 
 
 def build_dynamic_replay_input(
@@ -70,7 +66,7 @@ def build_dynamic_replay_input(
     user_ids: set[int] = set()
     for row in raw_user_rows:
         raw_by_time.setdefault(row.observed_at, {})[row.sub2api_user_id] = (
-            row.selected_cost(config.cost_basis)
+            row.normalized_cost(config.cost_basis)
         )
         user_ids.add(row.sub2api_user_id)
 

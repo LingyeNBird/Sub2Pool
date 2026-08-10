@@ -66,7 +66,11 @@ def _trajectory_periods(account_id: int) -> list[dict]:
     return periods
 
 
-def _segment_for_period(account_id: int, period: dict) -> ReplaySegment | None:
+def _segment_for_period(
+    account_id: int,
+    period: dict,
+    cost_basis: str,
+) -> ReplaySegment | None:
     observations = list(
         Observation.objects.filter(
             account_id=account_id,
@@ -99,7 +103,7 @@ def _segment_for_period(account_id: int, period: dict) -> ReplaySegment | None:
         first_observed_at=first.observed_at,
         resets_at=period["resets_at"],
         reason=reason,
-        total_baseline=first.raw_selected_total_cost if observed_baseline else ZERO,
+        total_baseline=first.normalized_cost(cost_basis) if observed_baseline else ZERO,
         participant_baselines=(
             participant_raw_costs(first) if observed_baseline else {}
         ),
@@ -149,6 +153,7 @@ def particle_trajectory_data(
     segment = _segment_for_period(
         config.openai_account_id,
         selected_period,
+        config.cost_basis,
     )
     if segment is None:
         raise ValueError("所选历史周期没有可重放的观测记录")

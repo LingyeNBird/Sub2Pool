@@ -1,11 +1,16 @@
 """采样所需的 Sub2API 本地用量读取与趋势点持久化。"""
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from .types import LocalBundle, LocalParticipantData, WindowReference
-from ..integrations.sub2api import Sub2APIReader, Sub2APIUserUsage
+from ..accounting.boundaries import same_official_reset
+from ..integrations.sub2api import (
+    Sub2APIReader,
+    Sub2APIUsageLog,
+    Sub2APIUserUsage,
+)
 from ..models import (
     AppSettings,
     Observation,
@@ -31,6 +36,11 @@ def fetch_local(
         reference.reset_at - timedelta(seconds=reference.window_seconds)
     ).astimezone(location).date()
     end_date = now.astimezone(location).date()
+    cost_window_started_at = datetime.combine(
+        start_date,
+        time.min,
+        tzinfo=location,
+    ).astimezone(dt_timezone.utc)
     query = {
         "account_id": reference.account_id,
         "start_date": start_date,
@@ -73,7 +83,176 @@ def fetch_local(
         participants=rows,
         users=all_users,
         checked_at=now,
+        cost_window_started_at=cost_window_started_at,
+        cost_window_ended_at=now,
     )
+
+
+def _same_query_window(left: datetime | None, right: datetime) -> bool:
+    return left is not None and left == right
+
+
+def _log_costs(
+    logs: list[Sub2APIUsageLog],
+    *,
+    started_at: datetime,
+    user_id: int | None = None,
+) -> tuple[Decimal, Decimal]:
+    selected = (
+        row
+        for row in logs
+        if row.created_at >= started_at
+        and (user_id is None or row.user_id == user_id)
+    )
+    standard = ZERO
+    actual = ZERO
+    for row in selected:
+        standard += row.total_cost
+        actual += row.actual_cost
+    return standard, actual
+
+
+def fetch_interval_bridge_logs(
+    client: Sub2APIReader,
+    config: AppSettings,
+    reference: WindowReference,
+    local: LocalBundle,
+    latest_observation: Observation | None,
+) -> list[Sub2APIUsageLog] | None:
+    """Only query exact logs when cumulative snapshots changed coordinates."""
+
+    starts: list[datetime] = []
+    if (
+        latest_observation is not None
+        and same_official_reset(
+            latest_observation.upstream_resets_at,
+            reference.reset_at,
+        )
+        and not _same_query_window(
+            latest_observation.cost_window_started_at,
+            local.cost_window_started_at,
+        )
+    ):
+        starts.append(latest_observation.observed_at)
+
+    latest_user_sample = (
+        Sub2APIUserUsageSample.objects.filter(account_id=reference.account_id)
+        .order_by("-observed_at", "-id")
+        .first()
+    )
+    if (
+        latest_user_sample is not None
+        and same_official_reset(
+            latest_user_sample.window_resets_at,
+            reference.reset_at,
+        )
+        and not _same_query_window(
+            latest_user_sample.window_started_at,
+            local.cost_window_started_at,
+        )
+    ):
+        starts.append(latest_user_sample.observed_at)
+
+    if not starts:
+        return None
+    fetch_logs = getattr(client, "usage_logs", None)
+    if not callable(fetch_logs):
+        return None
+    return fetch_logs(
+        account_id=reference.account_id,
+        started_at=min(starts),
+        ended_at=local.cost_window_ended_at,
+        timezone_name=config.timezone,
+    )
+
+
+def observation_interval_costs(
+    latest: Observation | None,
+    reference: WindowReference,
+    local: LocalBundle,
+    logs: list[Sub2APIUsageLog] | None,
+) -> tuple[datetime, Decimal | None, Decimal | None, str]:
+    if latest is None or not same_official_reset(
+        latest.upstream_resets_at,
+        reference.reset_at,
+    ):
+        return (
+            local.cost_window_started_at,
+            local.total.total_cost,
+            local.total.total_actual_cost,
+            "window_total",
+        )
+    if _same_query_window(
+        latest.cost_window_started_at,
+        local.cost_window_started_at,
+    ):
+        return (
+            latest.observed_at,
+            local.total.total_cost - latest.total_standard_cost,
+            local.total.total_actual_cost - latest.total_actual_cost,
+            "snapshot_delta",
+        )
+    if logs is not None:
+        standard, actual = _log_costs(
+            logs,
+            started_at=latest.observed_at,
+        )
+        return latest.observed_at, standard, actual, "request_logs"
+    return latest.observed_at, None, None, "unresolved"
+
+
+def _latest_user_samples(account_id: int) -> dict[int, Sub2APIUserUsageSample]:
+    latest = (
+        Sub2APIUserUsageSample.objects.filter(account_id=account_id)
+        .order_by("-observed_at", "-id")
+        .first()
+    )
+    if latest is None:
+        return {}
+    return {
+        row.sub2api_user_id: row
+        for row in Sub2APIUserUsageSample.objects.filter(
+            account_id=account_id,
+            observed_at=latest.observed_at,
+        ).order_by("sub2api_user_id", "id")
+    }
+
+
+def _user_interval(
+    user: Sub2APIUserUsage,
+    previous: Sub2APIUserUsageSample | None,
+    reference: WindowReference,
+    local: LocalBundle,
+    logs: list[Sub2APIUsageLog] | None,
+) -> tuple[datetime, Decimal | None, Decimal | None, str]:
+    if previous is None or not same_official_reset(
+        previous.window_resets_at,
+        reference.reset_at,
+    ):
+        return (
+            local.cost_window_started_at,
+            user.stats.total_cost,
+            user.stats.total_actual_cost,
+            "window_total",
+        )
+    if _same_query_window(
+        previous.window_started_at,
+        local.cost_window_started_at,
+    ):
+        return (
+            previous.observed_at,
+            user.stats.total_cost - previous.total_standard_cost,
+            user.stats.total_actual_cost - previous.total_actual_cost,
+            "snapshot_delta",
+        )
+    if logs is not None:
+        standard, actual = _log_costs(
+            logs,
+            started_at=previous.observed_at,
+            user_id=user.user_id,
+        )
+        return previous.observed_at, standard, actual, "request_logs"
+    return previous.observed_at, None, None, "unresolved"
 
 
 def _participant_baselines(
@@ -95,27 +274,43 @@ def save_local_bundle(
     reference: WindowReference,
     local: LocalBundle,
     latest: Observation | None,
+    *,
+    interval_logs: list[Sub2APIUsageLog] | None = None,
 ) -> None:
-    """保存一次本地趋势点；raw 字段永远保留 Sub2API 返回的累计值。"""
+    """Save raw cumulative snapshots together with their actual time window."""
 
-    window_started_at = reference.reset_at - timedelta(
-        seconds=reference.window_seconds
-    )
-    Sub2APIUserUsageSample.objects.bulk_create(
-        [
+    previous_by_user = _latest_user_samples(reference.account_id)
+    user_samples: list[Sub2APIUserUsageSample] = []
+    for user in local.users:
+        interval_start, interval_standard, interval_actual, source = (
+            _user_interval(
+                user,
+                previous_by_user.get(user.user_id),
+                reference,
+                local,
+                interval_logs,
+            )
+        )
+        user_samples.append(
             Sub2APIUserUsageSample(
                 account_id=reference.account_id,
                 sub2api_user_id=user.user_id,
                 username=user.username,
                 email=user.email,
                 observed_at=local.checked_at,
-                window_started_at=window_started_at,
+                window_started_at=local.cost_window_started_at,
+                window_ended_at=local.cost_window_ended_at,
                 window_resets_at=reference.reset_at,
                 total_standard_cost=user.stats.total_cost,
                 total_actual_cost=user.stats.total_actual_cost,
+                interval_started_at=interval_start,
+                interval_standard_cost=interval_standard,
+                interval_actual_cost=interval_actual,
+                interval_source=source,
             )
-            for user in local.users
-        ],
+        )
+    Sub2APIUserUsageSample.objects.bulk_create(
+        user_samples,
         ignore_conflicts=True,
     )
 

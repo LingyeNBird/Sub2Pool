@@ -12,6 +12,8 @@ import { useAuthStore } from "@/stores/auth";
 import type {
   AppSettingsData,
   ConfirmDialogOptions,
+  CostHistoryMaintenancePreview,
+  CostHistoryRepairResult,
   FastCorrectionRebuildResult,
   FullParticleReplayResult,
   HistoricalUsageBackfillResult,
@@ -47,6 +49,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   const checkingHistoricalUsage = ref(false);
   const backfillingHistoricalUsage = ref(false);
   const rebuildingAllParticles = ref(false);
+  const costHistoryPreview = ref<CostHistoryMaintenancePreview | null>(null);
+  const checkingCostHistory = ref(false);
+  const repairingCostHistory = ref(false);
   const savedFastCorrectionEnabled = ref(true);
   const passwordForm = reactive<PasswordForm>({
     old_password: "",
@@ -421,6 +426,58 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     }
   }
 
+  async function previewCostHistory() {
+    checkingCostHistory.value = true;
+    message.value = "";
+    success.value = "";
+    try {
+      costHistoryPreview.value = await api<CostHistoryMaintenancePreview>(
+        "settings/data-maintenance/cost-history-preview",
+        { method: "POST" },
+      );
+      const preview = costHistoryPreview.value;
+      success.value = preview.snapshot_conflicts
+        ? `检查完成：发现 ${preview.snapshot_conflicts} 个无法与请求日志核对的成本区间，已禁止写入。`
+        : `检查完成：可重建 ${preview.observation_interval_count} 个观测成本区间，其中 ${preview.coordinate_changes} 次累计快照坐标变化。`;
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "检查历史成本失败";
+    } finally {
+      checkingCostHistory.value = false;
+    }
+  }
+
+  async function repairCostHistory() {
+    if (!costHistoryPreview.value?.can_repair) return;
+    if (
+      !(await confirmAction({
+        title: "重取历史成本区间？",
+        message:
+          "系统将只读 Sub2API 请求日志，重建相邻观测之间的成本增量，再全量重放派生结果。原始累计成本、百分比和观测时间不会改变。",
+        confirmLabel: "开始重取",
+        tone: "warning",
+      }))
+    ) {
+      return;
+    }
+    repairingCostHistory.value = true;
+    message.value = "";
+    success.value = "";
+    try {
+      const result = await api<CostHistoryRepairResult>(
+        "settings/data-maintenance/cost-history-repair",
+        { method: "POST" },
+      );
+      costHistoryPreview.value = null;
+      success.value = `历史成本重建完成：写入 ${result.observation_interval_count} 个观测区间，重放 ${result.replayed_observations} 条观测。`;
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "重取历史成本失败";
+    } finally {
+      repairingCostHistory.value = false;
+    }
+  }
+
   async function test(kind: "sub2api" | "email") {
     testing.value = kind;
     message.value = "";
@@ -488,6 +545,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     checkingHistoricalUsage,
     backfillingHistoricalUsage,
     rebuildingAllParticles,
+    costHistoryPreview,
+    checkingCostHistory,
+    repairingCostHistory,
     passwordForm,
     loadOpenAIAccounts,
     saveConnection,
@@ -502,6 +562,8 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     previewHistoricalUsage,
     backfillHistoricalUsage,
     rebuildAllParticles,
+    previewCostHistory,
+    repairCostHistory,
     test,
     changePassword,
   };

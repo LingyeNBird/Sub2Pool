@@ -31,11 +31,40 @@ class Observation(models.Model):
         default=0,
         validators=PERCENT_VALIDATORS,
     )
-    # raw_* 与两种成本字段是不可变采样事实；selected_total_cost 是重放后的区间累计值。
+    # 原始累计成本必须与其查询窗口一起解释；normalized_* 是通过区间增量重建的
+    # 同一官方周期累计值，selected_total_cost 则是归属区间内的派生累计值。
     raw_selected_total_cost = models.DecimalField(max_digits=18, decimal_places=6)
     selected_total_cost = models.DecimalField(max_digits=18, decimal_places=6)
     total_standard_cost = models.DecimalField(max_digits=18, decimal_places=6)
     total_actual_cost = models.DecimalField(max_digits=18, decimal_places=6)
+    cost_window_started_at = models.DateTimeField(null=True, blank=True)
+    cost_window_ended_at = models.DateTimeField(null=True, blank=True)
+    interval_cost_started_at = models.DateTimeField(null=True, blank=True)
+    interval_standard_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    interval_actual_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    interval_cost_source = models.CharField(max_length=24, blank=True)
+    normalized_standard_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    normalized_actual_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
     # 每个字段记录“上一原始采样点到当前采样点”的额外等效成本。
     # NULL 表示该区间尚未计算；0 表示已计算且没有 FAST 请求。
     fast_correction_standard_cost = models.DecimalField(
@@ -96,6 +125,28 @@ class Observation(models.Model):
     manual_start_set_at = models.DateTimeField(null=True, blank=True)
     exclusion_reason = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def raw_cost(self, basis: str) -> Decimal:
+        return (
+            self.total_actual_cost
+            if basis == "actual"
+            else self.total_standard_cost
+        )
+
+    def interval_cost(self, basis: str) -> Decimal | None:
+        return (
+            self.interval_actual_cost
+            if basis == "actual"
+            else self.interval_standard_cost
+        )
+
+    def normalized_cost(self, basis: str) -> Decimal:
+        normalized = (
+            self.normalized_actual_cost
+            if basis == "actual"
+            else self.normalized_standard_cost
+        )
+        return self.raw_cost(basis) if normalized is None else normalized
 
     class Meta:
         ordering = ["-observed_at"]
@@ -226,10 +277,39 @@ class Sub2APIUserUsageSample(models.Model):
     username = models.CharField(max_length=150, blank=True)
     email = models.EmailField(blank=True)
     observed_at = models.DateTimeField()
-    window_started_at = models.DateTimeField()
+    # 统计接口实际按自然日接收查询范围；旧版误存为官方窗口起点，因此旧数据
+    # 迁移为未知，只有新采样或历史重取后才写入真实查询窗口。
+    window_started_at = models.DateTimeField(null=True, blank=True)
+    window_ended_at = models.DateTimeField(null=True, blank=True)
     window_resets_at = models.DateTimeField()
     total_standard_cost = models.DecimalField(max_digits=18, decimal_places=6)
     total_actual_cost = models.DecimalField(max_digits=18, decimal_places=6)
+    interval_started_at = models.DateTimeField(null=True, blank=True)
+    interval_standard_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    interval_actual_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    interval_source = models.CharField(max_length=24, blank=True)
+    normalized_standard_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    normalized_actual_cost = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
 
     def selected_cost(self, basis: str) -> Decimal:
         return (
@@ -237,6 +317,21 @@ class Sub2APIUserUsageSample(models.Model):
             if basis == "actual"
             else self.total_standard_cost
         )
+
+    def selected_interval_cost(self, basis: str) -> Decimal | None:
+        return (
+            self.interval_actual_cost
+            if basis == "actual"
+            else self.interval_standard_cost
+        )
+
+    def normalized_cost(self, basis: str) -> Decimal:
+        normalized = (
+            self.normalized_actual_cost
+            if basis == "actual"
+            else self.normalized_standard_cost
+        )
+        return self.selected_cost(basis) if normalized is None else normalized
 
     class Meta:
         ordering = ["observed_at", "sub2api_user_id"]

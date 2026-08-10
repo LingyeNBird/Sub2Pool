@@ -78,7 +78,8 @@ def sync_participant_history(
             if participant.last_checked_at == raw.observed_at
             else None
         )
-        selected_cost = raw.selected_cost(config.cost_basis)
+        raw_selected_cost = raw.selected_cost(config.cost_basis)
+        selected_cost = raw.normalized_cost(config.cost_basis)
         usage_rows.append(
             ParticipantUsageSample(
                 participant=participant,
@@ -87,7 +88,7 @@ def sync_participant_history(
                 attribution_started_at=raw.window_started_at,
                 balance_usd=balance,
                 selected_cost=selected_cost,
-                raw_selected_cost=selected_cost,
+                raw_selected_cost=raw_selected_cost,
             )
         )
     ParticipantUsageSample.objects.bulk_create(
@@ -127,7 +128,8 @@ def sync_participant_history(
             matched_observations.append(observation)
             if observation.pk in existing_observation_ids:
                 continue
-            selected_cost = raw.selected_cost(config.cost_basis)
+            raw_selected_cost = raw.selected_cost(config.cost_basis)
+            selected_cost = raw.normalized_cost(config.cost_basis)
             balance = (
                 participant.latest_balance_usd
                 if participant.last_checked_at == observation.observed_at
@@ -137,7 +139,7 @@ def sync_participant_history(
                 ParticipantSnapshot(
                     observation=observation,
                     participant=participant,
-                    raw_selected_cost=selected_cost,
+                    raw_selected_cost=raw_selected_cost,
                     selected_cost=selected_cost,
                     current_balance_usd=balance,
                     remaining_share_percent=participant.share_percent,

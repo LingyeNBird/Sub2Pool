@@ -4,12 +4,18 @@ from datetime import datetime, timedelta
 
 from django.db import transaction
 
+from .local_usage import observation_interval_costs
 from .types import LocalBundle, WindowReference
 from ..accounting.boundaries import same_official_reset
 from ..fast_correction.domain import FastCorrectionInterval
 from ..fast_correction.persistence import apply_fast_interval
 from ..fast_correction.service import fetch_fast_interval
-from ..integrations.sub2api import Sub2APIError, Sub2APIReader, WeeklyWindow
+from ..integrations.sub2api import (
+    Sub2APIError,
+    Sub2APIReader,
+    Sub2APIUsageLog,
+    WeeklyWindow,
+)
 from ..models import AppSettings, Observation, ParticipantSnapshot
 
 
@@ -21,12 +27,25 @@ def create_raw_observation(
     window: WeeklyWindow,
     local: LocalBundle,
     source: str,
+    latest_raw: Observation | None = None,
+    interval_logs: list[Sub2APIUsageLog] | None = None,
     fast_interval: FastCorrectionInterval | None = None,
     fast_error: str = "",
 ) -> Observation:
     """持久化不可变采样事实；派生字段先给安全初值，随后由重放器覆盖。"""
 
     selected_total = local.total.selected(config.cost_basis)
+    (
+        interval_started_at,
+        interval_standard_cost,
+        interval_actual_cost,
+        interval_source,
+    ) = observation_interval_costs(
+        latest_raw,
+        reference,
+        local,
+        interval_logs,
+    )
     observation = Observation.objects.create(
         account_id=reference.account_id,
         source=source,
@@ -38,6 +57,12 @@ def create_raw_observation(
         selected_total_cost=selected_total,
         total_standard_cost=local.total.total_cost,
         total_actual_cost=local.total.total_actual_cost,
+        cost_window_started_at=local.cost_window_started_at,
+        cost_window_ended_at=local.cost_window_ended_at,
+        interval_cost_started_at=interval_started_at,
+        interval_standard_cost=interval_standard_cost,
+        interval_actual_cost=interval_actual_cost,
+        interval_cost_source=interval_source,
         effective_usd_per_percent=config.initial_usd_per_percent,
         sample_note="等待派生计算",
         raw_window={
@@ -47,6 +72,9 @@ def create_raw_observation(
             "reset_at": window.reset_at,
             "query_mode": config.quota_query_mode,
             "sampled_at": window.sampled_at,
+            "cost_window_started_at": local.cost_window_started_at.isoformat(),
+            "cost_window_ended_at": local.cost_window_ended_at.isoformat(),
+            "interval_cost_source": interval_source,
             **({"fast_correction_error": fast_error} if fast_error else {}),
         },
     )

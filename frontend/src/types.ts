@@ -158,6 +158,12 @@ export interface Observation {
   interval_used_percent: number;
   raw_selected_total_cost: number;
   selected_total_cost: number;
+  cost_window_started_at: string | null;
+  cost_window_ended_at: string | null;
+  interval_cost_started_at: string | null;
+  interval_cost: number | null;
+  interval_cost_source: string;
+  normalized_total_cost: number;
   delta_percent: number | null;
   delta_cost: number | null;
   sample_usd_per_percent: number | null;
@@ -536,6 +542,28 @@ export interface HistoricalUsageBackfillResult extends HistoricalUsageMaintenanc
   replayed_observations: number;
   inferred_intervals?: number;
   automatic_exclusions?: number;
+}
+
+export interface CostHistoryMaintenancePreview {
+  account_id: number;
+  observation_count: number;
+  user_sample_count: number;
+  request_log_count: number;
+  observation_interval_count: number;
+  user_interval_count: number;
+  coordinate_changes: number;
+  snapshot_conflicts: number;
+  max_standard_gap_usd: number;
+  max_actual_gap_usd: number;
+  earliest_log_at: string | null;
+  latest_log_at: string | null;
+  can_repair: boolean;
+}
+
+export interface CostHistoryRepairResult extends CostHistoryMaintenancePreview {
+  replayed_observations: number;
+  inferred_intervals: number;
+  automatic_exclusions: number;
 }
 
 export interface FullParticleReplayResult {

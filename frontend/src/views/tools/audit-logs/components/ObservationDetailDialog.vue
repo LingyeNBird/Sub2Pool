@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
+import { useDateTime } from "@/composables/useDateTime";
+
 import type { Observation } from "@/types";
 import {
   formatCurrency,
@@ -12,6 +14,22 @@ import type { DialogController } from "../types";
 
 const dialog = ref<HTMLDialogElement | null>(null);
 const observation = ref<Observation | null>(null);
+const dateTime = useDateTime();
+
+function intervalSourceLabel(value: string) {
+  return (
+    {
+      window_total: "查询窗口累计值",
+      snapshot_delta: "同一查询窗口快照差",
+      request_logs: "请求日志精确汇总",
+      historical_anchor: "历史锚点",
+      historical_logs: "历史请求日志",
+      unresolved: "尚未解析",
+    }[value] ??
+    value ??
+    "—"
+  );
+}
 
 function open(value: Observation) {
   observation.value = value;
@@ -44,6 +62,51 @@ defineExpose<DialogController<[Observation]>>({ open, close });
           }}
         </span>
       </div>
+      <section v-if="observation" class="mt-5">
+        <h3 class="font-semibold">成本事实</h3>
+        <div class="mt-2 grid gap-3 sm:grid-cols-2">
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="text-xs opacity-60">原始累计成本</div>
+            <div class="mt-1 font-semibold tabular-nums">
+              {{ formatCurrency(observation.raw_selected_total_cost) }}
+            </div>
+            <div class="mt-1 text-xs opacity-60">
+              <template
+                v-if="
+                  observation.cost_window_started_at &&
+                  observation.cost_window_ended_at
+                "
+              >
+                {{ dateTime(observation.cost_window_started_at) }} 至
+                {{ dateTime(observation.cost_window_ended_at) }}
+              </template>
+              <template v-else>旧记录未保存原始查询窗口</template>
+            </div>
+          </div>
+          <div class="rounded-box bg-base-200 p-4">
+            <div class="text-xs opacity-60">本次成本区间</div>
+            <div class="mt-1 font-semibold tabular-nums">
+              {{ formatCurrency(observation.interval_cost) }}
+            </div>
+            <div class="mt-1 text-xs opacity-60">
+              <template v-if="observation.interval_cost_started_at">
+                {{ dateTime(observation.interval_cost_started_at) }} 至
+                {{ dateTime(observation.observed_at) }} ·
+              </template>
+              {{ intervalSourceLabel(observation.interval_cost_source) }}
+            </div>
+          </div>
+          <div class="rounded-box bg-base-200 p-4 sm:col-span-2">
+            <div class="text-xs opacity-60">归一化周期累计成本</div>
+            <div class="mt-1 font-semibold tabular-nums">
+              {{ formatCurrency(observation.normalized_total_cost) }}
+            </div>
+            <div class="mt-1 text-xs opacity-60">
+              模型使用区间增量衔接后的同一成本坐标；原始累计快照不会被改写。
+            </div>
+          </div>
+        </div>
+      </section>
       <div class="mt-4 overflow-x-auto">
         <table class="table table-sm">
           <thead>

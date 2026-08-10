@@ -43,6 +43,9 @@ const {
   checkingHistoricalUsage,
   backfillingHistoricalUsage,
   rebuildingAllParticles,
+  costHistoryPreview,
+  checkingCostHistory,
+  repairingCostHistory,
   passwordForm,
   loadOpenAIAccounts,
   saveConnection,
@@ -57,6 +60,8 @@ const {
   previewHistoricalUsage,
   backfillHistoricalUsage,
   rebuildAllParticles,
+  previewCostHistory,
+  repairCostHistory,
   test,
   changePassword,
 } = useSettingsPage(confirmAction);
@@ -152,9 +157,14 @@ async function handleFastCorrectionRebuild(scope: FastCorrectionRebuildScope) {
       :checking="checkingHistoricalUsage"
       :backfilling="backfillingHistoricalUsage"
       :rebuilding="rebuildingAllParticles"
+      :cost-preview="costHistoryPreview"
+      :checking-cost="checkingCostHistory"
+      :repairing-cost="repairingCostHistory"
       @preview="previewHistoricalUsage"
       @backfill="backfillHistoricalUsage"
       @rebuild="rebuildAllParticles"
+      @cost-preview="previewCostHistory"
+      @cost-repair="repairCostHistory"
     />
     <DatabaseTransferCard
       :exporting="exportingDatabase"
