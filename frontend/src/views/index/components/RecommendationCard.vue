@@ -19,6 +19,7 @@ defineEmits<{
     :class="applied ? 'cursor-default' : 'cursor-pointer'"
     :disabled="applied"
     :aria-label="`处理参与者 ${participant.name} 的额度建议`"
+    @click="$emit('select', participant)"
   >
     <AppIcon
       v-if="applied"
@@ -27,19 +28,41 @@ defineEmits<{
     />
     <div :class="{ 'blur-sm': applied }">
       <div class="flex flex-wrap items-start justify-between gap-4">
-        <p class="min-w-0 text-lg leading-9 font-semibold sm:text-xl">
-          对于参与者
-          <strong class="text-xl break-words sm:text-2xl">{{
-            participant.name
-          }}</strong>
-          （Sub2API 账号
-          <span class="font-bold break-all">{{
-            participant.sub2api_identity
-          }}</span
-          >），
-          <template v-if="participant.snapshot">
-            建议把 Sub2API 用户余额设置为
-            <strong class="text-2xl font-bold text-primary sm:text-3xl">
+        <div class="min-w-0 flex-1">
+          <p class="text-lg leading-9 font-semibold sm:text-xl">
+            对于参与者
+            <strong class="text-xl break-words sm:text-2xl">{{
+              participant.name
+            }}</strong>
+            （Sub2API 账号
+            <span class="font-bold break-all">{{
+              participant.sub2api_identity
+            }}</span
+            >），
+            <template v-if="participant.snapshot">
+              建议把 Sub2API 用户余额设置为
+              <strong class="text-2xl font-bold text-primary sm:text-3xl">
+                {{
+                  formatCurrency(participant.snapshot.recommended_balance_usd)
+                }}
+              </strong>
+              。
+            </template>
+            <template v-else>尚无额度建议，请先完成一次有效测算。</template>
+          </p>
+          <p
+            v-if="
+              participant.snapshot?.recommended_balance_min_usd != null &&
+              participant.snapshot.recommended_balance_max_usd != null
+            "
+            class="mt-1 text-sm font-medium opacity-65"
+          >
+            {{
+              participant.snapshot.allocation_model === "time_varying"
+                ? "90% 参考范围"
+                : "整数百分比参考范围"
+            }}：
+            <span class="tabular-nums">
               {{
                 formatCurrencyRange(
                   participant.snapshot.recommended_balance_min_usd,
@@ -47,11 +70,9 @@ defineEmits<{
                   participant.snapshot.recommended_balance_usd,
                 )
               }}
-            </strong>
-            。
-          </template>
-          <template v-else>尚无额度建议，请先完成一次有效测算。</template>
-        </p>
+            </span>
+          </p>
+        </div>
         <span
           class="badge"
           :class="
