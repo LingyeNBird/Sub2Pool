@@ -62,23 +62,31 @@ def _send_resend(
     api_key = decrypt_secret(config.resend_api_key_encrypted)
     if not api_key or not config.resend_from_email:
         raise NotificationDeliveryError("未完整配置 Resend API Key 或发件人")
-    response = httpx.post(
-        "https://api.resend.com/emails",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            # Resend 的幂等键标识一次具体 HTTP 投递，而不是业务冷却键。
-            # 同一业务提醒过了冷却期会创建新审计事件，因此必须使用新键；
-            # 若将 dedupe_key 复用于不同正文，Resend 会在 24 小时内返回 409。
-            "Idempotency-Key": f"pinche-notification-{delivery_event_id}",
-        },
-        json={
-            "from": config.resend_from_email,
-            "to": [recipient],
-            "subject": subject,
-            "text": body,
-        },
-        timeout=config.request_timeout_seconds,
-    )
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        # Resend 的幂等键标识一次具体 HTTP 投递，而不是业务冷却键。
+        # 同一业务提醒过了冷却期会创建新审计事件，因此必须使用新键；
+        # 若将 dedupe_key 复用于不同正文，Resend 会在 24 小时内返回 409。
+        "Idempotency-Key": f"pinche-notification-{delivery_event_id}",
+    }
+    payload = {
+        "from": config.resend_from_email,
+        "to": [recipient],
+        "subject": subject,
+        "text": body,
+    }
+    for attempt in range(2):
+        try:
+            response = httpx.post(
+                "https://api.resend.com/emails",
+                headers=headers,
+                json=payload,
+                timeout=config.request_timeout_seconds,
+            )
+            break
+        except httpx.TransportError:
+            if attempt == 1:
+                raise
     if response.status_code >= 400:
         try:
             message = str(response.json().get("message", ""))[:300]

@@ -143,6 +143,37 @@ def test_resend_uses_a_new_idempotency_key_for_each_delivery(monkeypatch):
     }
 
 @pytest.mark.django_db
+def test_resend_retries_one_transient_transport_failure(monkeypatch):
+    config = AppSettings.load()
+    config.email_provider = "resend"
+    config.notification_email = "owner@example.com"
+    config.resend_from_email = "拼车额度 <notice@example.com>"
+    config.resend_api_key_encrypted = encrypt_secret("re_secret")
+    config.save()
+    requests = []
+
+    def fake_post(_url, **kwargs):
+        requests.append(kwargs)
+        if len(requests) == 1:
+            raise httpx.ConnectError("temporary TLS disconnect")
+        return httpx.Response(200, json={"id": "email_after_retry"})
+
+    monkeypatch.setattr("monitor.notifications.httpx.post", fake_post)
+    event = send_notification(
+        config=config,
+        event_type="test",
+        dedupe_key="resend-transport-retry",
+        subject="测试",
+        body="正文",
+        ignore_cooldown=True,
+    )
+
+    assert event is not None and event.status == "sent"
+    assert len(requests) == 2
+    assert requests[0]["headers"]["Idempotency-Key"] == requests[1]["headers"]["Idempotency-Key"]
+    assert requests[0]["json"] == requests[1]["json"]
+
+@pytest.mark.django_db
 def test_usage_logs_are_paginated_and_filtered_to_exact_interval():
     config = AppSettings.load()
     config.sub2api_base_url = "https://sub2api.example"
