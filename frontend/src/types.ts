@@ -517,3 +517,18 @@ export interface FullParticleReplayResult {
   inferred_intervals: number;
   latest_observation_id: number | null;
 }
+
+export type ConfirmDialogTone = "primary" | "warning" | "error";
+
+export interface ConfirmDialogOptions {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  tone?: ConfirmDialogTone;
+}
+
+export interface ConfirmDialogHandle {
+  open: (options: ConfirmDialogOptions) => Promise<boolean>;
+  close: () => void;
+}

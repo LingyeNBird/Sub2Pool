@@ -2,8 +2,9 @@
 import { computed, onMounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
-import type { Participant, SystemUser } from "@/types";
+import type { ConfirmDialogHandle, Participant, SystemUser } from "@/types";
 
 import SystemUserEditorDialog from "./components/SystemUserEditorDialog.vue";
 import SystemUserStats from "./components/SystemUserStats.vue";
@@ -16,6 +17,7 @@ const loading = ref(true);
 const saving = ref(false);
 const message = ref("");
 const editor = ref<SystemUserEditorHandle | null>(null);
+const confirmDialog = ref<ConfirmDialogHandle | null>(null);
 
 const activeCount = computed(
   () => users.value.filter((item) => item.is_active).length,
@@ -60,7 +62,16 @@ async function save(form: SystemUserFormData, userId: number | null) {
 }
 
 async function remove(user: SystemUser) {
-  if (!window.confirm(`确定删除系统用户“${user.username}”吗？`)) return;
+  if (
+    !(await confirmDialog.value?.open({
+      title: "删除系统用户？",
+      message: `确定删除系统用户“${user.username}”吗？删除后该账号将无法继续登录。`,
+      confirmLabel: "删除",
+      tone: "error",
+    }))
+  ) {
+    return;
+  }
   message.value = "";
   try {
     await api(`system-users/${user.id}`, { method: "DELETE" });
@@ -110,4 +121,5 @@ onMounted(load);
     :saving="saving"
     @save="save"
   />
+  <ConfirmDialog ref="confirmDialog" />
 </template>

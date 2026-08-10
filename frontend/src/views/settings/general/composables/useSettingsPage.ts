@@ -11,6 +11,7 @@ import {
 import { useAuthStore } from "@/stores/auth";
 import type {
   AppSettingsData,
+  ConfirmDialogOptions,
   FastCorrectionRebuildResult,
   FullParticleReplayResult,
   HistoricalUsageBackfillResult,
@@ -24,7 +25,9 @@ export interface PasswordForm {
   confirm_password: string;
 }
 
-export function useSettingsPage() {
+type ConfirmAction = (options: ConfirmDialogOptions) => Promise<boolean>;
+
+export function useSettingsPage(confirmAction: ConfirmAction) {
   const auth = useAuthStore();
   const settings = ref<AppSettingsData | null>(null);
   const loading = ref(true);
@@ -308,7 +311,13 @@ export function useSettingsPage() {
     const file = input.files?.[0];
     if (!file) return;
     if (
-      !window.confirm("导入会完整覆盖当前数据库，并要求重新登录。确认继续吗？")
+      !(await confirmAction({
+        title: "覆盖当前数据库？",
+        message:
+          "导入会完整覆盖当前数据库，并要求所有用户重新登录。覆盖前会在服务器数据目录保留一份当前数据库副本。",
+        confirmLabel: "导入并覆盖",
+        tone: "error",
+      }))
     ) {
       input.value = "";
       return;
@@ -353,11 +362,15 @@ export function useSettingsPage() {
   }
 
   async function backfillHistoricalUsage() {
+    if (!historyPreview.value?.can_backfill) return;
     if (
-      !historyPreview.value?.can_backfill ||
-      !window.confirm(
-        "将只读 Sub2API 历史请求日志，补全缺失的用户用量事实，并全量重建粒子结果。原始百分比和观测时间不会改变。确认继续吗？",
-      )
+      !(await confirmAction({
+        title: "补全全部历史？",
+        message:
+          "系统将只读 Sub2API 历史请求日志，补全缺失的用户用量事实，并从第一条观测全量重建粒子结果。原始百分比、成本和观测时间不会改变。",
+        confirmLabel: "开始补全",
+        tone: "warning",
+      }))
     ) {
       return;
     }
@@ -381,9 +394,13 @@ export function useSettingsPage() {
 
   async function rebuildAllParticles() {
     if (
-      !window.confirm(
-        "将从第一条原始观测重新计算全部粒子结果。原始百分比、成本和观测时间不会改变。确认继续吗？",
-      )
+      !(await confirmAction({
+        title: "重建全部粒子结果？",
+        message:
+          "系统将从第一条原始观测重新计算全部粒子结果。原始百分比、成本和观测时间不会改变。",
+        confirmLabel: "开始重建",
+        tone: "warning",
+      }))
     ) {
       return;
     }

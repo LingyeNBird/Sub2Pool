@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
+import type { ConfirmDialogHandle, ConfirmDialogOptions } from "@/types";
 
 import AllocationModelCard from "./components/AllocationModelCard.vue";
 import DatabaseTransferCard from "./components/DatabaseTransferCard.vue";
@@ -15,6 +17,12 @@ import NotificationRulesCard from "./components/NotificationRulesCard.vue";
 import SamplingStrategyCard from "./components/SamplingStrategyCard.vue";
 import Sub2APIConnectionCard from "./components/Sub2APIConnectionCard.vue";
 import { useSettingsPage } from "./composables/useSettingsPage";
+
+const confirmDialog = ref<ConfirmDialogHandle | null>(null);
+
+function confirmAction(options: ConfirmDialogOptions) {
+  return confirmDialog.value?.open(options) ?? Promise.resolve(false);
+}
 
 const {
   settings,
@@ -51,7 +59,7 @@ const {
   rebuildAllParticles,
   test,
   changePassword,
-} = useSettingsPage();
+} = useSettingsPage(confirmAction);
 
 const fastCorrectionDialog = ref<InstanceType<
   typeof FastCorrectionRebuildDialog
@@ -161,4 +169,5 @@ async function handleFastCorrectionRebuild(scope: FastCorrectionRebuildScope) {
     :rebuilding="rebuildingFastCorrection"
     @confirm="handleFastCorrectionRebuild"
   />
+  <ConfirmDialog ref="confirmDialog" />
 </template>

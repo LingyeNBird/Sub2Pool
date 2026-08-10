@@ -2,9 +2,14 @@
 import { computed, onMounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
-import type { Participant, Sub2APIUserOption } from "@/types";
+import type {
+  ConfirmDialogHandle,
+  Participant,
+  Sub2APIUserOption,
+} from "@/types";
 import { formatPercent } from "@/utils/formatters";
 
 import ParticipantCard from "./components/ParticipantCard.vue";
@@ -27,6 +32,7 @@ const message = ref("");
 const userListMessage = ref("");
 const userListError = ref("");
 const editor = ref<ParticipantEditorHandle | null>(null);
+const confirmDialog = ref<ConfirmDialogHandle | null>(null);
 
 const viewModeStorageKey = "sub2pool:participant-view";
 const viewMode = ref<ParticipantViewMode>("cards");
@@ -126,9 +132,12 @@ async function save(form: ParticipantFormData, participantId: number | null) {
 
 async function remove(participant: Participant) {
   if (
-    !window.confirm(
-      `确定删除“${participant.name}”吗？已有账本的参与者只能停用。`,
-    )
+    !(await confirmDialog.value?.open({
+      title: "删除参与者？",
+      message: `确定删除“${participant.name}”吗？已有账本的参与者只能停用。`,
+      confirmLabel: "删除",
+      tone: "error",
+    }))
   ) {
     return;
   }
@@ -272,4 +281,5 @@ onMounted(() => {
     @save="save"
     @remove="remove"
   />
+  <ConfirmDialog ref="confirmDialog" />
 </template>

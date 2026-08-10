@@ -2,9 +2,11 @@
 import { onMounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { useZonedDateTimeIso } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
 import type {
+  ConfirmDialogHandle,
   MonitorSchedule,
   Observation,
   ObservationRebuildResult,
@@ -75,6 +77,7 @@ const excludeDialog = ref<InstanceType<typeof ExcludeObservationDialog> | null>(
 const manualStartDialog = ref<InstanceType<typeof ManualStartDialog> | null>(
   null,
 );
+const confirmDialog = ref<ConfirmDialogHandle | null>(null);
 
 const { schedule, countdownProgress, remainingLabel, applySchedule } =
   useMonitorScheduleCountdown(() => load());
@@ -192,9 +195,13 @@ async function clearManualStart(row: Observation) {
 
 async function rebuildCalculations() {
   if (
-    !window.confirm(
-      "将保留全部原始采样、排除记录和管理员起点，从当前区间起点重新计算成本增量、百分比增量、折算率与参与者归属。是否继续？",
-    )
+    !(await confirmDialog.value?.open({
+      title: "重建当前区间计算？",
+      message:
+        "系统会保留全部原始采样、排除记录和管理员起点，从当前区间起点重新计算成本增量、百分比增量、折算率与参与者归属。",
+      confirmLabel: "开始重建",
+      tone: "warning",
+    }))
   ) {
     return;
   }
@@ -301,4 +308,5 @@ onMounted(load);
     :submitting="manualStartId !== null"
     @confirm="confirmManualStart"
   />
+  <ConfirmDialog ref="confirmDialog" />
 </template>
