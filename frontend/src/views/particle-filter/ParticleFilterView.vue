@@ -4,9 +4,11 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
+import { useAuthStore } from "@/stores/auth";
 import type {
   ParticleRangePromotion,
   ParticleTrajectoryData,
+  ParticleTrajectoryPeriod,
   ParticleTrajectoryPoint,
 } from "@/types";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
@@ -23,6 +25,7 @@ const playbackProgress = ref(0);
 const playing = ref(false);
 const playbackSpeed = ref<1 | 2 | 4>(2);
 const reducedMotion = ref(false);
+const auth = useAuthStore();
 const dateTime = useDateTime();
 let playbackFrame: number | undefined;
 let lastFrameTime: number | null = null;
@@ -34,6 +37,21 @@ const points = computed<ParticleTrajectoryPoint[]>(
 const promotions = computed<ParticleRangePromotion[]>(
   () => data.value?.promotions ?? [],
 );
+const periods = computed<ParticleTrajectoryPeriod[]>(() =>
+  [...(data.value?.periods ?? [])].reverse(),
+);
+const selectedPeriodId = ref<number | null>(null);
+const selectedPeriod = computed(
+  () =>
+    periods.value.find((period) => period.id === selectedPeriodId.value) ??
+    null,
+);
+const replayTitle = computed(() => {
+  if (!selectedPeriod.value) return "周期粒子重放";
+  return selectedPeriod.value.is_current
+    ? "当前周期粒子重放"
+    : `第 ${selectedPeriod.value.sequence} 周期粒子重放`;
+});
 const frame = computed(() =>
   trajectoryFrame(points.value, playbackProgress.value),
 );
@@ -111,12 +129,44 @@ function selectProgress(rawValue: number) {
   playbackProgress.value = Math.min(1, Math.max(0, rawValue / 1000));
 }
 
-async function load() {
+function periodDate(value: string) {
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) return "日期未知";
+  try {
+    const parts = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: auth.timezone,
+      month: "numeric",
+      day: "numeric",
+    }).formatToParts(instant);
+    const month = parts.find((part) => part.type === "month")?.value;
+    const day = parts.find((part) => part.type === "day")?.value;
+    return month && day ? `${month}月${day}日` : "日期未知";
+  } catch {
+    const fallback = /^(\d{4})\/(\d{1,2})\/(\d{1,2})/u.exec(dateTime(value));
+    return fallback
+      ? `${Number(fallback[2])}月${Number(fallback[3])}日`
+      : "日期未知";
+  }
+}
+
+function periodLabel(period: ParticleTrajectoryPeriod) {
+  return `第 ${period.sequence} 周期 · ${periodDate(period.started_at)}至${periodDate(period.resets_at)}`;
+}
+
+function loadSelectedPeriod() {
+  void load(selectedPeriodId.value);
+}
+
+async function load(periodId: number | null = selectedPeriodId.value) {
   loading.value = true;
   message.value = "";
   stopPlayback();
   try {
-    data.value = await api<ParticleTrajectoryData>("particle-trajectory");
+    const query = periodId === null ? "" : `?period=${periodId}`;
+    data.value = await api<ParticleTrajectoryData>(
+      `particle-trajectory${query}`,
+    );
+    selectedPeriodId.value = data.value.selected_period_id ?? null;
     if (points.value.length) {
       playbackProgress.value = reducedMotion.value ? 1 : 0;
       startPlayback();
@@ -160,7 +210,21 @@ onBeforeUnmount(() => {
         </ul>
       </div>
     </div>
-    <button class="btn btn-sm" :disabled="loading" @click="load">
+    <label v-if="periods.length" class="form-control w-full gap-1 lg:w-72">
+      <span class="text-xs font-medium opacity-60">历史周期</span>
+      <select
+        v-model.number="selectedPeriodId"
+        class="select w-full select-sm"
+        :disabled="loading"
+        aria-label="选择历史周期"
+        @change="loadSelectedPeriod"
+      >
+        <option v-for="period in periods" :key="period.id" :value="period.id">
+          {{ periodLabel(period) }}
+        </option>
+      </select>
+    </label>
+    <button class="btn btn-sm" :disabled="loading" @click="loadSelectedPeriod">
       <span v-if="loading" class="loading loading-xs loading-spinner"></span>
       <AppIcon v-else name="arrow-path" class="size-4" />
       重新计算
@@ -198,7 +262,7 @@ onBeforeUnmount(() => {
           <div>
             <h2 class="card-title">
               <AppIcon name="sparkles" class="size-5" />
-              当前周期粒子重放
+              {{ replayTitle }}
               <span
                 class="responsive-help-tooltip tooltip tooltip-bottom"
                 data-tip="细线连接相同后验分位位置，并不表示某个粒子的永久身份；点云和轨迹只读，不会写回正式计算。"
@@ -407,7 +471,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div v-else class="py-8 text-center text-sm opacity-55">
-          当前周期未触发范围扩张
+          该周期未触发范围扩张
         </div>
       </div>
     </section>

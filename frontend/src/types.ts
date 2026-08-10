@@ -594,6 +594,17 @@ export interface ParticleRangePromotion {
   display_residual_pp: number;
 }
 
+export interface ParticleTrajectoryPeriod {
+  id: number;
+  sequence: number;
+  started_at: string;
+  first_observed_at: string;
+  last_observed_at: string;
+  resets_at: string;
+  observation_count: number;
+  is_current: boolean;
+}
+
 export interface ParticleTrajectoryData {
   available: boolean;
   message: string;
@@ -602,6 +613,8 @@ export interface ParticleTrajectoryData {
   particle_count?: number;
   representative_particle_count?: number;
   credible_mass_percent?: number;
+  selected_period_id?: number;
+  periods?: ParticleTrajectoryPeriod[];
   segment?: {
     started_at: string;
     first_observed_at: string;

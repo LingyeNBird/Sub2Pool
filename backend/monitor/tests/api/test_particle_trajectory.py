@@ -71,6 +71,19 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
     assert data["particle_count"] == 480
     assert data["representative_particle_count"] == 96
     assert data["segment"]["observation_count"] == 2
+    assert data["selected_period_id"] == first.id
+    assert data["periods"] == [
+        {
+            "id": first.id,
+            "sequence": 1,
+            "started_at": started_at.isoformat(),
+            "first_observed_at": first.observed_at.isoformat(),
+            "last_observed_at": second.observed_at.isoformat(),
+            "resets_at": resets_at.isoformat(),
+            "observation_count": 2,
+            "is_current": True,
+        }
+    ]
     assert [point["observation_id"] for point in data["points"]] == [
         first.id,
         second.id,
@@ -89,6 +102,103 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
             "model_diagnostics",
         )
     ) == stored_before
+
+
+@pytest.mark.django_db
+def test_particle_trajectory_selects_historical_period():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save(update_fields=["openai_account_id"])
+
+    now = timezone.now()
+    old_start = now - timedelta(days=14)
+    current_start = now - timedelta(days=4)
+
+    def create_observation(
+        observed_at,
+        resets_at,
+        used_percent,
+        cost,
+    ):
+        return Observation.objects.create(
+            account_id=7,
+            source="scheduled",
+            observed_at=observed_at,
+            window_seconds=604800,
+            upstream_resets_at=resets_at,
+            upstream_used_percent=Decimal(used_percent),
+            raw_selected_total_cost=Decimal(cost),
+            selected_total_cost=Decimal(cost),
+            total_standard_cost=Decimal(cost),
+            total_actual_cost=Decimal(cost),
+            effective_usd_per_percent=Decimal("16"),
+        )
+
+    old_first = create_observation(
+        old_start,
+        old_start + timedelta(days=7),
+        "0",
+        "0",
+    )
+    old_second = create_observation(
+        old_start + timedelta(days=1),
+        old_start + timedelta(days=7),
+        "10",
+        "180",
+    )
+    current_first = create_observation(
+        current_start,
+        current_start + timedelta(days=7),
+        "0",
+        "200",
+    )
+    current_second = create_observation(
+        current_start + timedelta(days=1),
+        current_start + timedelta(days=7),
+        "8",
+        "360",
+    )
+    rebuild_account(7, config)
+
+    client = Client()
+    headers, _ = jwt_login(client)
+    current_response = client.get("/api/particle-trajectory", **headers)
+
+    assert current_response.status_code == 200
+    current_data = current_response.json()["data"]
+    assert [period["sequence"] for period in current_data["periods"]] == [1, 2]
+    assert current_data["selected_period_id"] == current_first.id
+    assert [point["observation_id"] for point in current_data["points"]] == [
+        current_first.id,
+        current_second.id,
+    ]
+
+    historical_response = client.get(
+        f"/api/particle-trajectory?period={old_first.id}",
+        **headers,
+    )
+
+    assert historical_response.status_code == 200
+    historical_data = historical_response.json()["data"]
+    assert historical_data["selected_period_id"] == old_first.id
+    assert historical_data["periods"][0]["is_current"] is False
+    assert historical_data["periods"][1]["is_current"] is True
+    assert [point["observation_id"] for point in historical_data["points"]] == [
+        old_first.id,
+        old_second.id,
+    ]
+
+    invalid_response = client.get(
+        "/api/particle-trajectory?period=999999",
+        **headers,
+    )
+    assert invalid_response.status_code == 400
+    assert invalid_response.json()["message"] == "所选历史周期不存在"
 
 
 @pytest.mark.django_db

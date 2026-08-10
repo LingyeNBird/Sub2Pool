@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from .accounting.adaptive_range import run_adaptive_range_filter
@@ -26,24 +26,52 @@ REASON_LABELS = {
 }
 
 
-def _current_segment(account_id: int) -> ReplaySegment | None:
-    latest = (
+def _trajectory_periods(account_id: int) -> list[dict]:
+    rows = (
         Observation.objects.filter(
             account_id=account_id,
             excluded_at__isnull=True,
             attribution_started_at__isnull=False,
         )
-        .order_by("-observed_at", "-id")
-        .first()
+        .order_by("attribution_started_at", "observed_at", "id")
+        .values(
+            "id",
+            "observed_at",
+            "attribution_started_at",
+            "upstream_resets_at",
+        )
     )
-    if latest is None or latest.attribution_started_at is None:
-        return None
+    grouped: dict[datetime, dict] = {}
+    for row in rows:
+        started_at = row["attribution_started_at"]
+        period = grouped.get(started_at)
+        if period is None:
+            grouped[started_at] = {
+                "id": row["id"],
+                "started_at": started_at,
+                "first_observed_at": row["observed_at"],
+                "last_observed_at": row["observed_at"],
+                "resets_at": row["upstream_resets_at"],
+                "observation_count": 1,
+            }
+            continue
+        period["last_observed_at"] = row["observed_at"]
+        period["resets_at"] = row["upstream_resets_at"]
+        period["observation_count"] += 1
 
+    periods = list(grouped.values())
+    for index, period in enumerate(periods, start=1):
+        period["sequence"] = index
+        period["is_current"] = index == len(periods)
+    return periods
+
+
+def _segment_for_period(account_id: int, period: dict) -> ReplaySegment | None:
     observations = list(
         Observation.objects.filter(
             account_id=account_id,
             excluded_at__isnull=True,
-            attribution_started_at=latest.attribution_started_at,
+            attribution_started_at=period["started_at"],
         )
         .prefetch_related("participant_snapshots__participant")
         .order_by("observed_at", "id")
@@ -57,7 +85,7 @@ def _current_segment(account_id: int) -> ReplaySegment | None:
         if first.is_manual_start:
             reason = "manual_override"
         elif (
-            first.observed_at == latest.attribution_started_at
+            first.observed_at == period["started_at"]
             and first.upstream_used_percent == ZERO
         ):
             reason = "official_zero_observation"
@@ -67,9 +95,9 @@ def _current_segment(account_id: int) -> ReplaySegment | None:
     observed_baseline = reason in OBSERVED_BASELINE_REASONS
     return ReplaySegment(
         observations=observations,
-        started_at=latest.attribution_started_at,
+        started_at=period["started_at"],
         first_observed_at=first.observed_at,
-        resets_at=latest.upstream_resets_at,
+        resets_at=period["resets_at"],
         reason=reason,
         total_baseline=first.raw_selected_total_cost if observed_baseline else ZERO,
         participant_baselines=(
@@ -91,8 +119,11 @@ def _initial_capacity(segment: ReplaySegment) -> float | None:
     return None
 
 
-def particle_trajectory_data(config: AppSettings) -> dict:
-    """重放当前区间；不写回观测、快照或配置。"""
+def particle_trajectory_data(
+    config: AppSettings,
+    period_id: int | None = None,
+) -> dict:
+    """只读重放指定历史区间；默认选择当前区间。"""
 
     if not config.openai_account_id:
         return {
@@ -100,12 +131,27 @@ def particle_trajectory_data(config: AppSettings) -> dict:
             "message": "尚未配置 OpenAI 上游账号",
         }
 
-    segment = _current_segment(config.openai_account_id)
-    if segment is None:
+    periods = _trajectory_periods(config.openai_account_id)
+    if not periods:
         return {
             "available": False,
-            "message": "当前周期尚无可重放的观测记录",
+            "message": "尚无可重放的观测记录",
         }
+    selected_period = periods[-1]
+    if period_id is not None:
+        selected_period = next(
+            (period for period in periods if period["id"] == period_id),
+            None,
+        )
+        if selected_period is None:
+            raise ValueError("所选历史周期不存在")
+
+    segment = _segment_for_period(
+        config.openai_account_id,
+        selected_period,
+    )
+    if segment is None:
+        raise ValueError("所选历史周期没有可重放的观测记录")
 
     replay_input = build_dynamic_replay_input(
         account_id=config.openai_account_id,
@@ -221,6 +267,20 @@ def particle_trajectory_data(config: AppSettings) -> dict:
         "particle_count": filter_config.particles,
         "representative_particle_count": len(latest["particles_usd"]),
         "credible_mass_percent": filter_config.credible_mass * 100,
+        "selected_period_id": selected_period["id"],
+        "periods": [
+            {
+                "id": period["id"],
+                "sequence": period["sequence"],
+                "started_at": iso(period["started_at"]),
+                "first_observed_at": iso(period["first_observed_at"]),
+                "last_observed_at": iso(period["last_observed_at"]),
+                "resets_at": iso(period["resets_at"]),
+                "observation_count": period["observation_count"],
+                "is_current": period["is_current"],
+            }
+            for period in periods
+        ],
         "segment": {
             "started_at": iso(segment.started_at),
             "first_observed_at": iso(segment.first_observed_at),
