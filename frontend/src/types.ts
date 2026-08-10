@@ -484,3 +484,36 @@ export interface AppSettingsData {
   last_success_at: string | null;
   last_error: string;
 }
+
+export interface HistoricalUsageMaintenancePreview {
+  account_id: number;
+  observation_count: number;
+  segment_count: number;
+  compatible_segments: number;
+  incompatible_segments: number;
+  skipped_observations: number;
+  request_log_count: number;
+  user_count: number;
+  existing_samples: number;
+  missing_samples: number;
+  fillable_samples: number;
+  max_standard_gap_usd: number;
+  max_actual_gap_usd: number;
+  earliest_log_at: string | null;
+  latest_log_at: string | null;
+  can_backfill: boolean;
+}
+
+export interface HistoricalUsageBackfillResult extends HistoricalUsageMaintenancePreview {
+  inserted_samples: number;
+  replayed_observations: number;
+  inferred_intervals?: number;
+  automatic_exclusions?: number;
+}
+
+export interface FullParticleReplayResult {
+  rebuilt_observations: number;
+  automatic_exclusions: number;
+  inferred_intervals: number;
+  latest_observation_id: number | null;
+}

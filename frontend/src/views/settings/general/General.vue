@@ -4,6 +4,7 @@ import PageShellHeader from "@/components/common/PageShellHeader.vue";
 
 import AllocationModelCard from "./components/AllocationModelCard.vue";
 import DatabaseTransferCard from "./components/DatabaseTransferCard.vue";
+import DataMaintenanceCard from "./components/DataMaintenanceCard.vue";
 import EmailServiceCard from "./components/EmailServiceCard.vue";
 import FastCorrectionCard from "./components/FastCorrectionCard.vue";
 import FastCorrectionRebuildDialog, {
@@ -30,6 +31,10 @@ const {
   exportingDatabase,
   importingDatabase,
   rebuildingFastCorrection,
+  historyPreview,
+  checkingHistoricalUsage,
+  backfillingHistoricalUsage,
+  rebuildingAllParticles,
   passwordForm,
   loadOpenAIAccounts,
   saveConnection,
@@ -41,6 +46,9 @@ const {
   saveNotifications,
   exportDatabase,
   importDatabase,
+  previewHistoricalUsage,
+  backfillHistoricalUsage,
+  rebuildAllParticles,
   test,
   changePassword,
 } = useSettingsPage();
@@ -130,6 +138,15 @@ async function handleFastCorrectionRebuild(scope: FastCorrectionRebuildScope) {
       v-model:settings="settings"
       :saving="saving === 'notifications'"
       @save="saveNotifications"
+    />
+    <DataMaintenanceCard
+      :preview="historyPreview"
+      :checking="checkingHistoricalUsage"
+      :backfilling="backfillingHistoricalUsage"
+      :rebuilding="rebuildingAllParticles"
+      @preview="previewHistoricalUsage"
+      @backfill="backfillHistoricalUsage"
+      @rebuild="rebuildAllParticles"
     />
     <DatabaseTransferCard
       :exporting="exportingDatabase"

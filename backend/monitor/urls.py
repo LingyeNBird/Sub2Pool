@@ -14,6 +14,11 @@ from .views.dashboard import (
 )
 from .views.database import DatabaseExportView, DatabaseImportView
 from .views.fast_correction import FastCorrectionRebuildView
+from .views.maintenance import (
+    HistoricalUsageBackfillView,
+    HistoricalUsagePreviewView,
+    ParticleReplayAllView,
+)
 from .views.monitoring import RunMonitorView
 from .views.participants import (
     ParticipantDetailView,
@@ -95,6 +100,18 @@ urlpatterns = [
     path(
         "settings/fast-correction/rebuild",
         FastCorrectionRebuildView.as_view(),
+    ),
+    path(
+        "settings/data-maintenance/history-preview",
+        HistoricalUsagePreviewView.as_view(),
+    ),
+    path(
+        "settings/data-maintenance/history-backfill",
+        HistoricalUsageBackfillView.as_view(),
+    ),
+    path(
+        "settings/data-maintenance/rebuild-all",
+        ParticleReplayAllView.as_view(),
     ),
     path("monitor/run", RunMonitorView.as_view()),
 ]

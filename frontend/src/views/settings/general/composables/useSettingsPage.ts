@@ -12,6 +12,9 @@ import { useAuthStore } from "@/stores/auth";
 import type {
   AppSettingsData,
   FastCorrectionRebuildResult,
+  FullParticleReplayResult,
+  HistoricalUsageBackfillResult,
+  HistoricalUsageMaintenancePreview,
   OpenAIAccountOption,
 } from "@/types";
 
@@ -37,6 +40,10 @@ export function useSettingsPage() {
   const exportingDatabase = ref(false);
   const importingDatabase = ref(false);
   const rebuildingFastCorrection = ref(false);
+  const historyPreview = ref<HistoricalUsageMaintenancePreview | null>(null);
+  const checkingHistoricalUsage = ref(false);
+  const backfillingHistoricalUsage = ref(false);
+  const rebuildingAllParticles = ref(false);
   const savedFastCorrectionEnabled = ref(true);
   const passwordForm = reactive<PasswordForm>({
     old_password: "",
@@ -325,6 +332,78 @@ export function useSettingsPage() {
     }
   }
 
+  async function previewHistoricalUsage() {
+    checkingHistoricalUsage.value = true;
+    message.value = "";
+    success.value = "";
+    try {
+      historyPreview.value = await api<HistoricalUsageMaintenancePreview>(
+        "settings/data-maintenance/history-preview",
+        { method: "POST" },
+      );
+      success.value = historyPreview.value.missing_samples
+        ? `检查完成：发现 ${historyPreview.value.missing_samples} 条缺失用户用量事实。`
+        : "检查完成：历史用户用量事实完整，无需补全。";
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "检查历史用量失败";
+    } finally {
+      checkingHistoricalUsage.value = false;
+    }
+  }
+
+  async function backfillHistoricalUsage() {
+    if (
+      !historyPreview.value?.can_backfill ||
+      !window.confirm(
+        "将只读 Sub2API 历史请求日志，补全缺失的用户用量事实，并全量重建粒子结果。原始百分比和观测时间不会改变。确认继续吗？",
+      )
+    ) {
+      return;
+    }
+    backfillingHistoricalUsage.value = true;
+    message.value = "";
+    success.value = "";
+    try {
+      const result = await api<HistoricalUsageBackfillResult>(
+        "settings/data-maintenance/history-backfill",
+        { method: "POST" },
+      );
+      historyPreview.value = null;
+      success.value = `历史补全完成：写入 ${result.inserted_samples} 条用户用量事实，重建 ${result.replayed_observations} 条观测。`;
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "补全历史用量失败";
+    } finally {
+      backfillingHistoricalUsage.value = false;
+    }
+  }
+
+  async function rebuildAllParticles() {
+    if (
+      !window.confirm(
+        "将从第一条原始观测重新计算全部粒子结果。原始百分比、成本和观测时间不会改变。确认继续吗？",
+      )
+    ) {
+      return;
+    }
+    rebuildingAllParticles.value = true;
+    message.value = "";
+    success.value = "";
+    try {
+      const result = await api<FullParticleReplayResult>(
+        "settings/data-maintenance/rebuild-all",
+        { method: "POST" },
+      );
+      success.value = `全量重建完成：处理 ${result.rebuilt_observations} 条观测，得到 ${result.inferred_intervals} 个归属区间。`;
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "全量粒子重建失败";
+    } finally {
+      rebuildingAllParticles.value = false;
+    }
+  }
+
   async function test(kind: "sub2api" | "email") {
     testing.value = kind;
     message.value = "";
@@ -388,6 +467,10 @@ export function useSettingsPage() {
     exportingDatabase,
     importingDatabase,
     rebuildingFastCorrection,
+    historyPreview,
+    checkingHistoricalUsage,
+    backfillingHistoricalUsage,
+    rebuildingAllParticles,
     passwordForm,
     loadOpenAIAccounts,
     saveConnection,
@@ -399,6 +482,9 @@ export function useSettingsPage() {
     importDatabase,
     saveFastCorrection,
     rebuildFastCorrection,
+    previewHistoricalUsage,
+    backfillHistoricalUsage,
+    rebuildAllParticles,
     test,
     changePassword,
   };
