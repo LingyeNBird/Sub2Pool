@@ -48,6 +48,25 @@ const chartEnd = computed(() => ({
   x: 72 + (endPercent.value / 50) * 550,
   y: 152 - (endCost.value / 800) * 112,
 }));
+function inputValue(event: Event): number {
+  return Number((event.currentTarget as HTMLInputElement).value);
+}
+
+function updateStartCost(event: Event) {
+  startCost.value = Math.min(inputValue(event), endCost.value - 20);
+}
+
+function updateEndCost(event: Event) {
+  endCost.value = Math.max(inputValue(event), startCost.value + 20);
+}
+
+function updateStartPercent(event: Event) {
+  startPercent.value = Math.min(inputValue(event), endPercent.value - 2);
+}
+
+function updateEndPercent(event: Event) {
+  endPercent.value = Math.max(inputValue(event), startPercent.value + 2);
+}
 
 function formatUsd(value: number): string {
   return `$${value.toFixed(2)}`;
@@ -86,12 +105,13 @@ function formatUsd(value: number): string {
                 ><strong>{{ formatUsd(startCost) }}</strong></span
               >
               <input
-                v-model.number="startCost"
+                :value="startCost"
                 type="range"
                 min="0"
-                :max="Math.max(0, endCost - 20)"
+                max="800"
                 step="10"
                 class="range mt-2 w-full range-primary range-sm"
+                @input="updateStartCost"
               />
             </label>
             <label class="block">
@@ -100,12 +120,13 @@ function formatUsd(value: number): string {
                 ><strong>{{ formatUsd(endCost) }}</strong></span
               >
               <input
-                v-model.number="endCost"
+                :value="endCost"
                 type="range"
-                :min="startCost + 20"
+                min="0"
                 max="800"
                 step="10"
                 class="range mt-2 w-full range-primary range-sm"
+                @input="updateEndCost"
               />
             </label>
             <label class="block">
@@ -113,12 +134,13 @@ function formatUsd(value: number): string {
                 ><span>起点显示</span><strong>{{ startPercent }}%</strong></span
               >
               <input
-                v-model.number="startPercent"
+                :value="startPercent"
                 type="range"
                 min="0"
-                :max="Math.max(0, endPercent - 2)"
+                max="50"
                 step="1"
                 class="range mt-2 w-full range-secondary range-sm"
+                @input="updateStartPercent"
               />
             </label>
             <label class="block">
@@ -126,12 +148,13 @@ function formatUsd(value: number): string {
                 ><span>终点显示</span><strong>{{ endPercent }}%</strong></span
               >
               <input
-                v-model.number="endPercent"
+                :value="endPercent"
                 type="range"
-                :min="startPercent + 2"
+                min="0"
                 max="50"
                 step="1"
                 class="range mt-2 w-full range-secondary range-sm"
+                @input="updateEndPercent"
               />
             </label>
           </div>
