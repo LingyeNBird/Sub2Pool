@@ -36,6 +36,12 @@ export const navigation: NavigationGroup[] = [
     adminOnly: true,
   },
   {
+    label: "粒子轨迹",
+    icon: "sparkles",
+    to: "/particle-filter",
+    adminOnly: true,
+  },
+  {
     label: "额度统计",
     icon: "presentation-chart-line",
     to: "/statistics",

@@ -70,6 +70,7 @@ class ParticleFilterOutput:
     resampled: np.ndarray
     lower_boundary_mass: np.ndarray
     upper_boundary_mass: np.ndarray
+    capacity_particle_samples_usd: np.ndarray
 
 
 @dataclass(frozen=True)

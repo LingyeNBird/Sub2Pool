@@ -25,6 +25,7 @@ from .views.participants import (
     ParticipantListView,
     Sub2APIUserListView,
 )
+from .views.particle_trajectory import ParticleTrajectoryView
 from .views.public import AuthClientConfigView, HealthView
 from .views.notifications import NotificationListView
 from .views.observations import (
@@ -96,6 +97,7 @@ urlpatterns = [
         "observations/<int:observation_id>/manual-start",
         ObservationManualStartView.as_view(),
     ),
+    path("particle-trajectory", ParticleTrajectoryView.as_view()),
     path("notifications", NotificationListView.as_view()),
     path("settings", SettingsView.as_view()),
     path("settings/openai-accounts", OpenAIAccountListView.as_view()),

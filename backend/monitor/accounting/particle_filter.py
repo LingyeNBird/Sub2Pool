@@ -13,6 +13,7 @@ V_MAX = 4000.0
 V_MID = 2700.0
 V_HALF = 1300.0
 QUANTIZER_NAMES = ("floor", "nearest", "ceil")
+VISUAL_PARTICLE_SAMPLE_COUNT = 96
 
 
 @dataclass(frozen=True)
@@ -171,6 +172,13 @@ def run_particle_filter(
     resampled = np.zeros(observation_count, dtype=bool)
     lower_boundary_mass = np.zeros(observation_count)
     upper_boundary_mass = np.zeros(observation_count)
+    particle_sample_probabilities = tuple(
+        (index + 0.5) / VISUAL_PARTICLE_SAMPLE_COUNT
+        for index in range(VISUAL_PARTICLE_SAMPLE_COUNT)
+    )
+    capacity_particle_samples = np.zeros(
+        (observation_count, VISUAL_PARTICLE_SAMPLE_COUNT)
+    )
 
     tail = (1.0 - cfg.credible_mass) / 2.0
     interval_probabilities = (tail, 0.5, 1.0 - tail)
@@ -216,6 +224,11 @@ def run_particle_filter(
             capacity_hat[index],
             capacity_upper[index],
         ) = capacity_quantiles
+        capacity_particle_samples[index] = _weighted_quantile(
+            capacity_particles,
+            weights,
+            particle_sample_probabilities,
+        )
         total_lower[index], total_hat[index], total_upper[index] = (
             total_quantiles
         )
@@ -386,4 +399,5 @@ def run_particle_filter(
         resampled=resampled,
         lower_boundary_mass=lower_boundary_mass,
         upper_boundary_mass=upper_boundary_mass,
+        capacity_particle_samples_usd=capacity_particle_samples,
     )

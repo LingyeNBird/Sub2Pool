@@ -44,6 +44,11 @@ def test_particle_filter_is_repeatable_and_tracks_constant_case():
         first.attributed_percent_hat,
         second.attributed_percent_hat,
     )
+    np.testing.assert_array_equal(
+        first.capacity_particle_samples_usd,
+        second.capacity_particle_samples_usd,
+    )
+    assert first.capacity_particle_samples_usd.shape == (5, 96)
     assert first.capacity_hat_usd[-1] == pytest.approx(1800.0, abs=180.0)
     assert first.total_percent_hat[-1] == pytest.approx(20.0, abs=1.5)
     assert first.attributed_percent_hat[-1, 0] == pytest.approx(12.0, abs=1.5)
