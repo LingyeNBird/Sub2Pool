@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 
 import pytest
@@ -142,7 +142,7 @@ def test_staged_expansion_is_persisted_in_observation_diagnostics():
         share_percent=100,
         is_owner=True,
     )
-    now = timezone.now().replace(microsecond=0)
+    now = datetime(2026, 8, 11, 12, tzinfo=dt_timezone.utc)
     reset_at = now + timedelta(days=7)
     _raw_observation(
         participant_costs={participant: Decimal("0")},

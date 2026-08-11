@@ -29,6 +29,11 @@ class AppSettings(models.Model):
         default="passive",
     )
     request_timeout_seconds = models.PositiveIntegerField(default=20)
+    # 查询天数只是维护操作的网络预算，不代表 Sub2API 日志仍然完整保留。
+    sub2api_usage_log_query_horizon_days = models.PositiveIntegerField(
+        default=90,
+        validators=[MinValueValidator(1), MaxValueValidator(36500)],
+    )
     verify_tls = models.BooleanField(default=True)
     timezone = models.CharField(max_length=64, default="Asia/Shanghai")
 

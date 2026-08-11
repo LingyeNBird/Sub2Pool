@@ -117,6 +117,19 @@ function hasAccountOption(accountId: number | null) {
           />
         </fieldset>
         <fieldset class="fieldset">
+          <SettingLabel
+            label="请求日志查询天数"
+            help="仅限制远端维护计划的查询预算，不代表 Sub2API 保留期，也不构成任何事实维度的完整性证明。"
+          />
+          <input
+            v-model.number="settings.sub2api_usage_log_query_horizon_days"
+            type="number"
+            min="1"
+            max="36500"
+            class="input w-full"
+          />
+        </fieldset>
+        <fieldset class="fieldset">
           <label class="label">显示与统计时区</label>
           <input
             v-model="settings.timezone"

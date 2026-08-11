@@ -14,12 +14,14 @@ from django.core.management import call_command
 from django.test import Client
 from django.utils import timezone
 
+from monitor.history_state import LeaseGuard
 from monitor.engine import run_monitor
 from monitor.management.commands.runmonitor import schedule_next_run
 from monitor.models import (
     AppSettings,
     BlockedIPAddress,
     LoginEvent,
+    HistoryMaintenanceState,
     NotificationEvent,
     Observation,
     ObservationFastCorrection,
@@ -76,6 +78,42 @@ def test_partial_settings_patch_does_not_touch_other_cards():
     assert config.smtp_host == "smtp.original.example"
 
 
+@pytest.mark.django_db(transaction=True)
+def test_replay_settings_respect_fence_but_unrelated_email_settings_do_not():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save(update_fields=["openai_account_id"])
+    client = Client()
+    headers, _ = jwt_login(client)
+    guard = LeaseGuard.acquire(7)
+    try:
+        blocked = client.patch(
+            "/api/settings",
+            data=json.dumps({"safety_factor": "0.9"}),
+            content_type="application/json",
+            **headers,
+        )
+        unrelated = client.patch(
+            "/api/settings",
+            data=json.dumps({"smtp_host": "smtp.changed.example"}),
+            content_type="application/json",
+            **headers,
+        )
+    finally:
+        guard.release()
+
+    assert blocked.status_code == 409
+    assert unrelated.status_code == 200, unrelated.json()
+    config.refresh_from_db()
+    assert config.safety_factor == Decimal("0.95")
+    assert config.smtp_host == "smtp.changed.example"
+
+
 
 @pytest.mark.django_db
 def test_allocation_settings_rebuild_existing_derived_results(monkeypatch):
@@ -99,7 +137,8 @@ def test_allocation_settings_rebuild_existing_derived_results(monkeypatch):
     )
     rebuilt: list[tuple[int, Decimal]] = []
 
-    def fake_rebuild(account_id, config):
+    def fake_rebuild(account_id, config, *, guard):
+        assert guard.account_id == account_id
         rebuilt.append((account_id, config.safety_factor))
 
     monkeypatch.setattr(
@@ -144,7 +183,8 @@ def test_allocation_setting_rolls_back_when_derived_replay_fails(
         effective_usd_per_percent=Decimal("20"),
     )
 
-    def fail_rebuild(_account_id, _config):
+    def fail_rebuild(_account_id, _config, *, guard):
+        assert guard.account_id == 7
         raise ValueError("历史成本不满足模型约束")
 
     monkeypatch.setattr(
@@ -246,8 +286,13 @@ def test_monitor_status_exposes_global_countdown_and_hides_it_when_disabled():
     config.monitoring_enabled = True
     config.local_poll_minutes = 10
     config.next_local_check_at = now + timedelta(minutes=7)
-    config.run_lease_until = now + timedelta(minutes=1)
+    config.openai_account_id = 7
     config.save()
+    HistoryMaintenanceState.objects.create(
+        account_id=7,
+        lease_owner="61d20cbf-c1b5-4e90-bd40-4837436db565",
+        lease_expires_at=now + timedelta(minutes=1),
+    )
 
     enabled = client.get("/api/monitor/run", **headers)
 

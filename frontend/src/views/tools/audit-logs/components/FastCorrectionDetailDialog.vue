@@ -97,8 +97,8 @@ defineExpose<DialogController<[Observation]>>({ open, close });
         >
           <AppIcon name="exclamation-triangle" class="size-5 shrink-0" />
           <span>
-            这条历史记录由旧版本生成，尚未保存全部请求数；执行一次 FAST
-            修正重建后即可补齐非 FAST 请求统计。
+            这条旧记录没有保存完整请求数。只有“远端验证修复”计划取得
+            request_count coverage 后才能补齐；未知状态不会被推测或强制覆盖。
           </span>
         </div>
         <div

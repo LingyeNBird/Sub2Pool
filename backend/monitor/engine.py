@@ -8,12 +8,13 @@
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Q
+from django.db import transaction
 from django.utils import timezone
 
 from .accounting.boundaries import same_official_reset as _same_official_reset
 from .integrations.sub2api import Sub2APIClient, Sub2APIError
-from .models import AppSettings, Participant
+from .history_state import LeaseBusyError, LeaseGuard
+from .models import AppSettings, HistoryMaintenanceState, Participant
 from .notifications import notify_collection_error
 from .replay import RESET_ROLLBACK_TOLERANCE, rebuild_observation_suffix
 from .sampling.local_usage import (
@@ -43,6 +44,58 @@ from .sampling.types import (
 ZERO = Decimal("0")
 
 
+@transaction.atomic
+def _persist_capture(
+    config,
+    reference,
+    local,
+    previous,
+    *,
+    latest_raw,
+    guard: LeaseGuard,
+    capture_started_at,
+    interval_logs,
+    window=None,
+    source="scheduled",
+    fast_interval=None,
+    fast_error="",
+):
+    guard.renew()
+    state = HistoryMaintenanceState.objects.select_for_update().get(
+        account_id=reference.account_id
+    )
+    guard.assert_owned(state)
+    point = _save_local_bundle(
+        config,
+        reference,
+        local,
+        previous,
+        latest_raw=latest_raw,
+        interval_logs=interval_logs,
+        capture_started_at=capture_started_at,
+        capture_finished_at=timezone.now(),
+    )
+    observation = None
+    if window is not None:
+        observation = _create_raw_observation(
+            config=config,
+            reference=reference,
+            window=window,
+            local=local,
+            source=source,
+            sample_point=point,
+            latest_raw=latest_raw,
+            interval_logs=interval_logs,
+            fast_interval=fast_interval,
+            fast_error=fast_error,
+        )
+    state.fact_revision += 1
+    state.save(update_fields=["fact_revision", "updated_at"])
+    point.fact_revision = state.fact_revision
+    point.save(update_fields=["fact_revision"])
+    return observation
+
+
 
 
 def _run_monitor_locked(
@@ -50,6 +103,7 @@ def _run_monitor_locked(
     *,
     force_upstream: bool,
     requested_source: str,
+    guard: LeaseGuard,
 ) -> dict:
     if not config.monitoring_enabled and not force_upstream:
         return {"status": "disabled", "message": "监控已停用"}
@@ -89,25 +143,21 @@ def _run_monitor_locked(
                 None,
                 local.checked_at,
             )
-            _save_local_bundle(
+            observation = _persist_capture(
                 config,
                 reference,
                 local,
                 None,
-                interval_logs=interval_logs,
-            )
-            observation = _create_raw_observation(
-                config=config,
-                reference=reference,
-                window=window,
-                local=local,
-                source=requested_source,
                 latest_raw=None,
+                guard=guard,
+                capture_started_at=now,
                 interval_logs=interval_logs,
+                window=window,
+                source=requested_source,
                 fast_interval=fast_interval,
                 fast_error=fast_error,
             )
-            rebuild_observation_suffix(observation, config)
+            rebuild_observation_suffix(observation, config, guard=guard)
             observation.refresh_from_db()
             _finish_success(config, local.checked_at)
             if observation.excluded_at is None:
@@ -161,11 +211,14 @@ def _run_monitor_locked(
                 local,
                 latest_raw,
             )
-            _save_local_bundle(
+            _persist_capture(
                 config,
                 current_reference,
                 local,
                 previous,
+                latest_raw=latest_raw,
+                guard=guard,
+                capture_started_at=now,
                 interval_logs=interval_logs,
             )
             AppSettings.objects.filter(pk=config.pk).update(
@@ -227,25 +280,21 @@ def _run_monitor_locked(
             latest_raw,
             local.checked_at,
         )
-        _save_local_bundle(
+        observation = _persist_capture(
             config,
             reference,
             local,
             previous,
-            interval_logs=interval_logs,
-        )
-        observation = _create_raw_observation(
-            config=config,
-            reference=reference,
-            window=window,
-            local=local,
-            source=source,
             latest_raw=latest_raw,
+            guard=guard,
+            capture_started_at=now,
             interval_logs=interval_logs,
+            window=window,
+            source=source,
             fast_interval=fast_interval,
             fast_error=fast_error,
         )
-        rebuild_observation_suffix(observation, config)
+        rebuild_observation_suffix(observation, config, guard=guard)
         observation.refresh_from_db()
         _finish_success(config, local.checked_at)
 
@@ -273,26 +322,21 @@ def run_monitor(
     force_upstream: bool = False,
     source: str = "scheduled",
 ) -> dict:
-    """执行一次探测。跨进程租约防止后台任务和手动按钮同时采集。"""
+    """Run one capture under the same fenced lease used by maintenance."""
 
     config = AppSettings.load()
-    now = timezone.now()
-    lease_until = now + timedelta(minutes=10)
-    acquired = (
-        AppSettings.objects.filter(pk=1)
-        .filter(
-            Q(run_lease_until__isnull=True)
-            | Q(run_lease_until__lt=now)
-        )
-        .update(run_lease_until=lease_until)
-    )
-    if not acquired:
-        return {"status": "busy", "message": "已有采集任务正在执行"}
+    if not config.openai_account_id:
+        raise Sub2APIError("尚未配置 OpenAI 账号 ID")
+    try:
+        guard = LeaseGuard.acquire(config.openai_account_id)
+    except LeaseBusyError:
+        return {"status": "busy", "message": "已有采集或历史维护任务正在执行"}
     try:
         return _run_monitor_locked(
             config,
             force_upstream=force_upstream,
             requested_source=source,
+            guard=guard,
         )
     except Exception as exc:
         message = str(exc)[:1000]
@@ -303,8 +347,4 @@ def run_monitor(
         notify_collection_error(config, message)
         raise
     finally:
-        # 只释放自己持有的租约，避免超时后另一个进程接管时被旧任务误清除。
-        AppSettings.objects.filter(
-            pk=1,
-            run_lease_until=lease_until,
-        ).update(run_lease_until=None)
+        guard.release()

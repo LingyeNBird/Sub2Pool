@@ -14,6 +14,7 @@ from django.core.management import call_command
 from django.test import Client
 from django.utils import timezone
 
+from monitor.history_state import LeaseBusyError, LeaseGuard
 from monitor.engine import run_monitor
 from monitor.management.commands.runmonitor import schedule_next_run
 from monitor.models import (
@@ -430,7 +431,7 @@ def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
     assert rider_snapshot.remaining_share_percent == Decimal("50")
 
 @pytest.mark.django_db
-def test_unmapped_user_usage_is_saved_and_attributed_after_binding(
+def test_unmapped_user_usage_is_saved_without_retroactive_participant_history(
     monkeypatch,
 ):
     get_user_model().objects.create_superuser(
@@ -531,24 +532,14 @@ def test_unmapped_user_usage_is_saved_and_attributed_after_binding(
     assert response.status_code == 201
     rider = Participant.objects.get(sub2api_user_id=2)
     latest = Observation.objects.get()
-    snapshots = {
-        row.participant_id: row
-        for row in latest.participant_snapshots.all()
-    }
-    owner_snapshot = snapshots[owner.id]
-    rider_snapshot = snapshots[rider.id]
-    assert owner_snapshot.charged_percent_lower <= owner_snapshot.charged_cycle_percent
-    assert owner_snapshot.charged_cycle_percent <= owner_snapshot.charged_percent_upper
-    assert rider_snapshot.charged_percent_lower <= rider_snapshot.charged_cycle_percent
-    assert rider_snapshot.charged_cycle_percent <= rider_snapshot.charged_percent_upper
-    assert float(owner_snapshot.charged_cycle_percent) == pytest.approx(
-        float(rider_snapshot.charged_cycle_percent) * 3,
-        rel=0.08,
-    )
-    assert snapshots[rider.id].selected_cost == Decimal("100")
-    assert ParticipantUsageSample.objects.filter(
-        participant=rider,
-        raw_selected_cost=Decimal("100"),
+    assert set(
+        latest.participant_snapshots.values_list("participant_id", flat=True)
+    ) == {owner.id}
+    assert not ParticipantSnapshot.objects.filter(participant=rider).exists()
+    assert not ParticipantUsageSample.objects.filter(participant=rider).exists()
+    assert Sub2APIUserUsageSample.objects.filter(
+        sub2api_user_id=2,
+        total_actual_cost=Decimal("100"),
     ).exists()
 
 @pytest.mark.django_db
@@ -945,6 +936,69 @@ def test_startup_replay_command_skips_current_algorithm_records():
     observation.refresh_from_db()
     assert observation.sample_note == "稳定结果哨兵"
     assert "派生结果已是最新版" in output.getvalue()
+
+@pytest.mark.django_db(transaction=True)
+def test_manual_replay_writers_and_management_replay_respect_active_fence():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save(update_fields=["openai_account_id"])
+    now = timezone.now()
+    observation = Observation.objects.create(
+        account_id=7,
+        source="manual",
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=3),
+        upstream_used_percent=Decimal("10"),
+        raw_selected_total_cost=Decimal("100"),
+        selected_total_cost=Decimal("100"),
+        total_standard_cost=Decimal("100"),
+        total_actual_cost=Decimal("100"),
+        effective_usd_per_percent=Decimal("10"),
+        valid_sample=True,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    guard = LeaseGuard.acquire(7)
+    try:
+        responses = [
+            client.post("/api/observations/rebuild", **headers),
+            client.post(
+                f"/api/observations/{observation.id}/exclude",
+                data=json.dumps({"reason": "race"}),
+                content_type="application/json",
+                **headers,
+            ),
+            client.post(
+                f"/api/observations/{observation.id}/restore",
+                **headers,
+            ),
+            client.post(
+                f"/api/observations/{observation.id}/manual-start",
+                data=json.dumps({"reason": "race"}),
+                content_type="application/json",
+                **headers,
+            ),
+            client.delete(
+                f"/api/observations/{observation.id}/manual-start",
+                **headers,
+            ),
+        ]
+        with pytest.raises(LeaseBusyError):
+            call_command("replayobservations", "--all")
+    finally:
+        guard.release()
+
+    assert [response.status_code for response in responses] == [409] * 5
+    observation.refresh_from_db()
+    assert observation.excluded_at is None
+    assert observation.is_manual_start is False
+
 
 @pytest.mark.django_db
 def test_exclusion_restore_and_manual_start_cancellation_replay_affected_suffix():

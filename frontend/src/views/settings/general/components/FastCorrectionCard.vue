@@ -3,8 +3,8 @@ import SettingLabel from "@/components/common/SettingLabel.vue";
 import type { AppSettingsData } from "@/types";
 
 const settings = defineModel<AppSettingsData>("settings", { required: true });
-defineProps<{ saving: boolean; rebuilding: boolean }>();
-const emit = defineEmits<{ save: []; rebuild: [] }>();
+defineProps<{ saving: boolean }>();
+const emit = defineEmits<{ save: [] }>();
 </script>
 
 <template>
@@ -30,44 +30,32 @@ const emit = defineEmits<{ save: []; rebuild: [] }>();
 
       <div
         v-if="settings.fast_correction_rebuild_recommended"
-        class="alert text-sm alert-warning"
+        class="alert items-start text-sm alert-warning"
       >
-        <AppIcon name="exclamation-triangle" class="size-5 shrink-0" />
+        <AppIcon name="exclamation-triangle" class="mt-0.5 size-5 shrink-0" />
         <span>
           当前周期有
           {{ settings.fast_correction_missing_intervals }}
-          个采样区间尚未计算 FAST 修正，建议执行修正重建。
+          个采样区间缺少 FAST
+          事实。历史补齐只能在下方“数据维护”中创建“远端验证修复”计划；coverage
+          未验证时只显示阻断，不会覆盖现有历史。
         </span>
       </div>
 
       <p class="text-sm leading-6 opacity-70">
-        仅额外保存修正值，不修改 Sub2API
-        原始用量。重建会重新读取请求日志，并重放受影响的额度估算与归属结论。
+        开启后只影响后续完整采样。历史 FAST
+        事实与账号、逐用户成本作为同一事实组应用，不再提供独立重建或强制覆盖入口。
       </p>
 
-      <div class="grid gap-2 sm:grid-cols-2">
-        <button
-          type="button"
-          class="btn btn-primary btn-sm"
-          :disabled="saving || rebuilding"
-          @click="emit('save')"
-        >
-          <span v-if="saving" class="loading loading-xs loading-spinner"></span>
-          <AppIcon v-else name="check" class="size-4" />保存 FAST 设置
-        </button>
-        <button
-          type="button"
-          class="btn btn-sm"
-          :disabled="saving || rebuilding"
-          @click="emit('rebuild')"
-        >
-          <span
-            v-if="rebuilding"
-            class="loading loading-xs loading-spinner"
-          ></span>
-          <AppIcon v-else name="arrow-path" class="size-4" />修正重建
-        </button>
-      </div>
+      <button
+        type="button"
+        class="btn btn-primary btn-sm"
+        :disabled="saving"
+        @click="emit('save')"
+      >
+        <span v-if="saving" class="loading loading-xs loading-spinner"></span>
+        <AppIcon v-else name="check" class="size-4" />保存 FAST 设置
+      </button>
     </div>
   </section>
 </template>

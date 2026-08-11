@@ -5,6 +5,7 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.db.models import Q
 
+from monitor.history_state import fenced_fact_write
 from monitor.models import Observation
 from monitor.replay import RATE_METHOD, rebuild_account
 
@@ -49,7 +50,15 @@ class Command(BaseCommand):
                     - timedelta(seconds=stale.window_seconds)
                 )
 
-            result = rebuild_account(account_id, replay_from=replay_from)
+            with fenced_fact_write(
+                [account_id],
+                ttl=timedelta(minutes=30),
+            ) as guards:
+                result = rebuild_account(
+                    account_id,
+                    replay_from=replay_from,
+                    guard=guards[account_id],
+                )
             self.stdout.write(
                 f"账号 {account_id}：重放 {result.rebuilt_observations} 条观测，"
                 f"推断 {result.inferred_intervals} 个区间，"

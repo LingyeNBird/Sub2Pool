@@ -1,8 +1,7 @@
 """管理员触发的重放、排除、恢复与边界覆盖命令。"""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from django.db import transaction
 from django.utils import timezone
 
 from .boundaries import (
@@ -11,12 +10,30 @@ from .boundaries import (
 )
 from .contracts import ReplayResult
 from .replay import _previous_included, _replay_anchor, rebuild_account
+from ..history_state import LeaseGuard, fenced_fact_write
 from ..models import AppSettings, Observation
 
 
 def rebuild_current_interval(
     account_id: int,
     config: AppSettings | None = None,
+) -> tuple[ReplayResult, datetime | None]:
+    with fenced_fact_write(
+        [account_id],
+        ttl=timedelta(minutes=30),
+    ) as guards:
+        return _rebuild_current_interval(
+            account_id,
+            config,
+            guard=guards[account_id],
+        )
+
+
+def _rebuild_current_interval(
+    account_id: int,
+    config: AppSettings | None = None,
+    *,
+    guard: LeaseGuard,
 ) -> tuple[ReplayResult, datetime | None]:
     """只重建当前归属区间的派生结果，并保留全部原始采样事实。"""
 
@@ -26,7 +43,7 @@ def rebuild_current_interval(
         .first()
     )
     if latest is None:
-        return rebuild_account(account_id, config), None
+        return rebuild_account(account_id, config, guard=guard), None
 
     replay_from = _replay_anchor(
         latest,
@@ -37,15 +54,32 @@ def rebuild_current_interval(
             account_id,
             config,
             replay_from=replay_from,
+            guard=guard,
         ),
         replay_from,
     )
 
 
-@transaction.atomic
 def exclude_observation(
     observation: Observation,
     reason: str = "管理员手动排除",
+) -> dict[str, int | bool | None]:
+    with fenced_fact_write(
+        [observation.account_id],
+        ttl=timedelta(minutes=30),
+    ) as guards:
+        return _exclude_observation(
+            observation,
+            reason,
+            guard=guards[observation.account_id],
+        )
+
+
+def _exclude_observation(
+    observation: Observation,
+    reason: str,
+    *,
+    guard: LeaseGuard,
 ) -> dict[str, int | bool | None]:
     """排除原始点，并从其原区间或被移除的手动边界之前重放。"""
 
@@ -74,13 +108,28 @@ def exclude_observation(
     replay = rebuild_account(
         observation.account_id,
         replay_from=replay_from,
+        guard=guard,
     )
     return {"already_excluded": already_excluded, **replay.as_dict()}
 
 
-@transaction.atomic
 def restore_observation(
     observation: Observation,
+) -> dict[str, int | bool | None]:
+    with fenced_fact_write(
+        [observation.account_id],
+        ttl=timedelta(minutes=30),
+    ) as guards:
+        return _restore_observation(
+            observation,
+            guard=guards[observation.account_id],
+        )
+
+
+def _restore_observation(
+    observation: Observation,
+    *,
+    guard: LeaseGuard,
 ) -> dict[str, int | bool | None]:
     """恢复排除记录；若恢复后形成同窗口回退，则由管理员确认它是新起点。"""
 
@@ -120,6 +169,7 @@ def restore_observation(
     replay = rebuild_account(
         observation.account_id,
         replay_from=replay_from,
+        guard=guard,
     )
     observation.refresh_from_db()
     return {
@@ -130,10 +180,26 @@ def restore_observation(
     }
 
 
-@transaction.atomic
 def set_manual_start(
     observation: Observation,
     reason: str = "",
+) -> dict[str, int | bool | None]:
+    with fenced_fact_write(
+        [observation.account_id],
+        ttl=timedelta(minutes=30),
+    ) as guards:
+        return _set_manual_start(
+            observation,
+            reason,
+            guard=guards[observation.account_id],
+        )
+
+
+def _set_manual_start(
+    observation: Observation,
+    reason: str,
+    *,
+    guard: LeaseGuard,
 ) -> dict[str, int | bool | None]:
     """把一个真实观测点设为最高优先级零基线，并重放其后缀。"""
 
@@ -158,13 +224,28 @@ def set_manual_start(
     replay = rebuild_account(
         observation.account_id,
         replay_from=observation.observed_at,
+        guard=guard,
     )
     return {"already_set": already_set, **replay.as_dict()}
 
 
-@transaction.atomic
 def clear_manual_start(
     observation: Observation,
+) -> dict[str, int | bool | None]:
+    with fenced_fact_write(
+        [observation.account_id],
+        ttl=timedelta(minutes=30),
+    ) as guards:
+        return _clear_manual_start(
+            observation,
+            guard=guards[observation.account_id],
+        )
+
+
+def _clear_manual_start(
+    observation: Observation,
+    *,
+    guard: LeaseGuard,
 ) -> dict[str, int | bool | None]:
     """取消人工边界，并从它之前的有效区间重新连接后续数据。"""
 
@@ -184,5 +265,6 @@ def clear_manual_start(
     replay = rebuild_account(
         observation.account_id,
         replay_from=replay_from,
+        guard=guard,
     )
     return {"was_set": was_set, **replay.as_dict()}

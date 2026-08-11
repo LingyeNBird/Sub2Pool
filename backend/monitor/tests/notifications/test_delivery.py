@@ -272,6 +272,8 @@ def test_usage_logs_are_paginated_and_filtered_to_exact_interval():
         assert request.url.params["account_id"] == "7"
         assert request.url.params["page_size"] == "1000"
         assert request.url.params["sort_order"] == "asc"
+        assert request.url.params["sort_by"] == "created_at"
+        assert request.url.params["exact_total"] == "true"
         assert request.url.params["user_id"] == "51"
         page = int(request.url.params["page"])
         requested_pages.append(page)
@@ -279,12 +281,15 @@ def test_usage_logs_are_paginated_and_filtered_to_exact_interval():
             [
                 raw_log(1, started_at - timedelta(seconds=1)),
                 raw_log(2, started_at),
-                raw_log(3, ended_at),
+                *[
+                    raw_log(log_id, started_at - timedelta(seconds=2))
+                    for log_id in range(5, 1003)
+                ],
             ]
             if page == 1
             else [
-                raw_log(4, ended_at - timedelta(seconds=1), user_id=52),
-                raw_log(5, ended_at - timedelta(seconds=2), account_id=8),
+                raw_log(3, ended_at),
+                raw_log(4, ended_at - timedelta(seconds=1)),
             ]
         )
         return httpx.Response(
@@ -292,7 +297,13 @@ def test_usage_logs_are_paginated_and_filtered_to_exact_interval():
             json={
                 "code": 0,
                 "message": "success",
-                "data": {"items": items, "pages": 2},
+                "data": {
+                    "items": items,
+                    "total": 1002,
+                    "page": page,
+                    "page_size": 1000,
+                    "pages": 2,
+                },
             },
         )
 
@@ -311,8 +322,8 @@ def test_usage_logs_are_paginated_and_filtered_to_exact_interval():
         )
 
     assert requested_pages == [1, 2]
-    assert [row.id for row in rows] == [2]
-    assert [row.user_id for row in rows] == [51]
+    assert [row.id for row in rows] == [2, 4]
+    assert [row.user_id for row in rows] == [51, 51]
     assert rows[0].total_cost == Decimal("4.00")
     assert rows[0].actual_cost == Decimal("3.00")
     assert rows[0].api_key_id == 91

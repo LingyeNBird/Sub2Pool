@@ -4,16 +4,19 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.http import HttpResponse
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 
+from ..history_state import LeaseBusyError, LeaseGuard
 from .base import AdminAPIView, error, ok
 from ..database_transfer import (
     DatabaseTransferError,
     export_database_bytes,
     import_database,
+    stage_database_import,
 )
-from ..models import AppSettings
+from ..models import AppSettings, HistoryMaintenanceState, Observation
 
 
 class DatabaseExportView(AdminAPIView):
@@ -36,44 +39,68 @@ class DatabaseImportView(AdminAPIView):
         if uploaded is None:
             return error("请选择要导入的 SQLite 备份文件")
 
-        # 单例设置可能尚未创建，例如新部署后第一次操作就是导入备份。
-        AppSettings.load()
-        now = timezone.now()
-        lease_until = now + timedelta(minutes=15)
-        acquired = (
-            AppSettings.objects.filter(
-                pk=1,
-                run_lease_until__isnull=True,
-            ).update(run_lease_until=lease_until)
-            == 1
-        ) or (
-            AppSettings.objects.filter(
-                pk=1,
-                run_lease_until__lt=now,
-            ).update(run_lease_until=lease_until)
-            == 1
-        )
-        if not acquired:
-            return error(
-                "后台采集正在运行，请稍后再导入数据库",
-                status.HTTP_409_CONFLICT,
-            )
-
-        imported = False
         try:
-            recovery_name = import_database(uploaded, uploaded.size)
-            imported = True
+            staged = stage_database_import(uploaded, uploaded.size)
         except DatabaseTransferError as exc:
             return error(str(exc))
-        finally:
-            # 成功导入后数据库已被替换，直接清除备份中可能残留的租约；失败时只释放自己的租约。
-            if imported:
-                AppSettings.objects.filter(pk=1).update(run_lease_until=None)
-            else:
-                AppSettings.objects.filter(
-                    pk=1,
-                    run_lease_until=lease_until,
-                ).update(run_lease_until=None)
+
+        with staged:
+            try:
+                guard = LeaseGuard.acquire(
+                    0,
+                    ttl=timedelta(hours=1),
+                )
+            except LeaseBusyError:
+                return error(
+                    "后台采集或历史维护正在运行，请稍后再导入数据库",
+                    status.HTTP_409_CONFLICT,
+                )
+
+            try:
+                guard.renew()
+                recovery_name = import_database(
+                    staged,
+                    guard=guard,
+                )
+                with transaction.atomic():
+                    global_state = (
+                        HistoryMaintenanceState.objects.select_for_update().get(
+                            account_id=0
+                        )
+                    )
+                    guard.assert_owned(global_state)
+                    account_ids = set(
+                        HistoryMaintenanceState.objects.exclude(account_id=0)
+                        .values_list("account_id", flat=True)
+                    )
+                    account_ids.update(
+                        Observation.objects.order_by()
+                        .values_list("account_id", flat=True)
+                        .distinct()
+                    )
+                    imported_account_id = AppSettings.load().openai_account_id
+                    if imported_account_id:
+                        account_ids.add(imported_account_id)
+                    for account_id in sorted(account_ids):
+                        state, _created = (
+                            HistoryMaintenanceState.objects.get_or_create(
+                                account_id=account_id
+                            )
+                        )
+                        state = (
+                            HistoryMaintenanceState.objects.select_for_update().get(
+                                pk=state.pk
+                            )
+                        )
+                        state.fact_revision += 1
+                        state.save(
+                            update_fields=["fact_revision", "updated_at"]
+                        )
+                    guard.assert_owned(global_state)
+            except DatabaseTransferError as exc:
+                return error(str(exc))
+            finally:
+                guard.release()
 
         response = ok(
             {

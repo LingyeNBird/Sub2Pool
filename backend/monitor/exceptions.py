@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
+
+from .history_state import LeaseBusyError, LeaseLostError
 
 
 def _message(data: Any, fallback: str) -> str:
@@ -27,8 +30,14 @@ def _message(data: Any, fallback: str) -> str:
 
 
 def api_exception_handler(exc, context) -> Response | None:
-    """保留 DRF 状态码，同时维持 `{ok, message, details}` 契约。"""
-    response = exception_handler(exc, context)
+    """Map fenced-write conflicts while preserving the shared JSON contract."""
+    if isinstance(exc, (LeaseBusyError, LeaseLostError)):
+        response = Response(
+            {"detail": str(exc)},
+            status=status.HTTP_409_CONFLICT,
+        )
+    else:
+        response = exception_handler(exc, context)
     if response is None:
         return None
 

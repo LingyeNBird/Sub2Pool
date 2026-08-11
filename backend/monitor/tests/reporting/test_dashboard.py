@@ -10,6 +10,7 @@ import httpx
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import DatabaseError, connection
 from django.core.management import call_command
 from django.test import Client
 from django.utils import timezone
@@ -21,6 +22,8 @@ from monitor.models import (
     BlockedIPAddress,
     LoginEvent,
     NotificationEvent,
+    HistoryMaintenanceState,
+    ParticipantBalanceOperation,
     Observation,
     ObservationFastCorrection,
     Participant,
@@ -349,7 +352,7 @@ def test_constant_average_model_changes_only_presented_attribution():
         "recommended_balance_max_usd"
     ] is None
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
     monkeypatch,
 ):
@@ -383,6 +386,7 @@ def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
             pass
 
         def set_user_balance_from_recommendation(self, user_id, balance):
+            assert connection.in_atomic_block is False
             captured.update(user_id=user_id, balance=balance)
             return balance
 
@@ -405,10 +409,244 @@ def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
     assert snapshot.current_balance_usd == Decimal("123.45")
     assert snapshot.balance_difference_usd == Decimal("0")
     assert participant.latest_balance_usd == Decimal("123.45")
+    state = HistoryMaintenanceState.objects.get(account_id=7)
+    assert state.fact_revision == 1
 
     dashboard = client.get("/api/dashboard", **headers).json()["data"]
     assert dashboard["sub2api_admin_url"] == "https://admin.example:8443"
     assert dashboard["participants"] == []
+
+
+@pytest.mark.django_db(transaction=True)
+def test_balance_rpc_blocks_concurrent_participant_policy_write(monkeypatch):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.openai_account_id = 7
+    config.save()
+    participant = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=51,
+        share_percent=50,
+        latest_balance_usd=Decimal("80"),
+    )
+    snapshot = create_recommendation_snapshot(participant)
+    client = Client()
+    headers, _ = jwt_login(client)
+    concurrent_status: list[int] = []
+
+    class RacingClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def set_user_balance_from_recommendation(self, _user_id, balance):
+            concurrent = Client().put(
+                f"/api/participants/{participant.id}",
+                data=json.dumps({"share_percent": "40"}),
+                content_type="application/json",
+                **headers,
+            )
+            concurrent_status.append(concurrent.status_code)
+            return balance
+
+    monkeypatch.setattr(
+        "monitor.views.dashboard.Sub2APIClient",
+        RacingClient,
+    )
+
+    applied = client.post(
+        f"/api/dashboard/participants/{participant.id}/apply-recommendation",
+        **headers,
+    )
+
+    assert concurrent_status == [409]
+    assert applied.status_code == 200, applied.json()
+    participant.refresh_from_db()
+    snapshot.refresh_from_db()
+    assert participant.share_percent == Decimal("50")
+    assert snapshot.recommendation_applied is True
+
+
+@pytest.mark.django_db(transaction=True)
+def test_remote_success_survives_local_commit_failure_and_retries_idempotently(
+    monkeypatch,
+):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.openai_account_id = 7
+    config.save()
+    participant = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=51,
+        share_percent=50,
+        latest_balance_usd=Decimal("80"),
+    )
+    snapshot = create_recommendation_snapshot(participant)
+    remote_calls: list[Decimal] = []
+
+    class BalanceClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def set_user_balance_from_recommendation(self, _user_id, balance):
+            remote_calls.append(balance)
+            return balance
+
+    monkeypatch.setattr(
+        "monitor.views.dashboard.Sub2APIClient",
+        BalanceClient,
+    )
+    from monitor.views import dashboard as dashboard_view
+
+    real_commit = dashboard_view._commit_balance_operation
+
+    def fail_local_commit(_operation_id, _guard):
+        raise DatabaseError("injected local commit failure")
+
+    monkeypatch.setattr(
+        dashboard_view,
+        "_commit_balance_operation",
+        fail_local_commit,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    first = client.post(
+        f"/api/dashboard/participants/{participant.id}/apply-recommendation",
+        **headers,
+    )
+
+    assert first.status_code == 503, first.json()
+    operation = ParticipantBalanceOperation.objects.get()
+    assert operation.state == "remote_confirmed"
+    assert operation.confirmed_balance_usd == Decimal("123.450000")
+    snapshot.refresh_from_db()
+    assert snapshot.recommendation_applied is False
+    monkeypatch.setattr(
+        dashboard_view,
+        "_commit_balance_operation",
+        real_commit,
+    )
+
+    class NoNetworkClient:
+        def __init__(self, _config):
+            raise AssertionError("remote-confirmed retry must not call Sub2API")
+
+    monkeypatch.setattr(
+        dashboard_view,
+        "Sub2APIClient",
+        NoNetworkClient,
+    )
+    retried = client.post(
+        f"/api/dashboard/participants/{participant.id}/apply-recommendation",
+        **headers,
+    )
+
+    assert retried.status_code == 200, retried.json()
+    operation.refresh_from_db()
+    snapshot.refresh_from_db()
+    assert operation.state == "committed"
+    assert snapshot.recommendation_applied is True
+    assert remote_calls == [Decimal("123.45")]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_ambiguous_remote_failure_reconciles_before_idempotent_retry(monkeypatch):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.openai_account_id = 7
+    config.save()
+    participant = Participant.objects.create(
+        name="车友",
+        sub2api_user_id=51,
+        share_percent=50,
+        latest_balance_usd=Decimal("80"),
+    )
+    snapshot = create_recommendation_snapshot(participant)
+    remote_balance = {"value": Decimal("80")}
+    calls = {"set": 0, "read": 0}
+
+    class AmbiguousClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def user_balance(self, _user_id):
+            calls["read"] += 1
+            return UserBalance(remote_balance["value"], Decimal("0"))
+
+        def set_user_balance_from_recommendation(self, _user_id, balance):
+            calls["set"] += 1
+            remote_balance["value"] = balance
+            if calls["set"] == 1:
+                raise Sub2APIError("connection lost after remote commit")
+            return balance
+
+    monkeypatch.setattr(
+        "monitor.views.dashboard.Sub2APIClient",
+        AmbiguousClient,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    first = client.post(
+        f"/api/dashboard/participants/{participant.id}/apply-recommendation",
+        **headers,
+    )
+
+    assert first.status_code == 502, first.json()
+    operation = ParticipantBalanceOperation.objects.get()
+    assert operation.state == "reconciliation_required"
+    blocked_write = client.put(
+        f"/api/participants/{participant.id}",
+        data=json.dumps({"share_percent": "40"}),
+        content_type="application/json",
+        **headers,
+    )
+    assert blocked_write.status_code == 409
+
+    retried = client.post(
+        f"/api/dashboard/participants/{participant.id}/apply-recommendation",
+        **headers,
+    )
+
+    assert retried.status_code == 200, retried.json()
+    operation.refresh_from_db()
+    snapshot.refresh_from_db()
+    assert operation.state == "committed"
+    assert snapshot.recommendation_applied is True
+    assert calls == {"set": 1, "read": 1}
 
 @pytest.mark.django_db
 def test_constant_average_one_click_applies_recommendation_midpoint(monkeypatch):
@@ -497,6 +735,9 @@ def test_apply_recommendation_failure_keeps_snapshot_actionable(monkeypatch):
         sub2api_user_id=51,
         share_percent=50,
     )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save(update_fields=["openai_account_id"])
     snapshot = create_recommendation_snapshot(participant)
 
     class FailingClient:

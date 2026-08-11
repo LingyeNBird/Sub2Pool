@@ -16,7 +16,12 @@ from ..integrations.sub2api import (
     Sub2APIUsageLog,
     WeeklyWindow,
 )
-from ..models import AppSettings, Observation, ParticipantSnapshot
+from ..models import (
+    AppSettings,
+    Observation,
+    ParticipantSnapshot,
+    UsageSamplePoint,
+)
 
 
 @transaction.atomic
@@ -27,12 +32,13 @@ def create_raw_observation(
     window: WeeklyWindow,
     local: LocalBundle,
     source: str,
+    sample_point: UsageSamplePoint,
     latest_raw: Observation | None = None,
     interval_logs: list[Sub2APIUsageLog] | None = None,
     fast_interval: FastCorrectionInterval | None = None,
     fast_error: str = "",
 ) -> Observation:
-    """保存采样证据；历史维护可从请求日志重取成本，随后统一重放。"""
+    """保存采样证据；历史成本仅可由带 verified coverage 的计划替换。"""
 
     selected_total = local.total.selected(config.cost_basis)
     (
@@ -48,6 +54,7 @@ def create_raw_observation(
     )
     observation = Observation.objects.create(
         account_id=reference.account_id,
+        sample_point=sample_point,
         source=source,
         observed_at=local.checked_at,
         window_seconds=reference.window_seconds,

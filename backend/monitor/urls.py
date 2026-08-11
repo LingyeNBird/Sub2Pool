@@ -13,10 +13,11 @@ from .views.dashboard import (
     DashboardView,
 )
 from .views.database import DatabaseExportView, DatabaseImportView
-from .views.fast_correction import FastCorrectionRebuildView
 from .views.maintenance import (
-    HistoricalRebuildPreviewView,
-    HistoricalRebuildView,
+    HistoricalRebuildApplyView,
+    HistoricalRebuildPlanDetailView,
+    HistoricalRebuildPlanListView,
+    HistoricalRebuildRollbackView,
 )
 from .views.monitoring import RunMonitorView
 from .views.participants import (
@@ -120,16 +121,20 @@ urlpatterns = [
     path("settings/test-email", TestEmailView.as_view()),
     path("settings/readonly-api-key", ReadOnlyAPIKeyView.as_view()),
     path(
-        "settings/fast-correction/rebuild",
-        FastCorrectionRebuildView.as_view(),
+        "settings/data-maintenance/history-rebuild-plans",
+        HistoricalRebuildPlanListView.as_view(),
     ),
     path(
-        "settings/data-maintenance/history-rebuild-preview",
-        HistoricalRebuildPreviewView.as_view(),
+        "settings/data-maintenance/history-rebuild-plans/<uuid:plan_id>",
+        HistoricalRebuildPlanDetailView.as_view(),
     ),
     path(
-        "settings/data-maintenance/history-rebuild",
-        HistoricalRebuildView.as_view(),
+        "settings/data-maintenance/history-rebuild-plans/<uuid:plan_id>/apply",
+        HistoricalRebuildApplyView.as_view(),
+    ),
+    path(
+        "settings/data-maintenance/history-rebuild-plans/<uuid:plan_id>/rollback",
+        HistoricalRebuildRollbackView.as_view(),
     ),
     path("monitor/run", RunMonitorView.as_view()),
 ]

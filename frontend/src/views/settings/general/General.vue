@@ -9,9 +9,6 @@ import DatabaseTransferCard from "./components/DatabaseTransferCard.vue";
 import DataMaintenanceCard from "./components/DataMaintenanceCard.vue";
 import EmailServiceCard from "./components/EmailServiceCard.vue";
 import FastCorrectionCard from "./components/FastCorrectionCard.vue";
-import FastCorrectionRebuildDialog, {
-  type FastCorrectionRebuildScope,
-} from "./components/FastCorrectionRebuildDialog.vue";
 import LoginSecurityCard from "./components/LoginSecurityCard.vue";
 import ReadOnlyAPIKeyCard from "./components/ReadOnlyAPIKeyCard.vue";
 import NotificationRulesCard from "./components/NotificationRulesCard.vue";
@@ -39,12 +36,12 @@ const {
   loadingAccounts,
   exportingDatabase,
   importingDatabase,
-  rebuildingFastCorrection,
-  historyRebuildPreview,
+  historyRebuildPlan,
   generatingReadOnlyApiKey,
   revokingReadOnlyApiKey,
-  checkingHistoricalRebuild,
-  rebuildingHistory,
+  planningHistory,
+  applyingHistory,
+  rollingBackHistory,
   passwordForm,
   loadOpenAIAccounts,
   saveConnection,
@@ -52,33 +49,17 @@ const {
   saveSampling,
   saveEmail,
   saveFastCorrection,
-  rebuildFastCorrection,
   saveNotifications,
   exportDatabase,
   importDatabase,
-  previewHistoricalRebuild,
-  rebuildHistoricalData,
+  createHistoricalRebuildPlan,
+  applyHistoricalRebuildPlan,
+  rollbackHistoricalRebuildPlan,
   test,
   generateReadOnlyApiKey,
   revokeReadOnlyApiKey,
   changePassword,
 } = useSettingsPage(confirmAction);
-
-const fastCorrectionDialog = ref<InstanceType<
-  typeof FastCorrectionRebuildDialog
-> | null>(null);
-
-async function handleFastCorrectionSave() {
-  if (await saveFastCorrection()) {
-    fastCorrectionDialog.value?.open(true);
-  }
-}
-
-async function handleFastCorrectionRebuild(scope: FastCorrectionRebuildScope) {
-  if (await rebuildFastCorrection(scope)) {
-    fastCorrectionDialog.value?.close();
-  }
-}
 
 const readOnlyAPIKeyCard = ref<InstanceType<typeof ReadOnlyAPIKeyCard> | null>(
   null,
@@ -162,9 +143,7 @@ async function handleRevokeReadOnlyAPIKey() {
     <FastCorrectionCard
       v-model:settings="settings"
       :saving="saving === 'fast-correction'"
-      :rebuilding="rebuildingFastCorrection"
-      @save="handleFastCorrectionSave"
-      @rebuild="fastCorrectionDialog?.open()"
+      @save="saveFastCorrection"
     />
     <SamplingStrategyCard
       v-model:settings="settings"
@@ -186,11 +165,13 @@ async function handleRevokeReadOnlyAPIKey() {
       @save="saveNotifications"
     />
     <DataMaintenanceCard
-      :preview="historyRebuildPreview"
-      :checking="checkingHistoricalRebuild"
-      :rebuilding="rebuildingHistory"
-      @preview="previewHistoricalRebuild"
-      @rebuild="rebuildHistoricalData"
+      :plan="historyRebuildPlan"
+      :planning="planningHistory"
+      :applying="applyingHistory"
+      :rolling-back="rollingBackHistory"
+      @create-plan="createHistoricalRebuildPlan"
+      @apply="applyHistoricalRebuildPlan"
+      @rollback="rollbackHistoricalRebuildPlan"
     />
     <DatabaseTransferCard
       :exporting="exportingDatabase"
@@ -210,10 +191,5 @@ async function handleRevokeReadOnlyAPIKey() {
       @revoke="handleRevokeReadOnlyAPIKey"
     />
   </div>
-  <FastCorrectionRebuildDialog
-    ref="fastCorrectionDialog"
-    :rebuilding="rebuildingFastCorrection"
-    @confirm="handleFastCorrectionRebuild"
-  />
   <ConfirmDialog ref="confirmDialog" />
 </template>

@@ -8,7 +8,7 @@ from .participants import Participant
 
 
 class Observation(models.Model):
-    """一次上游百分比采样；百分比边界保留，成本事实可从请求日志重取。"""
+    """一次上游百分比采样；成本只有在逐维 coverage 已验证时才可替换。"""
     SOURCE_CHOICES = (("scheduled", "定时"), ("manual", "手动"), ("exhausted", "额度耗尽触发"), ("reset", "重置临近"))
     EXCLUSION_CHOICES = (
         ("", "未排除"),
@@ -16,6 +16,13 @@ class Observation(models.Model):
         ("automatic", "异常检测排除"),
     )
     account_id = models.BigIntegerField(db_index=True)
+    sample_point = models.ForeignKey(
+        "UsageSamplePoint",
+        on_delete=models.SET_NULL,
+        related_name="observations",
+        null=True,
+        blank=True,
+    )
     source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default="scheduled")
     observed_at = models.DateTimeField()
     window_seconds = models.PositiveIntegerField(default=604800)
@@ -237,6 +244,13 @@ class ParticipantUsageSample(models.Model):
         related_name="usage_samples",
     )
     account_id = models.BigIntegerField(db_index=True)
+    sample_point = models.ForeignKey(
+        "UsageSamplePoint",
+        on_delete=models.SET_NULL,
+        related_name="participant_usage_samples",
+        null=True,
+        blank=True,
+    )
     attribution_started_at = models.DateTimeField(null=True, blank=True)
     observed_at = models.DateTimeField()
     balance_usd = models.DecimalField(
@@ -265,13 +279,20 @@ class ParticipantUsageSample(models.Model):
 
 
 class Sub2APIUserUsageSample(models.Model):
-    """一个时间点的全量 Sub2API 用户用量。
+    """一个时间点的完整 Sub2API 用户用量。
 
-    记录不依赖参与者配置；历史维护会以请求日志为权威来源覆盖旧快照，
-    然后再生成规范累计值和参与者账本。
+    记录不依赖参与者配置；历史维护只在独立证据验证具体区间与维度时
+    生成替换 patch，查询 horizon 和分页一致本身不授权覆盖。
     """
 
     account_id = models.BigIntegerField(db_index=True)
+    sample_point = models.ForeignKey(
+        "UsageSamplePoint",
+        on_delete=models.SET_NULL,
+        related_name="user_samples",
+        null=True,
+        blank=True,
+    )
     sub2api_user_id = models.BigIntegerField(db_index=True)
     username = models.CharField(max_length=150, blank=True)
     email = models.EmailField(blank=True)

@@ -5,7 +5,7 @@ from decimal import Decimal
 from urllib.parse import urlsplit
 
 from django.shortcuts import get_object_or_404
-from django.db import transaction
+from django.db import DatabaseError, transaction
 
 from django.utils import timezone
 
@@ -17,7 +17,16 @@ from ..reporting import (
     iso,
     participant_data,
 )
-from ..models import AppSettings, Observation, Participant
+from ..history_state import LeaseBusyError, LeaseGuard, LeaseLostError
+from ..models import (
+    AppSettings,
+    HistoryMaintenanceState,
+    Observation,
+    ParticipantBalanceSample,
+    ParticipantBalanceOperation,
+    Participant,
+    ParticipantSnapshot,
+)
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 from ..replay import RATE_METHOD
 
@@ -188,37 +197,179 @@ class DashboardView(AdminAPIView):
         return ok(data)
 
 
-class ApplyParticipantRecommendationView(AdminAPIView):
-    """仅响应管理员的显式点击，不会被后台监控或其他自动任务调用。"""
+class BalanceOperationConflict(RuntimeError):
+    pass
 
-    @transaction.atomic
-    def post(self, _request, participant_id: int):
-        participant = get_object_or_404(
-            Participant.objects.select_for_update(),
+
+def _prepare_balance_operation(
+    *,
+    account_id: int,
+    participant_id: int,
+    config: AppSettings,
+    guard: LeaseGuard,
+) -> tuple[ParticipantBalanceOperation, bool]:
+    with transaction.atomic():
+        state = HistoryMaintenanceState.objects.select_for_update().get(
+            account_id=account_id
+        )
+        guard.assert_owned(state)
+        config.refresh_from_db()
+        if config.openai_account_id != account_id:
+            raise BalanceOperationConflict(
+                "上游账号设置已变化，请刷新后重试"
+            )
+        pending = (
+            ParticipantBalanceOperation.objects.select_for_update()
+            .exclude(state="committed")
+            .filter(account_id=account_id)
+            .order_by("created_at", "id")
+            .first()
+        )
+        if pending is not None:
+            if pending.participant_id != participant_id:
+                raise BalanceOperationConflict(
+                    "另一个参与者存在待对账余额操作，请先重试对应建议"
+                )
+            if state.fact_revision != pending.base_revision:
+                raise BalanceOperationConflict(
+                    "待对账余额操作的源事实 revision 已变化，已阻止自动提交"
+                )
+            return pending, False
+
+        participant = Participant.objects.select_for_update().get(
             pk=participant_id,
             enabled=True,
         )
-        config = AppSettings.load()
         snapshot, recommended = display_recommendation(participant, config)
         if snapshot is None or recommended is None:
-            return error("该参与者尚无可应用的额度建议", 409)
+            raise BalanceOperationConflict("该参与者尚无可应用的额度建议")
         if snapshot.recommendation_applied:
-            return error("该条额度建议已经应用", 409)
-
+            raise BalanceOperationConflict("该条额度建议已经应用")
         if recommended <= 0:
-            return error(
-                "Sub2API 原生余额调整接口不允许把余额设为 0，请前往管理后台手动处理",
-                409,
+            raise BalanceOperationConflict(
+                "Sub2API 原生余额调整接口不允许把余额设为 0，请前往管理后台手动处理"
             )
-        try:
-            with Sub2APIClient(config) as client:
-                confirmed = client.set_user_balance_from_recommendation(
-                    participant.sub2api_user_id,
-                    recommended,
-                )
-        except Sub2APIError as exc:
-            return error(str(exc), 502)
+        operation = ParticipantBalanceOperation.objects.create(
+            account_id=account_id,
+            base_revision=state.fact_revision,
+            participant=participant,
+            snapshot=snapshot,
+            sub2api_user_id=participant.sub2api_user_id,
+            requested_balance_usd=recommended,
+        )
+        return operation, True
 
+
+def _record_balance_attempt(
+    operation_id,
+    guard: LeaseGuard,
+) -> ParticipantBalanceOperation:
+    with transaction.atomic():
+        state = HistoryMaintenanceState.objects.select_for_update().get(
+            account_id=guard.account_id
+        )
+        guard.assert_owned(state)
+        operation = ParticipantBalanceOperation.objects.select_for_update().get(
+            pk=operation_id
+        )
+        operation.attempt_count += 1
+        operation.last_error = ""
+        operation.save(update_fields=["attempt_count", "last_error", "updated_at"])
+        return operation
+
+
+def _mark_balance_reconciliation_required(
+    operation_id,
+    guard: LeaseGuard,
+    message: str,
+) -> None:
+    with transaction.atomic():
+        state = HistoryMaintenanceState.objects.select_for_update().get(
+            account_id=guard.account_id
+        )
+        guard.assert_owned(state)
+        operation = ParticipantBalanceOperation.objects.select_for_update().get(
+            pk=operation_id
+        )
+        operation.state = "reconciliation_required"
+        operation.confirmed_balance_usd = None
+        operation.remote_confirmed_at = None
+        operation.last_error = message
+        operation.save(
+            update_fields=[
+                "state",
+                "confirmed_balance_usd",
+                "remote_confirmed_at",
+                "last_error",
+                "updated_at",
+            ]
+        )
+
+
+def _mark_balance_remote_confirmed(
+    operation_id,
+    guard: LeaseGuard,
+    confirmed: Decimal,
+) -> None:
+    with transaction.atomic():
+        state = HistoryMaintenanceState.objects.select_for_update().get(
+            account_id=guard.account_id
+        )
+        guard.assert_owned(state)
+        operation = ParticipantBalanceOperation.objects.select_for_update().get(
+            pk=operation_id
+        )
+        operation.state = "remote_confirmed"
+        operation.confirmed_balance_usd = confirmed
+        operation.remote_confirmed_at = timezone.now()
+        operation.last_error = ""
+        operation.save(
+            update_fields=[
+                "state",
+                "confirmed_balance_usd",
+                "remote_confirmed_at",
+                "last_error",
+                "updated_at",
+            ]
+        )
+
+
+def _commit_balance_operation(
+    operation_id,
+    guard: LeaseGuard,
+) -> ParticipantBalanceOperation:
+    with transaction.atomic():
+        state = HistoryMaintenanceState.objects.select_for_update().get(
+            account_id=guard.account_id
+        )
+        guard.assert_owned(state)
+        operation = (
+            ParticipantBalanceOperation.objects.select_for_update()
+            .select_related("snapshot__observation", "participant")
+            .get(pk=operation_id)
+        )
+        if operation.state == "committed":
+            return operation
+        if operation.state != "remote_confirmed":
+            raise BalanceOperationConflict(
+                "上游余额尚未确认，不能提交本地余额事实"
+            )
+        if state.fact_revision != operation.base_revision:
+            raise BalanceOperationConflict(
+                "余额操作创建后的源事实 revision 已变化，已阻止本地提交"
+            )
+        confirmed = operation.confirmed_balance_usd
+        if confirmed is None:
+            raise BalanceOperationConflict("上游确认余额事实缺失")
+        participant = Participant.objects.select_for_update().get(
+            pk=operation.participant_id,
+            enabled=True,
+            sub2api_user_id=operation.sub2api_user_id,
+        )
+        snapshot = ParticipantSnapshot.objects.select_for_update().get(
+            pk=operation.snapshot_id,
+            participant=participant,
+        )
         snapshot.current_balance_usd = confirmed
         snapshot.balance_difference_usd = Decimal("0")
         snapshot.needs_manual_update = False
@@ -233,8 +384,18 @@ class ApplyParticipantRecommendationView(AdminAPIView):
                 "reason",
             ]
         )
-
         now = timezone.now()
+        point_id = snapshot.observation.sample_point_id
+        if point_id is not None:
+            ParticipantBalanceSample.objects.update_or_create(
+                point_id=point_id,
+                participant=participant,
+                provenance="admin_recommendation",
+                defaults={
+                    "balance_usd": confirmed,
+                    "captured_at": now,
+                },
+            )
         participant.latest_balance_usd = confirmed
         participant.last_checked_at = now
         participant.updated_at = now
@@ -245,10 +406,147 @@ class ApplyParticipantRecommendationView(AdminAPIView):
                 "updated_at",
             ]
         )
-        return ok(
-            {
-                "participant_id": participant.id,
-                "sub2api_user_id": participant.sub2api_user_id,
-                "applied_balance_usd": float(confirmed),
-            }
+        state.fact_revision += 1
+        state.save(update_fields=["fact_revision", "updated_at"])
+        operation.state = "committed"
+        operation.committed_at = now
+        operation.last_error = ""
+        operation.save(
+            update_fields=[
+                "state",
+                "committed_at",
+                "last_error",
+                "updated_at",
+            ]
         )
+        return operation
+
+
+class ApplyParticipantRecommendationView(AdminAPIView):
+    """Apply one recommendation through a durable, idempotent operation."""
+
+    def post(self, _request, participant_id: int):
+        participant = get_object_or_404(
+            Participant,
+            pk=participant_id,
+            enabled=True,
+        )
+        config = AppSettings.load()
+        account_id = config.openai_account_id
+        if not account_id:
+            return error("尚未配置 OpenAI 上游账号", 409)
+        try:
+            guard = LeaseGuard.acquire(
+                account_id,
+                ttl=timedelta(minutes=15),
+                allow_pending_balance=True,
+            )
+        except LeaseBusyError as exc:
+            return error(str(exc), 409)
+
+        operation = None
+        try:
+            guard.renew()
+            operation, created = _prepare_balance_operation(
+                account_id=account_id,
+                participant_id=participant.id,
+                config=config,
+                guard=guard,
+            )
+            if operation.state != "remote_confirmed":
+                operation = _record_balance_attempt(operation.id, guard)
+                try:
+                    with Sub2APIClient(config) as client:
+                        confirmed = None
+                        if not created:
+                            guard.renew()
+                            remote = client.user_balance(
+                                operation.sub2api_user_id
+                            )
+                            if (
+                                remote.balance
+                                == operation.requested_balance_usd
+                            ):
+                                confirmed = remote.balance
+                        if confirmed is None:
+                            guard.renew()
+                            confirmed = (
+                                client.set_user_balance_from_recommendation(
+                                    operation.sub2api_user_id,
+                                    operation.requested_balance_usd,
+                                )
+                            )
+                except Sub2APIError as exc:
+                    try:
+                        _mark_balance_reconciliation_required(
+                            operation.id,
+                            guard,
+                            str(exc),
+                        )
+                    except DatabaseError:
+                        return error(
+                            "上游结果不确定，且本地对账状态暂时无法更新；请重试该额度建议",
+                            503,
+                            {"operation_id": str(operation.id)},
+                        )
+                    return error(
+                        str(exc),
+                        502,
+                        {
+                            "operation_id": str(operation.id),
+                            "reconciliation_required": True,
+                        },
+                    )
+                try:
+                    _mark_balance_remote_confirmed(
+                        operation.id,
+                        guard,
+                        Decimal(str(confirmed)),
+                    )
+                    operation = _commit_balance_operation(
+                        operation.id,
+                        guard,
+                    )
+                except DatabaseError as exc:
+                    ParticipantBalanceOperation.objects.filter(
+                        pk=operation.id
+                    ).update(last_error=str(exc))
+                    return error(
+                        "上游余额已确认，本地提交待恢复；重试同一建议将幂等完成",
+                        503,
+                        {
+                            "operation_id": str(operation.id),
+                            "retryable": True,
+                        },
+                    )
+            else:
+                try:
+                    operation = _commit_balance_operation(
+                        operation.id,
+                        guard,
+                    )
+                except DatabaseError as exc:
+                    ParticipantBalanceOperation.objects.filter(
+                        pk=operation.id
+                    ).update(last_error=str(exc))
+                    return error(
+                        "上游余额已确认，本地提交待恢复；重试同一建议将幂等完成",
+                        503,
+                        {
+                            "operation_id": str(operation.id),
+                            "retryable": True,
+                        },
+                    )
+            confirmed = operation.confirmed_balance_usd
+            return ok(
+                {
+                    "operation_id": str(operation.id),
+                    "participant_id": operation.participant_id,
+                    "sub2api_user_id": operation.sub2api_user_id,
+                    "applied_balance_usd": float(confirmed),
+                }
+            )
+        except (LeaseLostError, BalanceOperationConflict) as exc:
+            return error(str(exc), 409)
+        finally:
+            guard.release()

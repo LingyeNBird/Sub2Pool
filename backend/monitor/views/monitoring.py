@@ -5,7 +5,7 @@ from django.utils import timezone
 from .base import AdminAPIView, error, ok
 from ..reporting import iso
 from ..engine import run_monitor
-from ..models import AppSettings
+from ..models import AppSettings, HistoryMaintenanceState
 from ..integrations.sub2api import Sub2APIError
 
 
@@ -23,8 +23,13 @@ class RunMonitorView(AdminAPIView):
                     if config.monitoring_enabled
                     else None
                 ),
-                "run_in_progress": bool(
-                    config.run_lease_until and config.run_lease_until > now
+                "run_in_progress": (
+                    HistoryMaintenanceState.objects.filter(
+                        account_id=config.openai_account_id,
+                        lease_expires_at__gt=now,
+                    ).exists()
+                    if config.openai_account_id
+                    else False
                 ),
                 "server_time": iso(now),
             }

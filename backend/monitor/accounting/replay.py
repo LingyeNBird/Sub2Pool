@@ -22,9 +22,11 @@ from .boundaries import (
 from .contracts import ReplayResult, ReplaySegment
 from .cost_ledger import normalize_cost_history
 from .dynamic_attribution import replay_dynamic_segment
+from ..history_state import LeaseGuard
 from ..fast_correction.prefix import FastCorrectionPrefix
 from ..models import (
     AppSettings,
+    HistoryMaintenanceState,
     Observation,
     Participant,
     ParticipantUsageSample,
@@ -206,20 +208,38 @@ def _replay_anchor(
     return _official_start(observation)
 
 
+def _assert_replay_guard(guard: LeaseGuard | None) -> None:
+    if guard is None:
+        return
+    state = HistoryMaintenanceState.objects.select_for_update().get(
+        account_id=guard.account_id
+    )
+    guard.assert_owned(state)
+
+
 @transaction.atomic
 def rebuild_account(
     account_id: int,
     config: AppSettings | None = None,
     *,
     replay_from: datetime | None = None,
+    guard: LeaseGuard | None = None,
 ) -> ReplayResult:
     """从最早受影响的边界向后重放；``None`` 仅供升级或修复时全量重放。"""
+    if guard is not None:
+        if guard.account_id != account_id:
+            raise ValueError("重放租约账号与目标账号不一致")
+        guard.renew()
+        _assert_replay_guard(guard)
 
     config = config or AppSettings.load()
     all_observations = list(
         Observation.objects.select_for_update()
         .filter(account_id=account_id)
-        .prefetch_related("participant_snapshots__participant")
+        .prefetch_related(
+            "participant_snapshots__participant",
+            "sample_point__balance_samples",
+        )
         .order_by("observed_at", "id")
     )
     normalize_cost_history(account_id, all_observations)
@@ -237,6 +257,7 @@ def rebuild_account(
             .order_by("-observed_at", "-id")
             .first()
         )
+        _assert_replay_guard(guard)
         return ReplayResult(0, 0, 0, latest.pk if latest else None)
 
     latest_rate: Decimal | None = None
@@ -346,6 +367,7 @@ def rebuild_account(
         .order_by("-observed_at", "-id")
         .first()
     )
+    _assert_replay_guard(guard)
     return ReplayResult(
         rebuilt_observations=rebuilt,
         automatic_exclusions=len(automatic),
@@ -362,6 +384,8 @@ def rebuild_account(
 def rebuild_observation_suffix(
     observation: Observation,
     config: AppSettings | None = None,
+    *,
+    guard: LeaseGuard | None = None,
 ) -> ReplayResult:
     """粒子状态依赖完整区间；新增、插入和恢复都从当前区间起点重放。"""
 
@@ -373,6 +397,7 @@ def rebuild_observation_suffix(
         observation.account_id,
         config,
         replay_from=_replay_anchor(observation),
+        guard=guard,
     )
 
 

@@ -7,6 +7,7 @@ from .dto import (
     Sub2APIUserUsage,
     UsageStats,
     UserBalance,
+    UsageLogScan,
     WeeklyWindow,
 )
 from .protocols import RecommendationBalanceWriter, Sub2APIReader
@@ -20,6 +21,7 @@ __all__ = [
     "Sub2APIUsageLog",
     "Sub2APIUserUsage",
     "UsageStats",
+    "UsageLogScan",
     "UserBalance",
     "WeeklyWindow",
 ]

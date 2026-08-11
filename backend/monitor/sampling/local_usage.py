@@ -4,7 +4,9 @@ from datetime import datetime, time, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+from django.db import transaction
 from .types import LocalBundle, LocalParticipantData, WindowReference
+from ..fact_utils import expected_user_digest
 from ..accounting.boundaries import same_official_reset
 from ..accounting.cost_ledger import normalize_user_sample
 from ..integrations.sub2api import (
@@ -16,8 +18,10 @@ from ..models import (
     AppSettings,
     Observation,
     Participant,
+    ParticipantBalanceSample,
     ParticipantUsageSample,
     Sub2APIUserUsageSample,
+    UsageSamplePoint,
 )
 
 ZERO = Decimal("0")
@@ -282,19 +286,80 @@ def _participant_baselines(
     }
 
 
+@transaction.atomic
 def save_local_bundle(
     config: AppSettings,
     reference: WindowReference,
     local: LocalBundle,
     latest: Observation | None,
     *,
+    latest_raw: Observation | None = None,
     interval_logs: list[Sub2APIUsageLog] | None = None,
-) -> None:
-    """Save raw cumulative snapshots together with their actual time window."""
+    capture_started_at: datetime | None = None,
+    capture_finished_at: datetime | None = None,
+) -> UsageSamplePoint:
+    """Commit one complete local fact group and return its canonical point."""
+
+    user_ids = [int(user.user_id) for user in local.users]
+    if len(user_ids) != len(set(user_ids)):
+        raise ValueError("Sub2API 全量用户快照包含重复用户")
+    sum_standard = sum(
+        (user.stats.total_cost for user in local.users),
+        ZERO,
+    )
+    sum_actual = sum(
+        (user.stats.total_actual_cost for user in local.users),
+        ZERO,
+    )
+    residual_standard = local.total.total_cost - sum_standard
+    residual_actual = local.total.total_actual_cost - sum_actual
+    (
+        account_interval_start,
+        account_interval_standard,
+        account_interval_actual,
+        _account_interval_source,
+    ) = observation_interval_costs(
+        latest_raw,
+        reference,
+        local,
+        interval_logs,
+    )
+    point = UsageSamplePoint.objects.create(
+        account_id=reference.account_id,
+        observed_at=local.checked_at,
+        window_started_at=local.cost_window_started_at,
+        window_ended_at=local.cost_window_ended_at,
+        window_resets_at=reference.reset_at,
+        capture_started_at=capture_started_at,
+        capture_finished_at=capture_finished_at,
+        account_standard_cost=local.total.total_cost,
+        account_actual_cost=local.total.total_actual_cost,
+        interval_started_at=account_interval_start,
+        interval_standard_cost=account_interval_standard,
+        interval_actual_cost=account_interval_actual,
+        residual_standard_cost=residual_standard,
+        residual_actual_cost=residual_actual,
+        expected_user_count=len(user_ids),
+        expected_user_digest=expected_user_digest(user_ids),
+        write_status="complete",
+        reconciliation_status=(
+            "conflict"
+            if residual_standard < ZERO or residual_actual < ZERO
+            else (
+                "reconciled"
+                if residual_standard == ZERO and residual_actual == ZERO
+                else "residual"
+            )
+        ),
+        provenance={
+            "source": "monitor_capture",
+            "multi_request_snapshot": True,
+        },
+    )
 
     previous_by_user = _latest_user_samples(reference.account_id)
     user_samples: list[Sub2APIUserUsageSample] = []
-    for user in local.users:
+    for user in sorted(local.users, key=lambda item: item.user_id):
         previous = previous_by_user.get(user.user_id)
         interval_start, interval_standard, interval_actual, source = (
             _user_interval(
@@ -306,6 +371,7 @@ def save_local_bundle(
             )
         )
         sample = Sub2APIUserUsageSample(
+            sample_point=point,
             account_id=reference.account_id,
             sub2api_user_id=user.user_id,
             username=user.username,
@@ -323,10 +389,7 @@ def save_local_bundle(
         )
         normalize_user_sample(sample, previous)
         user_samples.append(sample)
-    Sub2APIUserUsageSample.objects.bulk_create(
-        user_samples,
-        ignore_conflicts=True,
-    )
+    Sub2APIUserUsageSample.objects.bulk_create(user_samples)
 
     normalized_by_user = {
         sample.sub2api_user_id: sample.normalized_cost(config.cost_basis)
@@ -335,6 +398,7 @@ def save_local_bundle(
     baselines = _participant_baselines(latest, config.cost_basis)
     changed_participants: list[Participant] = []
     usage_samples: list[ParticipantUsageSample] = []
+    balance_samples: list[ParticipantBalanceSample] = []
     for row in local.participants:
         raw_cost = row.selected_cost(config.cost_basis)
         normalized_cost = normalized_by_user.get(
@@ -351,6 +415,7 @@ def save_local_bundle(
         changed_participants.append(row.participant)
         usage_samples.append(
             ParticipantUsageSample(
+                sample_point=point,
                 participant=row.participant,
                 account_id=reference.account_id,
                 attribution_started_at=(
@@ -362,12 +427,20 @@ def save_local_bundle(
                 raw_selected_cost=raw_cost,
             )
         )
+        balance_samples.append(
+            ParticipantBalanceSample(
+                point=point,
+                participant=row.participant,
+                balance_usd=row.balance.balance,
+                captured_at=local.checked_at,
+                provenance="captured_local",
+            )
+        )
     if changed_participants:
         Participant.objects.bulk_update(
             changed_participants,
             ["latest_balance_usd", "latest_selected_cost", "last_checked_at"],
         )
-        ParticipantUsageSample.objects.bulk_create(
-            usage_samples,
-            ignore_conflicts=True,
-        )
+        ParticipantUsageSample.objects.bulk_create(usage_samples)
+        ParticipantBalanceSample.objects.bulk_create(balance_samples)
+    return point

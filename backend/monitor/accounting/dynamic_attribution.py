@@ -352,6 +352,13 @@ def replay_dynamic_segment(
         )
 
         snapshots = list(observation.participant_snapshots.all())
+        admin_balances = {}
+        if observation.sample_point_id is not None:
+            admin_balances = {
+                row.participant_id: row.balance_usd
+                for row in observation.sample_point.balance_samples.all()
+                if row.provenance == "admin_recommendation"
+            }
         remaining_participant_ids = [
             item.participant_id
             for item in snapshots
@@ -467,7 +474,12 @@ def replay_dynamic_segment(
                 recommended = ZERO
                 recommended_min = ZERO
                 recommended_max = ZERO
-            current = snapshot.current_balance_usd
+            admin_balance = admin_balances.get(snapshot.participant_id)
+            current = (
+                admin_balance
+                if admin_balance is not None
+                else snapshot.current_balance_usd
+            )
             difference = (
                 (recommended - current).quantize(CENT, rounding=ROUND_HALF_UP)
                 if current is not None
@@ -532,7 +544,12 @@ def replay_dynamic_segment(
             snapshot.deterministic_balance_min_usd = deterministic_min
             snapshot.deterministic_balance_max_usd = deterministic_max
             snapshot.balance_difference_usd = difference
-            if snapshot.recommendation_applied and recommendation_changed:
+            if admin_balance is not None:
+                snapshot.current_balance_usd = admin_balance
+                snapshot.recommendation_applied = True
+                needs_update = False
+                reason = "已一键应用建议余额"
+            elif snapshot.recommendation_applied and recommendation_changed:
                 snapshot.recommendation_applied = False
             snapshot.needs_manual_update = needs_update
             snapshot.reason = reason
@@ -540,6 +557,7 @@ def replay_dynamic_segment(
             ParticipantSnapshot.objects.bulk_update(
                 snapshots,
                 [
+                    "current_balance_usd",
                     "selected_cost",
                     "delta_cost",
                     "charged_delta_percent",

@@ -6,10 +6,15 @@ from ..api_auth import ReadOnlyAPIKeyAuthentication
 
 from .base import AdminAPIView, AuthenticatedAPIView, error, ok
 from ..reporting import participant_data
+from ..history_state import LeaseLostError, fenced_fact_write
 from ..models import AppSettings, Participant
 from ..serializers import ParticipantWriteSerializer
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 
+
+
+class _ParticipantHasSnapshots(RuntimeError):
+    pass
 
 class Sub2APIUserListView(AdminAPIView):
     def get(self, _request):
@@ -112,10 +117,29 @@ class ParticipantDetailView(AdminAPIView):
         participant = self._get_participant(participant_id)
         if participant is None:
             return error("参与者不存在", status.HTTP_404_NOT_FOUND)
-        if participant.snapshots.exists():
+        account_id = AppSettings.load().openai_account_id
+        try:
+            with fenced_fact_write(
+                [account_id if account_id is not None else 0]
+            ):
+                current_account_id = (
+                    AppSettings.objects.select_for_update()
+                    .get(pk=1)
+                    .openai_account_id
+                )
+                if current_account_id != account_id:
+                    raise LeaseLostError(
+                        "上游账号设置已变化，请刷新后重试参与者删除"
+                    )
+                participant = Participant.objects.select_for_update().get(
+                    pk=participant_id
+                )
+                if participant.snapshots.exists():
+                    raise _ParticipantHasSnapshots
+                participant.delete()
+        except _ParticipantHasSnapshots:
             return error(
                 "该参与者已有测算账本，不能删除；请改为停用",
                 status.HTTP_409_CONFLICT,
             )
-        participant.delete()
         return ok({"deleted": True})

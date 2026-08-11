@@ -1,4 +1,3 @@
-import json
 import sqlite3
 from io import BytesIO, StringIO
 
@@ -30,7 +29,6 @@ from monitor.models import (
 )
 from monitor.notifications import send_notification
 from monitor.replay import (
-    RATE_METHOD,
     exclude_observation,
     rebuild_account,
     rebuild_observation_suffix,
@@ -250,7 +248,7 @@ def test_disabled_fast_correction_skips_log_reads_and_preserves_null_interval(
     assert observation.selected_total_cost == Decimal("100")
 
 @pytest.mark.django_db
-def test_fast_correction_rebuild_api_fills_missing_cycle_and_replays(monkeypatch):
+def test_unsafe_fast_rebuild_endpoint_is_removed_and_missing_facts_are_preserved():
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
@@ -259,147 +257,41 @@ def test_fast_correction_rebuild_api_fills_missing_cycle_and_replays(monkeypatch
     config = AppSettings.load()
     config.openai_account_id = 7
     config.fast_correction_enabled = True
-    config.cost_basis = "actual"
     config.save()
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=51,
-        share_percent=100,
-    )
     cycle_start = timezone.now().replace(microsecond=0) - timedelta(days=2)
     reset_at = cycle_start + timedelta(days=7)
-    first_at = cycle_start + timedelta(hours=1)
-    second_at = cycle_start + timedelta(hours=2)
-
-    def observation_at(observed_at, used_percent, cost):
-        observation = Observation.objects.create(
+    observations = [
+        Observation.objects.create(
             account_id=7,
-            observed_at=observed_at,
+            observed_at=cycle_start + timedelta(hours=offset),
             window_seconds=604800,
             upstream_resets_at=reset_at,
             attribution_started_at=cycle_start,
-            upstream_used_percent=used_percent,
-            interval_used_percent=used_percent,
-            raw_selected_total_cost=cost,
-            selected_total_cost=cost,
-            total_standard_cost=cost,
-            total_actual_cost=cost,
+            upstream_used_percent=Decimal(offset * 10),
+            raw_selected_total_cost=Decimal(offset * 100),
+            selected_total_cost=Decimal(offset * 100),
+            total_standard_cost=Decimal(offset * 100),
+            total_actual_cost=Decimal(offset * 100),
             effective_usd_per_percent=Decimal("10"),
         )
-        ParticipantSnapshot.objects.create(
-            observation=observation,
-            participant=participant,
-            raw_selected_cost=cost,
-            selected_cost=cost,
-            remaining_share_percent=Decimal("100") - used_percent,
-        )
-        return observation
-
-    first = observation_at(first_at, Decimal("10"), Decimal("100"))
-    second = observation_at(second_at, Decimal("20"), Decimal("200"))
-
-    class FakeClient:
-        def __init__(self, _config):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            pass
-
-        def usage_logs(self, **kwargs):
-            assert kwargs["started_at"] == cycle_start
-            assert kwargs["ended_at"] == second_at
-            return [
-                Sub2APIUsageLog(
-                    1,
-                    51,
-                    7,
-                    first_at + timedelta(minutes=1),
-                    "priority",
-                    Decimal("100"),
-                    Decimal("100"),
-                )
-            ]
-
-    monkeypatch.setattr(
-        "monitor.fast_correction.rebuild.Sub2APIClient",
-        FakeClient,
-    )
+        for offset in (1, 2)
+    ]
     client = Client()
     headers, _ = jwt_login(client)
-    settings_before = client.get("/api/settings", **headers).json()["data"]
-    assert settings_before["fast_correction_rebuild_recommended"] is True
-    assert settings_before["fast_correction_missing_intervals"] == 2
+    settings = client.get("/api/settings", **headers).json()["data"]
+    assert settings["fast_correction_rebuild_recommended"] is True
+    assert settings["fast_correction_missing_intervals"] == 2
 
     response = client.post(
         "/api/settings/fast-correction/rebuild",
-        data=json.dumps({"scope": "cycle"}),
+        data={"scope": "all"},
         content_type="application/json",
         **headers,
     )
 
-    assert response.status_code == 200
-    result = response.json()["data"]
-    assert result["rebuilt_observations"] == 2
-    assert result["fast_request_count"] == 1
-    assert result["correction_usd"] == 25.0
-    first.refresh_from_db()
-    second.refresh_from_db()
-    assert first.fast_correction_actual_cost == Decimal("0")
-    assert second.fast_correction_actual_cost == Decimal("25")
-    assert second.selected_total_cost == Decimal("225")
-    assert ParticipantSnapshot.objects.get(
-        observation=second,
-        participant=participant,
-    ).selected_cost == Decimal("225")
-    settings_after = client.get("/api/settings", **headers).json()["data"]
-    assert settings_after["fast_correction_rebuild_recommended"] is False
-    assert settings_after["fast_correction_missing_intervals"] == 0
-    observations = client.get("/api/observations", **headers).json()["data"]
-    assert observations["fast_correction_enabled"] is True
-    assert observations["items"][0]["fast_correction_usd"] == 25.0
-    # 混合历史中未计算的区间必须按 0 累加，不能阻断后续已计算修正。
-    first.fast_correction_standard_cost = None
-    first.fast_correction_actual_cost = None
-    first.save(
-        update_fields=[
-            "fast_correction_standard_cost",
-            "fast_correction_actual_cost",
-        ]
-    )
-    dashboard = client.get("/api/dashboard", **headers).json()["data"]
-    assert dashboard["fast_correction_enabled"] is True
-    assert dashboard["cycle"]["start_cost_breakdown"] == {
-        "sub2api_cost_usd": 0.0,
-        "fast_correction_usd": 0.0,
-        "total_cost_usd": 0.0,
-    }
-    assert dashboard["cycle"]["selected_total_cost_breakdown"] == {
-        "sub2api_cost_usd": 200.0,
-        "fast_correction_usd": 25.0,
-        "total_cost_usd": 225.0,
-    }
-    assert dashboard["cycle"]["model_diagnostics"]["algorithm"] == RATE_METHOD
-
-    statistics = client.get("/api/statistics", **headers).json()["data"]
-    assert statistics["fast_correction_enabled"] is True
-    assert statistics["capacity_summary"]["cycle"]["end_cost_breakdown"] == {
-        "sub2api_cost_usd": 200.0,
-        "fast_correction_usd": 25.0,
-        "total_cost_usd": 225.0,
-    }
-
-    config.fast_correction_enabled = False
-    config.save(update_fields=["fast_correction_enabled"])
-    dashboard_without_breakdown = client.get(
-        "/api/dashboard",
-        **headers,
-    ).json()["data"]
-    statistics_without_breakdown = client.get(
-        "/api/statistics",
-        **headers,
-    ).json()["data"]
-    assert dashboard_without_breakdown["fast_correction_enabled"] is False
-    assert statistics_without_breakdown["fast_correction_enabled"] is False
+    assert response.status_code == 404
+    for observation in observations:
+        observation.refresh_from_db()
+        assert observation.fast_correction_standard_cost is None
+        assert observation.fast_correction_actual_cost is None
+        assert observation.fast_correction_request_count is None

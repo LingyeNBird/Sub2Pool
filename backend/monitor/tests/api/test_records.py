@@ -14,6 +14,7 @@ from django.core.management import call_command
 from django.test import Client
 from django.utils import timezone
 
+from monitor.history_state import LeaseGuard
 from monitor.engine import run_monitor
 from monitor.management.commands.runmonitor import schedule_next_run
 from monitor.models import (
@@ -135,13 +136,38 @@ def test_database_transfer_endpoints_require_admin_and_clear_refresh_on_import(
         "monitor.views.database.export_database_bytes",
         lambda: b"SQLite format 3\x00backup",
     )
-    captured = {}
+    captured = {"staged": [], "imports": []}
 
-    def fake_import(uploaded, size):
-        captured["name"] = uploaded.name
-        captured["size"] = size
+    class FakeStage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback):
+            return None
+
+    def fake_stage(uploaded, size):
+        captured["staged"].append((uploaded.name, size))
+        return FakeStage()
+
+    def fake_import(_staged, *, guard):
+        assert guard.account_id == 0
+        captured["imports"].append(True)
+        captured["writer_status"] = Client().post(
+            "/api/participants",
+            data={
+                "name": "import race",
+                "sub2api_user_id": 99,
+                "share_percent": "10",
+            },
+            content_type="application/json",
+            **headers,
+        ).status_code
         return "pinche.before-import.sqlite3"
 
+    monkeypatch.setattr(
+        "monitor.views.database.stage_database_import",
+        fake_stage,
+    )
     monkeypatch.setattr("monitor.views.database.import_database", fake_import)
 
     unauthorized = Client().get("/api/database/export")
@@ -149,6 +175,27 @@ def test_database_transfer_endpoints_require_admin_and_clear_refresh_on_import(
     exported = client.get("/api/database/export", **headers)
     assert exported.status_code == 200
     assert exported.content.startswith(b"SQLite format 3\x00")
+
+    account_guard = LeaseGuard.acquire(7)
+    try:
+        blocked = client.post(
+            "/api/database/import",
+            data={
+                "database": SimpleUploadedFile(
+                    "blocked.sqlite3",
+                    b"SQLite format 3\x00blocked",
+                    content_type="application/vnd.sqlite3",
+                )
+            },
+            **headers,
+        )
+    finally:
+        account_guard.release()
+    assert blocked.status_code == 409
+    assert captured["staged"] == [
+        ("blocked.sqlite3", len(b"SQLite format 3\x00blocked"))
+    ]
+    assert captured["imports"] == []
 
     imported = client.post(
         "/api/database/import",
@@ -162,6 +209,11 @@ def test_database_transfer_endpoints_require_admin_and_clear_refresh_on_import(
         **headers,
     )
     assert imported.status_code == 200
-    assert captured["name"] == "backup.sqlite3"
-    assert captured["size"] == len(b"SQLite format 3\x00backup")
+    assert captured["staged"][-1] == (
+        "backup.sqlite3",
+        len(b"SQLite format 3\x00backup"),
+    )
+    assert captured["imports"] == [True]
+    assert captured["writer_status"] == 409
+    assert not Participant.objects.filter(sub2api_user_id=99).exists()
     assert imported.cookies["pinche_refresh"]["max-age"] == 0

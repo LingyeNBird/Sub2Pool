@@ -12,9 +12,8 @@ import { useAuthStore } from "@/stores/auth";
 import type {
   AppSettingsData,
   ConfirmDialogOptions,
-  FastCorrectionRebuildResult,
-  HistoricalRebuildPreview,
-  HistoricalRebuildResult,
+  HistoricalRebuildPlan,
+  HistoricalRebuildMode,
   ReadOnlyAPIKeyGenerated,
   OpenAIAccountOption,
 } from "@/types";
@@ -42,11 +41,10 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   const loadingAccounts = ref(false);
   const exportingDatabase = ref(false);
   const importingDatabase = ref(false);
-  const rebuildingFastCorrection = ref(false);
-  const historyRebuildPreview = ref<HistoricalRebuildPreview | null>(null);
-  const checkingHistoricalRebuild = ref(false);
-  const rebuildingHistory = ref(false);
-  const savedFastCorrectionEnabled = ref(true);
+  const historyRebuildPlan = ref<HistoricalRebuildPlan | null>(null);
+  const planningHistory = ref<HistoricalRebuildMode | "">("");
+  const applyingHistory = ref(false);
+  const rollingBackHistory = ref(false);
   const generatingReadOnlyApiKey = ref(false);
   const revokingReadOnlyApiKey = ref(false);
   const passwordForm = reactive<PasswordForm>({
@@ -97,7 +95,6 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     loading.value = true;
     try {
       settings.value = await api<AppSettingsData>("settings");
-      savedFastCorrectionEnabled.value = settings.value.fast_correction_enabled;
       if (settings.value.sub2api_token_configured) {
         await loadOpenAIAccounts(false);
       }
@@ -144,7 +141,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         resendApiKey.value = "";
       }
       if (section === "connection" || section === "allocation") {
-        historyRebuildPreview.value = null;
+        historyRebuildPlan.value = null;
       }
       success.value = `${label}已保存`;
     } catch (error) {
@@ -164,6 +161,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         "openai_account_id",
         "quota_query_mode",
         "request_timeout_seconds",
+        "sub2api_usage_log_query_horizon_days",
         "verify_tls",
         "timezone",
       ],
@@ -199,7 +197,6 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     saving.value = "fast-correction";
     message.value = "";
     success.value = "";
-    const wasEnabled = savedFastCorrectionEnabled.value;
     try {
       const updated = await api<AppSettingsData>("settings", {
         method: "PATCH",
@@ -212,46 +209,15 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         updated.fast_correction_rebuild_recommended;
       settings.value.fast_correction_missing_intervals =
         updated.fast_correction_missing_intervals;
-      savedFastCorrectionEnabled.value = updated.fast_correction_enabled;
-      historyRebuildPreview.value = null;
+      historyRebuildPlan.value = null;
       success.value = "FAST 修正设置已保存";
-      return Boolean(
-        !wasEnabled &&
-        updated.fast_correction_enabled &&
-        updated.fast_correction_rebuild_recommended,
-      );
+      return true;
     } catch (error) {
       message.value =
         error instanceof ApiError ? error.message : "保存 FAST 修正设置失败";
       return false;
     } finally {
       saving.value = "";
-    }
-  }
-
-  async function rebuildFastCorrection(scope: "cycle" | "all") {
-    if (!settings.value) return false;
-    rebuildingFastCorrection.value = true;
-    message.value = "";
-    success.value = "";
-    try {
-      const result = await api<FastCorrectionRebuildResult>(
-        "settings/fast-correction/rebuild",
-        {
-          method: "POST",
-          body: jsonBody({ scope }),
-        },
-      );
-      settings.value.fast_correction_rebuild_recommended = false;
-      settings.value.fast_correction_missing_intervals = 0;
-      success.value = `FAST 修正重建完成：处理 ${result.rebuilt_observations} 个采样区间，识别 ${result.fast_request_count} 条 FAST 请求，补充 ${result.correction_usd.toFixed(2)} 美元等效用量。`;
-      return true;
-    } catch (error) {
-      message.value =
-        error instanceof ApiError ? error.message : "FAST 修正重建失败";
-      return false;
-    } finally {
-      rebuildingFastCorrection.value = false;
     }
   }
 
@@ -346,57 +312,105 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     }
   }
 
-  async function previewHistoricalRebuild() {
-    checkingHistoricalRebuild.value = true;
+  async function createHistoricalRebuildPlan(mode: HistoricalRebuildMode) {
+    planningHistory.value = mode;
     message.value = "";
     success.value = "";
-    historyRebuildPreview.value = null;
+    historyRebuildPlan.value = null;
     try {
-      historyRebuildPreview.value = await api<HistoricalRebuildPreview>(
-        "settings/data-maintenance/history-rebuild-preview",
-        { method: "POST" },
+      const plan = await api<HistoricalRebuildPlan>(
+        "settings/data-maintenance/history-rebuild-plans",
+        { method: "POST", body: jsonBody({ mode }) },
       );
-      const preview = historyRebuildPreview.value;
-      success.value = preview.observation_count
-        ? `检查完成：可从 ${preview.request_log_count} 条请求日志重建 ${preview.observation_count} 条百分比观测和 ${preview.rebuilt_user_samples} 条用户事实。`
-        : "检查完成：尚无百分比观测，不需要重建。";
+      historyRebuildPlan.value = plan;
+      if (plan.state === "ready") {
+        success.value =
+          mode === "audit_replay"
+            ? "本地全点审计完成：计划已冻结，应用阶段不会连接 Sub2API。"
+            : `远端候选计划已冻结：${plan.patch_summary.total} 个 typed patch 可安全应用。`;
+      } else if (plan.state === "blocked") {
+        success.value =
+          "计划已保存但被 coverage 或源事实不变量阻断；系统不会执行不安全覆盖。";
+      } else {
+        success.value = `计划状态：${plan.state}`;
+      }
     } catch (error) {
       message.value =
-        error instanceof ApiError ? error.message : "检查历史数据失败";
+        error instanceof ApiError ? error.message : "创建历史维护计划失败";
     } finally {
-      checkingHistoricalRebuild.value = false;
+      planningHistory.value = "";
     }
   }
 
-  async function rebuildHistoricalData() {
-    if (!historyRebuildPreview.value?.can_rebuild) return;
+  async function applyHistoricalRebuildPlan() {
+    const plan = historyRebuildPlan.value;
+    if (!plan?.safe_to_apply) return;
     if (
       !(await confirmAction({
-        title: "从 Sub2API 重建全部历史？",
+        title: "应用已冻结的历史维护计划？",
         message:
-          "系统将重新读取请求日志，并覆盖历史成本、逐用户用量、FAST 修正及全部派生结果。仅保留无法从日志恢复的上游百分比及采样边界、管理操作和历史余额。建议先导出数据库备份。",
-        confirmLabel: "开始重建",
+          "系统只消费当前 plan id 与 digest，应用阶段不会访问 Sub2API。源事实会按 typed patch 原子更新并确定性重放；成功后可按维护栈逆序业务回滚。",
+        confirmLabel: "应用计划",
         tone: "warning",
       }))
     ) {
       return;
     }
-    rebuildingHistory.value = true;
+    applyingHistory.value = true;
     message.value = "";
     success.value = "";
     try {
-      const result = await api<HistoricalRebuildResult>(
-        "settings/data-maintenance/history-rebuild",
+      historyRebuildPlan.value = await api<HistoricalRebuildPlan>(
+        `settings/data-maintenance/history-rebuild-plans/${plan.id}/apply`,
+        { method: "POST", body: jsonBody({ digest: plan.digest }) },
+      );
+      const replay = historyRebuildPlan.value.patch_summary.replay;
+      success.value = replay
+        ? `计划已应用：重放 ${replay.rebuilt_observations} 条观测，fact revision 为 ${historyRebuildPlan.value.result_revision}。`
+        : "计划已应用。";
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "应用历史维护计划失败";
+      try {
+        historyRebuildPlan.value = await api<HistoricalRebuildPlan>(
+          `settings/data-maintenance/history-rebuild-plans/${plan.id}`,
+        );
+      } catch {
+        historyRebuildPlan.value = null;
+      }
+    } finally {
+      applyingHistory.value = false;
+    }
+  }
+
+  async function rollbackHistoricalRebuildPlan() {
+    const plan = historyRebuildPlan.value;
+    if (!plan?.can_rollback) return;
+    if (
+      !(await confirmAction({
+        title: "回滚最近一次历史维护？",
+        message:
+          "只恢复本次 touched source before-image，并使用同版本算法重放；cutoff 后新增采样会保留，不承诺字节级数据库还原。",
+        confirmLabel: "业务回滚",
+        tone: "warning",
+      }))
+    ) {
+      return;
+    }
+    rollingBackHistory.value = true;
+    message.value = "";
+    success.value = "";
+    try {
+      historyRebuildPlan.value = await api<HistoricalRebuildPlan>(
+        `settings/data-maintenance/history-rebuild-plans/${plan.id}/rollback`,
         { method: "POST" },
       );
-      historyRebuildPreview.value = null;
-      success.value = `历史重建完成：重取 ${result.rebuilt_user_samples} 条用户事实、${result.rebuilt_participant_samples} 条参与者趋势，重放 ${result.replayed_observations} 条观测。`;
+      success.value = `业务回滚完成，fact revision 为 ${historyRebuildPlan.value.rollback_revision}。`;
     } catch (error) {
-      historyRebuildPreview.value = null;
       message.value =
-        error instanceof ApiError ? error.message : "历史数据重建失败";
+        error instanceof ApiError ? error.message : "业务回滚失败";
     } finally {
-      rebuildingHistory.value = false;
+      rollingBackHistory.value = false;
     }
   }
 
@@ -507,10 +521,10 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     loadingAccounts,
     exportingDatabase,
     importingDatabase,
-    rebuildingFastCorrection,
-    historyRebuildPreview,
-    checkingHistoricalRebuild,
-    rebuildingHistory,
+    historyRebuildPlan,
+    planningHistory,
+    applyingHistory,
+    rollingBackHistory,
     generatingReadOnlyApiKey,
     revokingReadOnlyApiKey,
     passwordForm,
@@ -523,9 +537,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     exportDatabase,
     importDatabase,
     saveFastCorrection,
-    rebuildFastCorrection,
-    previewHistoricalRebuild,
-    rebuildHistoricalData,
+    createHistoricalRebuildPlan,
+    applyHistoricalRebuildPlan,
+    rollbackHistoricalRebuildPlan,
     test,
     changePassword,
     generateReadOnlyApiKey,

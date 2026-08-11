@@ -11,10 +11,15 @@ import os
 import sqlite3
 import tempfile
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
+import uuid
 
 from django.db import connection, connections
 from django.db.migrations.loader import MigrationLoader
+from django.utils import timezone
+
+if TYPE_CHECKING:
+    from .history_state import LeaseGuard
 
 
 MAX_IMPORT_BYTES = 512 * 1024 * 1024
@@ -26,9 +31,31 @@ REQUIRED_TABLES = {
     "monitor_observation",
 }
 
+PENDING_BALANCE_STATES = {
+    "prepared",
+    "reconciliation_required",
+    "remote_confirmed",
+}
+
 
 class DatabaseTransferError(RuntimeError):
     """可安全展示给管理员的数据库迁移错误。"""
+
+
+class StagedDatabaseImport:
+    """Validated upload copy that has not touched the live database."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    def __enter__(self) -> "StagedDatabaseImport":
+        return self
+
+    def __exit__(self, _exc_type, _exc, _traceback) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self.path.unlink(missing_ok=True)
 
 
 def _database_path() -> Path:
@@ -66,6 +93,55 @@ def _expected_leaf_migrations() -> set[tuple[str, str]]:
     return set(loader.graph.leaf_nodes())
 
 
+
+
+def _reject_unfinished_balance_operations(
+    source: sqlite3.Connection,
+) -> None:
+    try:
+        rows = list(
+            source.execute(
+                """
+                SELECT id, state, account_id
+                FROM monitor_participantbalanceoperation
+                WHERE state <> 'committed' OR state IS NULL
+                ORDER BY created_at, id
+                LIMIT 21
+                """
+            )
+        )
+    except sqlite3.DatabaseError as exc:
+        raise DatabaseTransferError(
+            "备份的余额操作表缺失或损坏，无法安全导入"
+        ) from exc
+    if not rows:
+        return
+
+    diagnostics = []
+    for raw_id, raw_state, raw_account_id in rows[:20]:
+        try:
+            operation_id = str(uuid.UUID(str(raw_id)))
+        except (AttributeError, TypeError, ValueError):
+            operation_id = "<无效 UUID>"
+        state = (
+            str(raw_state)
+            if raw_state in PENDING_BALANCE_STATES
+            else "<无效状态>"
+        )
+        try:
+            account_id = str(int(raw_account_id))
+        except (TypeError, ValueError):
+            account_id = "<无效账号>"
+        diagnostics.append(
+            f"{operation_id}（状态 {state}，账号 {account_id}）"
+        )
+    suffix = "；另有未列出的操作" if len(rows) > 20 else ""
+    raise DatabaseTransferError(
+        "备份包含未完成的上游余额操作，已拒绝导入；"
+        "请先在来源系统完成对账后重新导出："
+        + "、".join(diagnostics)
+        + suffix
+    )
 def _validate_source(source: sqlite3.Connection) -> None:
     integrity_rows = [row[0] for row in source.execute("PRAGMA integrity_check")]
     if integrity_rows != ["ok"]:
@@ -94,21 +170,71 @@ def _validate_source(source: sqlite3.Connection) -> None:
         raise DatabaseTransferError(
             f"备份版本早于当前程序，缺少迁移：{versions}；请先用对应旧版本恢复后再升级"
         )
+    _reject_unfinished_balance_operations(source)
 
 
-def import_database(uploaded_file: BinaryIO, uploaded_size: int) -> str:
-    """校验并覆盖当前数据库，返回覆盖前恢复副本的文件名。"""
+def _install_import_guard(
+    source: sqlite3.Connection,
+    guard: "LeaseGuard",
+) -> int:
+    if guard.account_id != 0:
+        raise DatabaseTransferError("数据库导入必须持有全局 fencing 租约")
+    source.execute(
+        """
+        UPDATE monitor_historymaintenancestate
+        SET lease_owner = NULL, lease_expires_at = NULL
+        """
+    )
+    row = source.execute(
+        """
+        SELECT fence_token
+        FROM monitor_historymaintenancestate
+        WHERE account_id = 0
+        """
+    ).fetchone()
+    staged_token = max(int(row[0]) if row else 0, guard.token) + 1
+    now = timezone.now().isoformat(sep=" ")
+    source.execute(
+        """
+        INSERT INTO monitor_historymaintenancestate (
+            account_id,
+            fact_revision,
+            fence_token,
+            lease_owner,
+            lease_expires_at,
+            updated_at
+        )
+        VALUES (0, 0, ?, ?, ?, ?)
+        ON CONFLICT(account_id) DO UPDATE SET
+            fence_token = excluded.fence_token,
+            lease_owner = excluded.lease_owner,
+            lease_expires_at = excluded.lease_expires_at,
+            updated_at = excluded.updated_at
+        """,
+        (
+            staged_token,
+            guard.owner.hex,
+            guard.expires_at.isoformat(sep=" "),
+            now,
+        ),
+    )
+    source.commit()
+    return staged_token
+
+
+def stage_database_import(
+    uploaded_file: BinaryIO,
+    uploaded_size: int,
+) -> StagedDatabaseImport:
+    """Copy and validate an upload before acquiring any live database lease."""
     if uploaded_size <= 0:
         raise DatabaseTransferError("请选择非空的 SQLite 备份文件")
     if uploaded_size > MAX_IMPORT_BYTES:
         raise DatabaseTransferError("数据库备份不能超过 512 MiB")
 
-    database_path = _database_path()
     descriptor, temporary_name = tempfile.mkstemp(suffix=".sqlite3")
     os.close(descriptor)
     temporary_path = Path(temporary_name)
-    recovery_path = database_path.with_name("pinche.before-import.sqlite3")
-
     try:
         written = 0
         with temporary_path.open("wb") as destination:
@@ -120,7 +246,9 @@ def import_database(uploaded_file: BinaryIO, uploaded_size: int) -> str:
             for chunk in chunks:
                 written += len(chunk)
                 if written > MAX_IMPORT_BYTES:
-                    raise DatabaseTransferError("数据库备份不能超过 512 MiB")
+                    raise DatabaseTransferError(
+                        "数据库备份不能超过 512 MiB"
+                    )
                 destination.write(chunk)
 
         with temporary_path.open("rb") as uploaded:
@@ -129,13 +257,34 @@ def import_database(uploaded_file: BinaryIO, uploaded_size: int) -> str:
 
         with closing(sqlite3.connect(temporary_path, timeout=30)) as source:
             _validate_source(source)
+        return StagedDatabaseImport(temporary_path)
+    except sqlite3.DatabaseError as exc:
+        temporary_path.unlink(missing_ok=True)
+        raise DatabaseTransferError(f"SQLite 备份处理失败：{exc}") from exc
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def import_database(
+    staged: StagedDatabaseImport,
+    *,
+    guard: "LeaseGuard",
+) -> str:
+    """Replace SQLite from a validated stage while carrying the global fence."""
+    database_path = _database_path()
+    recovery_path = database_path.with_name("pinche.before-import.sqlite3")
+
+    try:
+        with closing(sqlite3.connect(staged.path, timeout=30)) as source:
+            staged_guard_token = _install_import_guard(source, guard)
 
         # 关闭当前 Web 进程中的 Django 连接，再用 SQLite Backup API 复制页面。
         # run_lease 由调用方持有，后台采集进程在导入完成前不会开始新任务。
         connections.close_all()
         _backup_to(database_path, recovery_path)
         try:
-            with closing(sqlite3.connect(temporary_path, timeout=30)) as source:
+            with closing(sqlite3.connect(staged.path, timeout=30)) as source:
                 with closing(
                     sqlite3.connect(database_path, timeout=30)
                 ) as target:
@@ -152,9 +301,8 @@ def import_database(uploaded_file: BinaryIO, uploaded_size: int) -> str:
             raise
         finally:
             connections.close_all()
+        guard.token = staged_guard_token
     except sqlite3.DatabaseError as exc:
         raise DatabaseTransferError(f"SQLite 备份处理失败：{exc}") from exc
-    finally:
-        temporary_path.unlink(missing_ok=True)
 
     return recovery_path.name

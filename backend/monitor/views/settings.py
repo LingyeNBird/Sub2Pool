@@ -1,4 +1,5 @@
 """系统业务设置与连接测试 API。"""
+from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
@@ -7,6 +8,7 @@ from ..api_auth import generate_readonly_api_key
 from rest_framework.serializers import ValidationError
 from .base import AdminAPIView, error, ok
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
+from ..history_state import LeaseLostError, fenced_fact_write
 from ..models import AppSettings, Observation
 from ..notifications import send_notification
 from ..replay import rebuild_account
@@ -19,6 +21,21 @@ DERIVED_RESULT_SETTINGS = frozenset(
         "safety_factor",
         "limit_warning_usd",
         "recommendation_change_usd",
+    }
+)
+PLAN_RELEVANT_SETTINGS = frozenset(
+    {
+        "openai_account_id",
+        "sub2api_base_url",
+        "quota_query_mode",
+        "timezone",
+        "cost_basis",
+        "weekly_quota_model",
+        "fast_correction_enabled",
+        "initial_usd_per_percent",
+        "safety_factor",
+        "daily_estimate_min_percent_span",
+        "sub2api_usage_log_query_horizon_days",
     }
 )
 
@@ -45,6 +62,7 @@ class SettingsView(AdminAPIView):
 
     def patch(self, request):
         config = AppSettings.load()
+        original_account_id = config.openai_account_id
         serializer = AppSettingsSerializer(
             config,
             data=request.data,
@@ -58,17 +76,57 @@ class SettingsView(AdminAPIView):
             if field in serializer.validated_data
             and getattr(config, field) != serializer.validated_data[field]
         }
+        changed_plan_settings = {
+            field
+            for field in PLAN_RELEVANT_SETTINGS
+            if field in serializer.validated_data
+            and getattr(config, field) != serializer.validated_data[field]
+        }
+        derived_account_ids = (
+            set(
+                Observation.objects.order_by()
+                .values_list("account_id", flat=True)
+                .distinct()
+            )
+            if changed_derived_settings
+            else set()
+        )
+        plan_account_ids = (
+            {
+                account_id
+                for account_id in (
+                    original_account_id,
+                    serializer.validated_data.get(
+                        "openai_account_id",
+                        original_account_id,
+                    ),
+                )
+                if account_id
+            }
+            if changed_plan_settings
+            else set()
+        )
+        affected_account_ids = derived_account_ids | plan_account_ids
         try:
-            with transaction.atomic():
-                config = serializer.save()
-                if changed_derived_settings:
-                    account_ids = (
-                        Observation.objects.order_by()
-                        .values_list("account_id", flat=True)
-                        .distinct()
+            with fenced_fact_write(
+                affected_account_ids,
+                ttl=timedelta(minutes=30),
+            ) as guards:
+                locked_config = AppSettings.objects.select_for_update().get(
+                    pk=config.pk
+                )
+                if locked_config.updated_at != config.updated_at:
+                    raise LeaseLostError(
+                        "系统设置已被其他请求修改，请刷新后重试"
                     )
-                    for account_id in account_ids:
-                        rebuild_account(account_id, config)
+                serializer.instance = locked_config
+                config = serializer.save()
+                for account_id in derived_account_ids:
+                    rebuild_account(
+                        account_id,
+                        config,
+                        guard=guards[account_id],
+                    )
         except ValidationError as exc:
             return error("设置校验失败", details=exc.detail)
         except ValueError as exc:
