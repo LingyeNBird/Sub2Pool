@@ -5,6 +5,7 @@ import { useRoute } from "vue-router";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConstantAverageAlgorithmTutorial from "./tutorial/components/ConstantAverageAlgorithmTutorial.vue";
 import ParticleFilterAlgorithmTutorial from "./tutorial/components/ParticleFilterAlgorithmTutorial.vue";
+import TutorialCodeBlock from "./tutorial/components/TutorialCodeBlock.vue";
 
 import { tutorialPages, type TutorialNoteTone } from "./tutorial/tutorialPages";
 
@@ -100,10 +101,11 @@ watch(activePageId, async () => {
           <section
             v-for="section in activePage.sections"
             :key="section.title"
-            class="py-7 first:pt-7"
+            class="flex flex-col items-stretch py-7 first:pt-7"
           >
-            <h3 class="text-lg font-semibold">{{ section.title }}</h3>
-
+            <h3 class="text-lg font-semibold [overflow-wrap:anywhere]">
+              {{ section.title }}
+            </h3>
             <div
               v-if="section.paragraphs"
               class="mt-4 max-w-4xl space-y-3 text-sm leading-7 opacity-75"
@@ -137,23 +139,16 @@ watch(activePageId, async () => {
               </li>
             </ul>
 
-            <div v-if="section.codeBlocks" class="mt-5 max-w-4xl space-y-4">
-              <figure
+            <div
+              v-if="section.codeBlocks"
+              class="mt-5 flex w-full flex-col gap-4"
+              :class="{ 'max-w-4xl': activePage.id !== 'readonly-api' }"
+            >
+              <TutorialCodeBlock
                 v-for="block in section.codeBlocks"
                 :key="`${block.title ?? ''}:${block.code}`"
-                class="overflow-hidden rounded-box border border-base-300 bg-base-100"
-              >
-                <figcaption
-                  v-if="block.title"
-                  class="border-b border-base-300 px-4 py-2 text-xs font-semibold opacity-60"
-                >
-                  {{ block.title }}
-                </figcaption>
-                <pre
-                  class="overflow-x-auto p-4 text-xs leading-6"
-                  :data-language="block.language"
-                ><code>{{ block.code }}</code></pre>
-              </figure>
+                :block="block"
+              />
             </div>
             <div
               v-for="note in section.notes"
