@@ -60,9 +60,14 @@ def _trajectory_periods(account_id: int) -> list[dict]:
         period["observation_count"] += 1
 
     periods = list(grouped.values())
-    for index, period in enumerate(periods, start=1):
-        period["sequence"] = index
-        period["is_current"] = index == len(periods)
+    for index, period in enumerate(periods):
+        period["sequence"] = index + 1
+        period["is_current"] = index == len(periods) - 1
+        period["ended_at"] = (
+            periods[index + 1]["started_at"]
+            if index + 1 < len(periods)
+            else period["resets_at"]
+        )
     return periods
 
 
@@ -281,6 +286,7 @@ def particle_trajectory_data(
                 "first_observed_at": iso(period["first_observed_at"]),
                 "last_observed_at": iso(period["last_observed_at"]),
                 "resets_at": iso(period["resets_at"]),
+                "ended_at": iso(period["ended_at"]),
                 "observation_count": period["observation_count"],
                 "is_current": period["is_current"],
             }

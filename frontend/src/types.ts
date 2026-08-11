@@ -638,6 +638,7 @@ export interface ParticleTrajectoryPeriod {
   first_observed_at: string;
   last_observed_at: string;
   resets_at: string;
+  ended_at: string;
   observation_count: number;
   is_current: boolean;
 }

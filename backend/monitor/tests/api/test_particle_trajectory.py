@@ -80,6 +80,7 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
             "first_observed_at": first.observed_at.isoformat(),
             "last_observed_at": second.observed_at.isoformat(),
             "resets_at": resets_at.isoformat(),
+            "ended_at": resets_at.isoformat(),
             "observation_count": 2,
             "is_current": True,
         }
@@ -199,6 +200,58 @@ def test_particle_trajectory_selects_historical_period():
     )
     assert invalid_response.status_code == 400
     assert invalid_response.json()["message"] == "所选历史周期不存在"
+
+
+@pytest.mark.django_db
+def test_particle_trajectory_periods_end_at_the_next_segment_boundary():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save(update_fields=["openai_account_id"])
+
+    first_start = (timezone.now() - timedelta(days=21)).replace(microsecond=0)
+    raw_windows = [
+        (first_start, first_start + timedelta(days=7)),
+        (first_start + timedelta(days=5), first_start + timedelta(days=12)),
+        (first_start + timedelta(days=7), first_start + timedelta(days=14)),
+    ]
+    for index, (observed_at, resets_at) in enumerate(raw_windows):
+        Observation.objects.create(
+            account_id=7,
+            source="scheduled",
+            observed_at=observed_at,
+            window_seconds=604800,
+            upstream_resets_at=resets_at,
+            upstream_used_percent=Decimal("0"),
+            raw_selected_total_cost=Decimal(index * 100),
+            selected_total_cost=Decimal(index * 100),
+            total_standard_cost=Decimal(index * 100),
+            total_actual_cost=Decimal(index * 100),
+            effective_usd_per_percent=Decimal("16"),
+        )
+    rebuild_account(7, config)
+
+    client = Client()
+    headers, _ = jwt_login(client)
+    response = client.get("/api/particle-trajectory", **headers)
+
+    assert response.status_code == 200
+    periods = response.json()["data"]["periods"]
+    assert [period["started_at"] for period in periods] == [
+        started_at.isoformat() for started_at, _ in raw_windows
+    ]
+    assert [period["resets_at"] for period in periods] == [
+        resets_at.isoformat() for _, resets_at in raw_windows
+    ]
+    assert [period["ended_at"] for period in periods] == [
+        raw_windows[1][0].isoformat(),
+        raw_windows[2][0].isoformat(),
+        raw_windows[2][1].isoformat(),
+    ]
 
 
 @pytest.mark.django_db
