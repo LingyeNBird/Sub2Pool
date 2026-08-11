@@ -127,6 +127,31 @@ def _compare_snapshot_delta(
     return conflict, standard_gap, actual_gap, False
 
 
+def _compare_coordinate_snapshot(
+    observation: Observation,
+    prefix: _Prefix,
+) -> tuple[bool, Decimal, Decimal]:
+    """Verify a changed cumulative coordinate against its recorded query window."""
+
+    if observation.cost_window_started_at is None:
+        return (
+            True,
+            abs(observation.total_standard_cost),
+            abs(observation.total_actual_cost),
+        )
+    window_standard, window_actual = prefix.between(
+        observation.cost_window_started_at,
+        observation.cost_window_ended_at or observation.observed_at,
+    )
+    standard_gap = abs(observation.total_standard_cost - window_standard)
+    actual_gap = abs(observation.total_actual_cost - window_actual)
+    conflict = (
+        standard_gap > _tolerance(observation.total_standard_cost)
+        or actual_gap > _tolerance(observation.total_actual_cost)
+    )
+    return conflict, standard_gap, actual_gap
+
+
 def inspect_cost_history(config: AppSettings) -> CostHistoryRepairPlan:
     """Read logs and prepare interval facts without changing the database."""
 
@@ -225,6 +250,13 @@ def inspect_cost_history(config: AppSettings) -> CostHistoryRepairPlan:
                     actual,
                 )
             )
+            if changed:
+                conflict, standard_gap, actual_gap = (
+                    _compare_coordinate_snapshot(
+                        observation,
+                        total_prefix,
+                    )
+                )
             conflicts += int(conflict)
             coordinate_changes += int(changed)
             max_standard_gap = max(max_standard_gap, standard_gap)

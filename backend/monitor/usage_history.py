@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.db import transaction
 
+from .accounting.boundaries import same_official_reset
 from .integrations.sub2api import Sub2APIClient, Sub2APIUsageLog
 from .models import AppSettings, Observation, Sub2APIUserUsageSample
 from .replay import rebuild_account
@@ -210,6 +211,7 @@ def inspect_historical_user_usage(
     max_actual_gap = ZERO
     missing_samples = 0
     log_user_ids = sorted(prefixes)
+    previous_by_user: dict[int, Sub2APIUserUsageSample] = {}
 
     for observation in observations:
         segment = _segment_key(observation)
@@ -220,9 +222,7 @@ def inspect_historical_user_usage(
             for user_id, row in known.items()
         }
         stats_start = _statistics_start(observation, location)
-        window_start = observation.upstream_resets_at - timedelta(
-            seconds=observation.window_seconds
-        )
+
 
         for user_id in log_user_ids:
             standard, actual = prefixes[user_id].between(
@@ -230,23 +230,45 @@ def inspect_historical_user_usage(
                 observation.observed_at,
             )
             if user_id in known:
+                previous_by_user[user_id] = known[user_id]
                 continue
             missing_samples += 1
             totals_by_user[user_id] = (standard, actual)
             username, email = metadata.get(user_id, ("", ""))
-            candidates_by_segment[segment].append(
-                Sub2APIUserUsageSample(
-                    account_id=account_id,
-                    sub2api_user_id=user_id,
-                    username=username,
-                    email=email,
-                    observed_at=observation.observed_at,
-                    window_started_at=window_start,
-                    window_resets_at=observation.upstream_resets_at,
-                    total_standard_cost=standard,
-                    total_actual_cost=actual,
+            previous = previous_by_user.get(user_id)
+            if previous is None or not same_official_reset(
+                previous.window_resets_at,
+                observation.upstream_resets_at,
+            ):
+                interval_start = stats_start
+                interval_standard = standard
+                interval_actual = actual
+                interval_source = "window_total"
+            else:
+                interval_start = previous.observed_at
+                interval_standard, interval_actual = prefixes[user_id].between(
+                    previous.observed_at,
+                    observation.observed_at,
                 )
+                interval_source = "historical_logs"
+            candidate = Sub2APIUserUsageSample(
+                account_id=account_id,
+                sub2api_user_id=user_id,
+                username=username,
+                email=email,
+                observed_at=observation.observed_at,
+                window_started_at=stats_start,
+                window_ended_at=observation.observed_at,
+                window_resets_at=observation.upstream_resets_at,
+                total_standard_cost=standard,
+                total_actual_cost=actual,
+                interval_started_at=interval_start,
+                interval_standard_cost=interval_standard,
+                interval_actual_cost=interval_actual,
+                interval_source=interval_source,
             )
+            candidates_by_segment[segment].append(candidate)
+            previous_by_user[user_id] = candidate
 
         standard_total = sum(
             (value[0] for value in totals_by_user.values()),

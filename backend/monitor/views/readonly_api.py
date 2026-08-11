@@ -497,7 +497,7 @@ def _openapi_document() -> dict:
                         "minimum_usd": {"type": "number"},
                         "maximum_usd": {"type": "number"},
                         "sample_count": {"type": "integer"},
-                        "basis": {"type": "object"},
+                        "basis": _nullable("object"),
                         "daily_total_usd": nullable_number,
                         "daily_basis": {
                             "oneOf": [{"type": "object"}, {"type": "null"}]
@@ -582,7 +582,7 @@ def _openapi_document() -> dict:
                         "weekly_quota_percent",
                     ],
                     "properties": {
-                        "api_key_id": {"type": "integer"},
+                        "api_key_id": _nullable("integer"),
                         "name": {"type": "string"},
                         "status": {"type": "string"},
                         "usage_usd": {"type": "number"},

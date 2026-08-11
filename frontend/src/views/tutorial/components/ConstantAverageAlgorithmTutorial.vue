@@ -52,20 +52,32 @@ function inputValue(event: Event): number {
   return Number((event.currentTarget as HTMLInputElement).value);
 }
 
+function syncInputValue(event: Event, value: number) {
+  (event.currentTarget as HTMLInputElement).value = String(value);
+}
+
 function updateStartCost(event: Event) {
-  startCost.value = Math.min(inputValue(event), endCost.value - 20);
+  const value = Math.min(inputValue(event), endCost.value - 20);
+  startCost.value = value;
+  syncInputValue(event, value);
 }
 
 function updateEndCost(event: Event) {
-  endCost.value = Math.max(inputValue(event), startCost.value + 20);
+  const value = Math.max(inputValue(event), startCost.value + 20);
+  endCost.value = value;
+  syncInputValue(event, value);
 }
 
 function updateStartPercent(event: Event) {
-  startPercent.value = Math.min(inputValue(event), endPercent.value - 2);
+  const value = Math.min(inputValue(event), endPercent.value - 2);
+  startPercent.value = value;
+  syncInputValue(event, value);
 }
 
 function updateEndPercent(event: Event) {
-  endPercent.value = Math.max(inputValue(event), startPercent.value + 2);
+  const value = Math.max(inputValue(event), startPercent.value + 2);
+  endPercent.value = value;
+  syncInputValue(event, value);
 }
 
 function formatUsd(value: number): string {

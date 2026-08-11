@@ -69,7 +69,15 @@ def test_readonly_api_key_lifecycle_and_scope():
                 "usage_usd": 120.0,
                 "participant_usage_percent": 100.0,
                 "weekly_quota_percent": 6.0,
-            }
+            },
+            {
+                "api_key_id": None,
+                "name": "未识别或已删除的 API 密钥",
+                "status": "",
+                "usage_usd": 0.0,
+                "participant_usage_percent": 0.0,
+                "weekly_quota_percent": 0.0,
+            },
         ],
     )
 
@@ -129,6 +137,15 @@ def test_readonly_api_key_lifecycle_and_scope():
         openapi["components"]["securitySchemes"]["ReadOnlyApiKey"]["scheme"]
         == "bearer"
     )
+    schemas = openapi["components"]["schemas"]
+    assert schemas["CapacityPoint"]["properties"]["basis"]["type"] == [
+        "object",
+        "null",
+    ]
+    assert schemas["ApiKeyUsage"]["properties"]["api_key_id"]["type"] == [
+        "integer",
+        "null",
+    ]
 
     participants = client.get("/api/v1/participants", **api_headers)
     assert participants.status_code == 200
@@ -141,6 +158,13 @@ def test_readonly_api_key_lifecycle_and_scope():
     )
     assert statistics.status_code == 200
     assert statistics.json()["data"]["capacity_period"] == "day"
+    monthly_statistics = client.get(
+        "/api/v1/statistics?capacity_period=month&capacity_days=365",
+        **api_headers,
+    )
+    assert monthly_statistics.status_code == 200
+    monthly_points = monthly_statistics.json()["data"]["capacity_series"]
+    assert monthly_points[0]["basis"] is None
 
     api_usage = client.get(
         f"/api/v1/statistics/participants/{participant.id}/api-usage",
@@ -148,6 +172,7 @@ def test_readonly_api_key_lifecycle_and_scope():
     )
     assert api_usage.status_code == 200
     assert api_usage.json()["data"]["participant_total_usd"] == 120.0
+    assert api_usage.json()["data"]["api_keys"][1]["api_key_id"] is None
 
     assert client.post("/api/v1/participants", **api_headers).status_code == 405
     assert (

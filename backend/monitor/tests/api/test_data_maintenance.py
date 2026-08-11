@@ -211,6 +211,32 @@ def test_history_preview_is_read_only_and_backfill_replays_all(
         Decimal("80"),
         Decimal("70"),
     ]
+    first_rows = Sub2APIUserUsageSample.objects.filter(
+        observed_at=observations[0].observed_at
+    ).order_by("sub2api_user_id")
+    assert all(
+        row.window_ended_at == observations[0].observed_at
+        for row in first_rows
+    )
+    assert all(row.interval_source == "window_total" for row in first_rows)
+    assert [
+        row.interval_actual_cost for row in first_rows
+    ] == [Decimal("60"), Decimal("40")]
+    assert all(
+        row.window_ended_at == observations[-1].observed_at
+        for row in latest_rows
+    )
+    assert all(
+        row.interval_started_at == observations[0].observed_at
+        for row in latest_rows
+    )
+    assert [
+        row.interval_actual_cost for row in latest_rows
+    ] == [Decimal("20"), Decimal("30")]
+    assert all(
+        row.interval_source == "historical_logs" for row in latest_rows
+    )
+    assert all(row.window_started_at is not None for row in latest_rows)
 
 
 @pytest.mark.django_db
@@ -286,13 +312,20 @@ def test_cost_history_repair_preserves_raw_totals_and_bridges_false_reset(
     )
     now = timezone.now().replace(microsecond=0)
     reset_at = now + timedelta(days=3)
+    first_window_start = now - timedelta(days=7)
+    current_window_start = now - timedelta(hours=4)
     rows = (
         (now - timedelta(hours=3), Decimal("47"), Decimal("1217")),
         (now - timedelta(hours=2), Decimal("18"), Decimal("361")),
         (now - timedelta(hours=1), Decimal("49"), Decimal("379")),
     )
     observations = []
-    for observed_at, used_percent, raw_total in rows:
+    query_starts = (
+        first_window_start,
+        current_window_start,
+        current_window_start,
+    )
+    for index, (observed_at, used_percent, raw_total) in enumerate(rows):
         observation = Observation.objects.create(
             account_id=7,
             source="manual",
@@ -300,6 +333,8 @@ def test_cost_history_repair_preserves_raw_totals_and_bridges_false_reset(
             window_seconds=604800,
             upstream_resets_at=reset_at,
             upstream_used_percent=used_percent,
+            cost_window_started_at=query_starts[index],
+            cost_window_ended_at=observed_at,
             raw_selected_total_cost=raw_total,
             selected_total_cost=raw_total,
             total_standard_cost=raw_total,
@@ -317,16 +352,35 @@ def test_cost_history_repair_preserves_raw_totals_and_bridges_false_reset(
             account_id=7,
             sub2api_user_id=11,
             observed_at=observed_at,
-            window_started_at=None,
+            window_started_at=query_starts[index],
+            window_ended_at=observed_at,
             window_resets_at=reset_at,
             total_standard_cost=raw_total,
             total_actual_cost=raw_total,
         )
         observations.append(observation)
 
-    logs = [
+    complete_logs = [
         Sub2APIUsageLog(
             1,
+            11,
+            7,
+            now - timedelta(hours=5),
+            "",
+            Decimal("868"),
+            Decimal("868"),
+        ),
+        Sub2APIUsageLog(
+            2,
+            11,
+            7,
+            now - timedelta(hours=3, minutes=30),
+            "",
+            Decimal("349"),
+            Decimal("349"),
+        ),
+        Sub2APIUsageLog(
+            3,
             11,
             7,
             rows[0][0] + timedelta(minutes=30),
@@ -335,7 +389,7 @@ def test_cost_history_repair_preserves_raw_totals_and_bridges_false_reset(
             Decimal("12"),
         ),
         Sub2APIUsageLog(
-            2,
+            4,
             11,
             7,
             rows[1][0] + timedelta(minutes=30),
@@ -344,6 +398,7 @@ def test_cost_history_repair_preserves_raw_totals_and_bridges_false_reset(
             Decimal("18"),
         ),
     ]
+    logs = [complete_logs[0], complete_logs[1], complete_logs[3]]
 
     class FakeClient:
         def __init__(self, _config):
@@ -364,6 +419,17 @@ def test_cost_history_repair_preserves_raw_totals_and_bridges_false_reset(
         "/api/settings/data-maintenance/cost-history-preview"
     )
     assert unauthorized.status_code == 401
+
+    incomplete_preview = client.post(
+        "/api/settings/data-maintenance/cost-history-preview",
+        **headers,
+    )
+    assert incomplete_preview.status_code == 200
+    incomplete_data = incomplete_preview.json()["data"]
+    assert incomplete_data["snapshot_conflicts"] == 1
+    assert incomplete_data["can_repair"] is False
+
+    logs = complete_logs
 
     preview = client.post(
         "/api/settings/data-maintenance/cost-history-preview",
