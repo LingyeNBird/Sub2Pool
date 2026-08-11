@@ -488,7 +488,7 @@ export const tutorialGroups: TutorialGroup[] = [
             title: "认证与响应格式",
             paragraphs: [
               "每次请求都把完整 Key 放入标准 HTTP Authorization 请求头，认证方案为 Bearer。外部接口统一位于 /api/v1 下，并且只允许 GET、HEAD 和 OPTIONS。",
-              '成功响应固定为 { ok: true, data: ... }。失败响应固定为 { ok: false, message: "..." }，字段校验失败时还可能包含 details。',
+              '业务数据接口和 /api/v1 索引使用 { ok: true, data: ... } 响应；/api/v1/openapi.json 直接返回标准 OpenAPI 文档。失败响应使用 { ok: false, message: "..." }，字段校验失败时还可能包含 details。',
             ],
             codeBlocks: [
               {
@@ -508,6 +508,37 @@ export const tutorialGroups: TutorialGroup[] = [
 405  该只读端点不允许写入
 409  尚未形成当前上游周期或尚未配置上游账号
 502  读取 Sub2API 数据失败`,
+              },
+            ],
+          },
+          {
+            title: "从接口读取文档",
+            paragraphs: [
+              "GET /api/v1 返回 API 名称、版本、认证方式、数据端点索引和 OpenAPI 文档地址。它适合程序先发现当前版本支持的只读能力。",
+              "GET /api/v1/openapi.json 返回原始 OpenAPI 3.1 文档，可下载后导入 Postman、Apifox、Insomnia 或代码生成工具。这两个文档端点使用同一枚 Bearer API Key，不需要先登录网页。",
+            ],
+            codeBlocks: [
+              {
+                title: "读取端点索引",
+                language: "bash",
+                code: `curl --request GET \\
+  --url https://sub2pool.example.com/api/v1 \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey'`,
+              },
+              {
+                title: "下载 OpenAPI 3.1 文档",
+                language: "bash",
+                code: `curl --request GET \\
+  --url https://sub2pool.example.com/api/v1/openapi.json \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey' \\
+  --output sub2pool-openapi.json`,
+              },
+            ],
+            notes: [
+              {
+                tone: "info",
+                title: "文档也受只读 Key 保护",
+                text: "没有有效 API Key 时，索引和 OpenAPI 文档都会返回 401；它们不会向匿名访问者公开你的接口结构。",
               },
             ],
           },

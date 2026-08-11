@@ -30,6 +30,7 @@ from .views.participants import (
 )
 from .views.particle_trajectory import ParticleTrajectoryView
 from .views.public import AuthClientConfigView, HealthView
+from .views.readonly_api import ReadOnlyAPIRootView, ReadOnlyOpenAPIView
 from .views.notifications import NotificationListView
 from .views.observations import (
     ObservationExclusionView,
@@ -81,6 +82,8 @@ urlpatterns = [
         "statistics/participants/<int:participant_id>/api-usage",
         ParticipantAPIUsageView.as_view(),
     ),
+    path("v1", ReadOnlyAPIRootView.as_view()),
+    path("v1/openapi.json", ReadOnlyOpenAPIView.as_view()),
     path("v1/participants", ReadOnlyParticipantListView.as_view()),
     path("v1/statistics", ReadOnlyStatisticsView.as_view()),
     path(

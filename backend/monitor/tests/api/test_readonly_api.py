@@ -73,6 +73,8 @@ def test_readonly_api_key_lifecycle_and_scope():
         ],
     )
 
+    assert client.get("/api/v1").status_code == 401
+    assert client.get("/api/v1/openapi.json").status_code == 401
     assert client.get("/api/v1/participants").status_code == 401
 
     generated_response = client.post(
@@ -97,6 +99,37 @@ def test_readonly_api_key_lifecycle_and_scope():
     assert "api_key" not in settings_data
 
     api_headers = {"HTTP_AUTHORIZATION": f"Bearer {api_key}"}
+    api_index = client.get("/api/v1", **api_headers)
+    assert api_index.status_code == 200
+    index_data = api_index.json()["data"]
+    assert index_data["openapi"] == "/api/v1/openapi.json"
+    assert index_data["authentication"]["scheme"] == "bearer"
+    assert {
+        endpoint["path"] for endpoint in index_data["endpoints"]
+    } == {
+        "/api/v1/participants",
+        "/api/v1/statistics",
+        "/api/v1/statistics/participants/{participant_id}/api-usage",
+    }
+
+    openapi_response = client.get("/api/v1/openapi.json", **api_headers)
+    assert openapi_response.status_code == 200
+    openapi = openapi_response.json()
+    assert openapi["openapi"] == "3.1.0"
+    assert openapi["servers"] == [{"url": "/api"}]
+    assert set(openapi["paths"]) == {
+        "/v1",
+        "/v1/openapi.json",
+        "/v1/participants",
+        "/v1/statistics",
+        "/v1/statistics/participants/{participant_id}/api-usage",
+    }
+    assert openapi["security"] == [{"ReadOnlyApiKey": []}]
+    assert (
+        openapi["components"]["securitySchemes"]["ReadOnlyApiKey"]["scheme"]
+        == "bearer"
+    )
+
     participants = client.get("/api/v1/participants", **api_headers)
     assert participants.status_code == 200
     assert participants.json()["data"][0]["id"] == participant.id
@@ -117,6 +150,10 @@ def test_readonly_api_key_lifecycle_and_scope():
     assert api_usage.json()["data"]["participant_total_usd"] == 120.0
 
     assert client.post("/api/v1/participants", **api_headers).status_code == 405
+    assert (
+        client.post("/api/v1/openapi.json", **api_headers).status_code
+        == 405
+    )
     assert client.get("/api/settings", **api_headers).status_code == 401
 
     rotated_response = client.post(
