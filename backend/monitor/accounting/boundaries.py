@@ -51,6 +51,126 @@ def observed_baseline_segment(
         percent_baseline=percent_baseline,
     )
 
+def defer_redundant_zero_observations(
+    observations: list[Observation],
+) -> tuple[list[Observation], list[Observation]]:
+    """连续 0% 尚不能确认周期；仅保留最接近首次消费的候选基线。"""
+
+    candidates: list[Observation] = []
+    deferred: list[Observation] = []
+    index = 0
+    while index < len(observations):
+        observation = observations[index]
+        if observation.is_manual_start or observation.upstream_used_percent != ZERO:
+            candidates.append(observation)
+            index += 1
+            continue
+
+        zero_run = [observation]
+        scan = index + 1
+        while scan < len(observations):
+            candidate = observations[scan]
+            if candidate.is_manual_start or candidate.upstream_used_percent != ZERO:
+                break
+            zero_run.append(candidate)
+            scan += 1
+
+        previous = candidates[-1] if candidates else None
+        same_window_rollback = bool(
+            previous is not None
+            and previous.upstream_used_percent > ZERO
+            and same_official_reset(
+                previous.upstream_resets_at,
+                zero_run[0].upstream_resets_at,
+            )
+        )
+        if same_window_rollback:
+            candidates.extend(zero_run)
+        else:
+            deferred.extend(zero_run[:-1])
+            candidates.append(zero_run[-1])
+        index = scan
+    return candidates, deferred
+
+
+def mark_deferred_zero_observations(
+    observations: list[Observation],
+) -> None:
+    """清除被后续 0% 取代的派生结果，原始采样事实仍完整保留。"""
+
+    note = "连续 0% 空闲观测，等待首次使用后确认周期"
+    for observation in observations:
+        observation.attribution_started_at = None
+        observation.selected_total_cost = ZERO
+        observation.interval_used_percent = ZERO
+        observation.delta_percent = None
+        observation.delta_cost = None
+        observation.sample_usd_per_percent = None
+        observation.estimated_used_percent = ZERO
+        observation.capacity_lower_usd = None
+        observation.capacity_upper_usd = None
+        observation.model_diagnostics = {}
+        observation.valid_sample = False
+        observation.sample_note = note
+        raw_window = dict(observation.raw_window)
+        raw_window.pop("replay_segment_reason", None)
+        raw_window.update(
+            {
+                "rate_method": RATE_METHOD,
+                "replay_decision": "deferred_zero_plateau",
+            }
+        )
+        observation.raw_window = raw_window
+
+        snapshots = list(observation.participant_snapshots.all())
+        for snapshot in snapshots:
+            snapshot.selected_cost = ZERO
+            snapshot.delta_cost = None
+            snapshot.charged_delta_percent = ZERO
+            snapshot.charged_cycle_percent = ZERO
+            snapshot.remaining_share_percent = snapshot.participant.share_percent
+            snapshot.recommended_balance_usd = None
+            snapshot.charged_percent_lower = None
+            snapshot.charged_percent_upper = None
+            snapshot.recommended_balance_min_usd = None
+            snapshot.recommended_balance_max_usd = None
+            snapshot.deterministic_balance_min_usd = None
+            snapshot.deterministic_balance_max_usd = None
+            snapshot.balance_difference_usd = None
+            snapshot.needs_manual_update = False
+            snapshot.reason = note
+        if snapshots:
+            ParticipantSnapshot.objects.bulk_update(
+                snapshots,
+                [
+                    "selected_cost",
+                    "delta_cost",
+                    "charged_delta_percent",
+                    "charged_cycle_percent",
+                    "remaining_share_percent",
+                    "recommended_balance_usd",
+                    "charged_percent_lower",
+                    "charged_percent_upper",
+                    "recommended_balance_min_usd",
+                    "recommended_balance_max_usd",
+                    "deterministic_balance_min_usd",
+                    "deterministic_balance_max_usd",
+                    "balance_difference_usd",
+                    "needs_manual_update",
+                    "reason",
+                ],
+            )
+
+
+def waiting_for_first_use(segment: ReplaySegment) -> bool:
+    return (
+        segment.reason in {"official_zero_observation", "manual_override"}
+        and all(
+            observation.upstream_used_percent == ZERO
+            for observation in segment.observations
+        )
+    )
+
 
 def official_segment(observation: Observation, cost_basis: str) -> ReplaySegment:
     """建立官方窗口区间，并优先采用首个 0% 观测的累计成本基线。
@@ -166,8 +286,12 @@ def mark_automatic_exclusion(
 def infer_segments(
     observations: list[Observation],
     cost_basis: str,
-) -> tuple[list[ReplaySegment], list[Observation]]:
+) -> tuple[list[ReplaySegment], list[Observation], list[Observation]]:
     """按“管理员起点 > 官方窗口 > 异常检测”识别派生区间。
+
+    连续 0% 只说明账号尚未开始消费，不能用持续漂移的重置时间建立多个
+    空周期。系统保留全部原始点，但只把最后一个 0% 作为待确认基线；首次
+    正百分比出现后，再用它返回的重置时间确认该区间。
 
     官方重置时间没有变化时，百分比回退与七天窗口证据矛盾，不能再凭
     连续低点擅自建立新区间。此类低点保持自动排除，直到 reset_at
@@ -177,6 +301,7 @@ def infer_segments(
     segments: list[ReplaySegment] = []
     automatic: list[Observation] = []
     current: ReplaySegment | None = None
+    observations, deferred = defer_redundant_zero_observations(observations)
     index = 0
 
     while index < len(observations):
@@ -185,6 +310,12 @@ def infer_segments(
             if current is not None and current.observations:
                 segments.append(current)
             current = manual_start_segment(observation, cost_basis)
+            current.observations.append(observation)
+            index += 1
+            continue
+
+        if current is not None and waiting_for_first_use(current):
+            current.resets_at = observation.upstream_resets_at
             current.observations.append(observation)
             index += 1
             continue
@@ -239,4 +370,4 @@ def infer_segments(
 
     if current is not None and current.observations:
         segments.append(current)
-    return segments, automatic
+    return segments, automatic, deferred

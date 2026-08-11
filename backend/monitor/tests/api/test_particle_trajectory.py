@@ -7,7 +7,7 @@ from django.test import Client
 from django.utils import timezone
 
 from monitor.models import AppSettings, Observation
-from monitor.replay import rebuild_account
+from monitor.replay import rebuild_account, rebuild_observation_suffix
 from monitor.tests.helpers import jwt_login
 
 
@@ -203,7 +203,7 @@ def test_particle_trajectory_selects_historical_period():
 
 
 @pytest.mark.django_db
-def test_particle_trajectory_periods_end_at_the_next_segment_boundary():
+def test_particle_trajectory_defers_continuous_zero_plateau_until_usage():
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
@@ -213,27 +213,69 @@ def test_particle_trajectory_periods_end_at_the_next_segment_boundary():
     config.openai_account_id = 7
     config.save(update_fields=["openai_account_id"])
 
-    first_start = (timezone.now() - timedelta(days=21)).replace(microsecond=0)
-    raw_windows = [
-        (first_start, first_start + timedelta(days=7)),
-        (first_start + timedelta(days=5), first_start + timedelta(days=12)),
-        (first_start + timedelta(days=7), first_start + timedelta(days=14)),
-    ]
-    for index, (observed_at, resets_at) in enumerate(raw_windows):
-        Observation.objects.create(
+    first_start = (timezone.now() - timedelta(days=1)).replace(microsecond=0)
+
+    def create_observation(
+        observed_at,
+        resets_at,
+        used_percent,
+        cost,
+    ):
+        observation = Observation.objects.create(
             account_id=7,
             source="scheduled",
             observed_at=observed_at,
             window_seconds=604800,
             upstream_resets_at=resets_at,
-            upstream_used_percent=Decimal("0"),
-            raw_selected_total_cost=Decimal(index * 100),
-            selected_total_cost=Decimal(index * 100),
-            total_standard_cost=Decimal(index * 100),
-            total_actual_cost=Decimal(index * 100),
+            upstream_used_percent=Decimal(used_percent),
+            raw_selected_total_cost=Decimal(cost),
+            selected_total_cost=Decimal(cost),
+            total_standard_cost=Decimal(cost),
+            total_actual_cost=Decimal(cost),
             effective_usd_per_percent=Decimal("16"),
         )
-    rebuild_account(7, config)
+        rebuild_observation_suffix(observation, config)
+        observation.refresh_from_db()
+        return observation
+
+    first = create_observation(
+        first_start,
+        first_start + timedelta(days=7),
+        "0",
+        "100",
+    )
+    second = create_observation(
+        first_start + timedelta(minutes=10),
+        first_start + timedelta(days=7, minutes=10),
+        "0",
+        "200",
+    )
+    baseline = create_observation(
+        first_start + timedelta(minutes=20),
+        first_start + timedelta(days=7, minutes=20),
+        "0",
+        "300",
+    )
+    positive_reset = first_start + timedelta(days=7, minutes=30)
+    positive = create_observation(
+        first_start + timedelta(minutes=30),
+        positive_reset,
+        "1",
+        "340",
+    )
+
+    first.refresh_from_db()
+    second.refresh_from_db()
+    baseline.refresh_from_db()
+    assert first.attribution_started_at is None
+    assert second.attribution_started_at is None
+    assert first.raw_window["replay_decision"] == "deferred_zero_plateau"
+    assert second.raw_window["replay_decision"] == "deferred_zero_plateau"
+    assert first.excluded_at is None
+    assert second.excluded_at is None
+    assert baseline.attribution_started_at == baseline.observed_at
+    assert positive.attribution_started_at == baseline.observed_at
+    assert positive.selected_total_cost == Decimal("40")
 
     client = Client()
     headers, _ = jwt_login(client)
@@ -241,16 +283,18 @@ def test_particle_trajectory_periods_end_at_the_next_segment_boundary():
 
     assert response.status_code == 200
     periods = response.json()["data"]["periods"]
-    assert [period["started_at"] for period in periods] == [
-        started_at.isoformat() for started_at, _ in raw_windows
-    ]
-    assert [period["resets_at"] for period in periods] == [
-        resets_at.isoformat() for _, resets_at in raw_windows
-    ]
-    assert [period["ended_at"] for period in periods] == [
-        raw_windows[1][0].isoformat(),
-        raw_windows[2][0].isoformat(),
-        raw_windows[2][1].isoformat(),
+    assert periods == [
+        {
+            "id": baseline.id,
+            "sequence": 1,
+            "started_at": baseline.observed_at.isoformat(),
+            "first_observed_at": baseline.observed_at.isoformat(),
+            "last_observed_at": positive.observed_at.isoformat(),
+            "resets_at": positive_reset.isoformat(),
+            "ended_at": positive_reset.isoformat(),
+            "observation_count": 2,
+            "is_current": True,
+        }
     ]
 
 

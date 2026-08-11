@@ -15,6 +15,7 @@ from django.db.models import Q
 
 from .boundaries import (
     infer_segments as _infer_segments,
+    mark_deferred_zero_observations,
     official_start as _official_start,
     same_official_reset as _same_official_reset,
 )
@@ -81,12 +82,16 @@ def _replay_usage_samples(
         )
     }
     for sample in samples:
-        segment = segments[0]
+        segment = None
         for candidate in segments:
             if candidate.first_observed_at <= sample.observed_at:
                 segment = candidate
             else:
                 break
+        if segment is None:
+            sample.attribution_started_at = None
+            sample.selected_cost = ZERO
+            continue
         sample.attribution_started_at = segment.started_at
         raw_cost = normalized_by_key.get(
             (sample.participant.sub2api_user_id, sample.observed_at),
@@ -187,6 +192,12 @@ def _replay_anchor(
         return observation.observed_at
     if observation.attribution_started_at is not None:
         return observation.attribution_started_at
+    if (
+        previous is not None
+        and previous.upstream_used_percent == ZERO
+        and not observation.is_manual_start
+    ):
+        return previous.attribution_started_at or previous.observed_at
     if previous is not None and _same_official_reset(
         previous.upstream_resets_at,
         observation.upstream_resets_at,
@@ -261,7 +272,10 @@ def rebuild_account(
         for observation in observations
         if observation.exclusion_source != "manual"
     ]
-    segments, automatic = _infer_segments(candidates, config.cost_basis)
+    segments, automatic, deferred = _infer_segments(
+        candidates,
+        config.cost_basis,
+    )
     if automatic:
         Observation.objects.bulk_update(
             automatic,
@@ -269,6 +283,26 @@ def rebuild_account(
                 "excluded_at",
                 "exclusion_source",
                 "exclusion_reason",
+                "attribution_started_at",
+                "selected_total_cost",
+                "interval_used_percent",
+                "delta_percent",
+                "delta_cost",
+                "sample_usd_per_percent",
+                "estimated_used_percent",
+                "capacity_lower_usd",
+                "capacity_upper_usd",
+                "model_diagnostics",
+                "valid_sample",
+                "sample_note",
+                "raw_window",
+            ],
+        )
+    if deferred:
+        mark_deferred_zero_observations(deferred)
+        Observation.objects.bulk_update(
+            deferred,
+            [
                 "attribution_started_at",
                 "selected_total_cost",
                 "interval_used_percent",
