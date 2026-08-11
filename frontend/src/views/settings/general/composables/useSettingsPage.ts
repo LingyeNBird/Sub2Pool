@@ -12,12 +12,9 @@ import { useAuthStore } from "@/stores/auth";
 import type {
   AppSettingsData,
   ConfirmDialogOptions,
-  CostHistoryMaintenancePreview,
-  CostHistoryRepairResult,
   FastCorrectionRebuildResult,
-  FullParticleReplayResult,
-  HistoricalUsageBackfillResult,
-  HistoricalUsageMaintenancePreview,
+  HistoricalRebuildPreview,
+  HistoricalRebuildResult,
   ReadOnlyAPIKeyGenerated,
   OpenAIAccountOption,
 } from "@/types";
@@ -46,13 +43,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   const exportingDatabase = ref(false);
   const importingDatabase = ref(false);
   const rebuildingFastCorrection = ref(false);
-  const historyPreview = ref<HistoricalUsageMaintenancePreview | null>(null);
-  const checkingHistoricalUsage = ref(false);
-  const backfillingHistoricalUsage = ref(false);
-  const rebuildingAllParticles = ref(false);
-  const costHistoryPreview = ref<CostHistoryMaintenancePreview | null>(null);
-  const checkingCostHistory = ref(false);
-  const repairingCostHistory = ref(false);
+  const historyRebuildPreview = ref<HistoricalRebuildPreview | null>(null);
+  const checkingHistoricalRebuild = ref(false);
+  const rebuildingHistory = ref(false);
   const savedFastCorrectionEnabled = ref(true);
   const generatingReadOnlyApiKey = ref(false);
   const revokingReadOnlyApiKey = ref(false);
@@ -150,6 +143,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         smtpPassword.value = "";
         resendApiKey.value = "";
       }
+      if (section === "connection" || section === "allocation") {
+        historyRebuildPreview.value = null;
+      }
       success.value = `${label}已保存`;
     } catch (error) {
       message.value =
@@ -217,6 +213,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
       settings.value.fast_correction_missing_intervals =
         updated.fast_correction_missing_intervals;
       savedFastCorrectionEnabled.value = updated.fast_correction_enabled;
+      historyRebuildPreview.value = null;
       success.value = "FAST 修正设置已保存";
       return Boolean(
         !wasEnabled &&
@@ -349,135 +346,57 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     }
   }
 
-  async function previewHistoricalUsage() {
-    checkingHistoricalUsage.value = true;
+  async function previewHistoricalRebuild() {
+    checkingHistoricalRebuild.value = true;
     message.value = "";
     success.value = "";
+    historyRebuildPreview.value = null;
     try {
-      historyPreview.value = await api<HistoricalUsageMaintenancePreview>(
-        "settings/data-maintenance/history-preview",
+      historyRebuildPreview.value = await api<HistoricalRebuildPreview>(
+        "settings/data-maintenance/history-rebuild-preview",
         { method: "POST" },
       );
-      success.value = historyPreview.value.missing_samples
-        ? `检查完成：发现 ${historyPreview.value.missing_samples} 条缺失用户用量事实。`
-        : "检查完成：历史用户用量事实完整，无需补全。";
+      const preview = historyRebuildPreview.value;
+      success.value = preview.observation_count
+        ? `检查完成：可从 ${preview.request_log_count} 条请求日志重建 ${preview.observation_count} 条百分比观测和 ${preview.rebuilt_user_samples} 条用户事实。`
+        : "检查完成：尚无百分比观测，不需要重建。";
     } catch (error) {
       message.value =
-        error instanceof ApiError ? error.message : "检查历史用量失败";
+        error instanceof ApiError ? error.message : "检查历史数据失败";
     } finally {
-      checkingHistoricalUsage.value = false;
+      checkingHistoricalRebuild.value = false;
     }
   }
 
-  async function backfillHistoricalUsage() {
-    if (!historyPreview.value?.can_backfill) return;
+  async function rebuildHistoricalData() {
+    if (!historyRebuildPreview.value?.can_rebuild) return;
     if (
       !(await confirmAction({
-        title: "补全全部历史？",
+        title: "从 Sub2API 重建全部历史？",
         message:
-          "系统将只读 Sub2API 历史请求日志，补全缺失的用户用量事实，并从第一条观测全量重建粒子结果。原始百分比、成本和观测时间不会改变。",
-        confirmLabel: "开始补全",
-        tone: "warning",
-      }))
-    ) {
-      return;
-    }
-    backfillingHistoricalUsage.value = true;
-    message.value = "";
-    success.value = "";
-    try {
-      const result = await api<HistoricalUsageBackfillResult>(
-        "settings/data-maintenance/history-backfill",
-        { method: "POST" },
-      );
-      historyPreview.value = null;
-      success.value = `历史补全完成：写入 ${result.inserted_samples} 条用户用量事实，重建 ${result.replayed_observations} 条观测。`;
-    } catch (error) {
-      message.value =
-        error instanceof ApiError ? error.message : "补全历史用量失败";
-    } finally {
-      backfillingHistoricalUsage.value = false;
-    }
-  }
-
-  async function rebuildAllParticles() {
-    if (
-      !(await confirmAction({
-        title: "重建全部粒子结果？",
-        message:
-          "系统将从第一条原始观测重新计算全部粒子结果。原始百分比、成本和观测时间不会改变。",
+          "系统将重新读取请求日志，并覆盖历史成本、逐用户用量、FAST 修正及全部派生结果。仅保留无法从日志恢复的上游百分比及采样边界、管理操作和历史余额。建议先导出数据库备份。",
         confirmLabel: "开始重建",
         tone: "warning",
       }))
     ) {
       return;
     }
-    rebuildingAllParticles.value = true;
+    rebuildingHistory.value = true;
     message.value = "";
     success.value = "";
     try {
-      const result = await api<FullParticleReplayResult>(
-        "settings/data-maintenance/rebuild-all",
+      const result = await api<HistoricalRebuildResult>(
+        "settings/data-maintenance/history-rebuild",
         { method: "POST" },
       );
-      success.value = `全量重建完成：处理 ${result.rebuilt_observations} 条观测，得到 ${result.inferred_intervals} 个归属区间。`;
+      historyRebuildPreview.value = null;
+      success.value = `历史重建完成：重取 ${result.rebuilt_user_samples} 条用户事实、${result.rebuilt_participant_samples} 条参与者趋势，重放 ${result.replayed_observations} 条观测。`;
     } catch (error) {
+      historyRebuildPreview.value = null;
       message.value =
-        error instanceof ApiError ? error.message : "全量粒子重建失败";
+        error instanceof ApiError ? error.message : "历史数据重建失败";
     } finally {
-      rebuildingAllParticles.value = false;
-    }
-  }
-
-  async function previewCostHistory() {
-    checkingCostHistory.value = true;
-    message.value = "";
-    success.value = "";
-    try {
-      costHistoryPreview.value = await api<CostHistoryMaintenancePreview>(
-        "settings/data-maintenance/cost-history-preview",
-        { method: "POST" },
-      );
-      const preview = costHistoryPreview.value;
-      success.value = preview.snapshot_conflicts
-        ? `检查完成：发现 ${preview.snapshot_conflicts} 个无法与请求日志核对的成本区间，已禁止写入。`
-        : `检查完成：可重建 ${preview.observation_interval_count} 个观测成本区间，其中 ${preview.coordinate_changes} 次累计快照坐标变化。`;
-    } catch (error) {
-      message.value =
-        error instanceof ApiError ? error.message : "检查历史成本失败";
-    } finally {
-      checkingCostHistory.value = false;
-    }
-  }
-
-  async function repairCostHistory() {
-    if (!costHistoryPreview.value?.can_repair) return;
-    if (
-      !(await confirmAction({
-        title: "重取历史成本区间？",
-        message:
-          "系统将只读 Sub2API 请求日志，重建相邻观测之间的成本增量，再全量重放派生结果。原始累计成本、百分比和观测时间不会改变。",
-        confirmLabel: "开始重取",
-        tone: "warning",
-      }))
-    ) {
-      return;
-    }
-    repairingCostHistory.value = true;
-    message.value = "";
-    success.value = "";
-    try {
-      const result = await api<CostHistoryRepairResult>(
-        "settings/data-maintenance/cost-history-repair",
-        { method: "POST" },
-      );
-      costHistoryPreview.value = null;
-      success.value = `历史成本重建完成：写入 ${result.observation_interval_count} 个观测区间，重放 ${result.replayed_observations} 条观测。`;
-    } catch (error) {
-      message.value =
-        error instanceof ApiError ? error.message : "重取历史成本失败";
-    } finally {
-      repairingCostHistory.value = false;
+      rebuildingHistory.value = false;
     }
   }
 
@@ -589,13 +508,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     exportingDatabase,
     importingDatabase,
     rebuildingFastCorrection,
-    historyPreview,
-    checkingHistoricalUsage,
-    backfillingHistoricalUsage,
-    rebuildingAllParticles,
-    costHistoryPreview,
-    checkingCostHistory,
-    repairingCostHistory,
+    historyRebuildPreview,
+    checkingHistoricalRebuild,
+    rebuildingHistory,
     generatingReadOnlyApiKey,
     revokingReadOnlyApiKey,
     passwordForm,
@@ -609,11 +524,8 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     importDatabase,
     saveFastCorrection,
     rebuildFastCorrection,
-    previewHistoricalUsage,
-    backfillHistoricalUsage,
-    rebuildAllParticles,
-    previewCostHistory,
-    repairCostHistory,
+    previewHistoricalRebuild,
+    rebuildHistoricalData,
     test,
     changePassword,
     generateReadOnlyApiKey,

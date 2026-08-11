@@ -1,4 +1,4 @@
-"""不可变原始观测与可选 FAST 区间的采集持久化。"""
+"""上游百分比证据、Sub2API 成本快照与可选 FAST 区间的采集持久化。"""
 
 from datetime import datetime, timedelta
 
@@ -32,7 +32,7 @@ def create_raw_observation(
     fast_interval: FastCorrectionInterval | None = None,
     fast_error: str = "",
 ) -> Observation:
-    """持久化不可变采样事实；派生字段先给安全初值，随后由重放器覆盖。"""
+    """保存采样证据；历史维护可从请求日志重取成本，随后统一重放。"""
 
     selected_total = local.total.selected(config.cost_basis)
     (

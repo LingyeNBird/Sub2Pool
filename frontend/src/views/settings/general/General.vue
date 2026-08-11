@@ -40,15 +40,11 @@ const {
   exportingDatabase,
   importingDatabase,
   rebuildingFastCorrection,
-  historyPreview,
+  historyRebuildPreview,
   generatingReadOnlyApiKey,
   revokingReadOnlyApiKey,
-  checkingHistoricalUsage,
-  backfillingHistoricalUsage,
-  rebuildingAllParticles,
-  costHistoryPreview,
-  checkingCostHistory,
-  repairingCostHistory,
+  checkingHistoricalRebuild,
+  rebuildingHistory,
   passwordForm,
   loadOpenAIAccounts,
   saveConnection,
@@ -60,11 +56,8 @@ const {
   saveNotifications,
   exportDatabase,
   importDatabase,
-  previewHistoricalUsage,
-  backfillHistoricalUsage,
-  rebuildAllParticles,
-  previewCostHistory,
-  repairCostHistory,
+  previewHistoricalRebuild,
+  rebuildHistoricalData,
   test,
   generateReadOnlyApiKey,
   revokeReadOnlyApiKey,
@@ -193,18 +186,11 @@ async function handleRevokeReadOnlyAPIKey() {
       @save="saveNotifications"
     />
     <DataMaintenanceCard
-      :preview="historyPreview"
-      :checking="checkingHistoricalUsage"
-      :backfilling="backfillingHistoricalUsage"
-      :rebuilding="rebuildingAllParticles"
-      :cost-preview="costHistoryPreview"
-      :checking-cost="checkingCostHistory"
-      :repairing-cost="repairingCostHistory"
-      @preview="previewHistoricalUsage"
-      @backfill="backfillHistoricalUsage"
-      @rebuild="rebuildAllParticles"
-      @cost-preview="previewCostHistory"
-      @cost-repair="repairCostHistory"
+      :preview="historyRebuildPreview"
+      :checking="checkingHistoricalRebuild"
+      :rebuilding="rebuildingHistory"
+      @preview="previewHistoricalRebuild"
+      @rebuild="rebuildHistoricalData"
     />
     <DatabaseTransferCard
       :exporting="exportingDatabase"

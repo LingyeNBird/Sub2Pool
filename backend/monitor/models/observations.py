@@ -8,8 +8,7 @@ from .participants import Participant
 
 
 class Observation(models.Model):
-    """一次上游百分比采样；原始事实保持不变，所有计算字段均可重放生成。"""
-
+    """一次上游百分比采样；百分比边界保留，成本事实可从请求日志重取。"""
     SOURCE_CHOICES = (("scheduled", "定时"), ("manual", "手动"), ("exhausted", "额度耗尽触发"), ("reset", "重置临近"))
     EXCLUSION_CHOICES = (
         ("", "未排除"),
@@ -31,8 +30,8 @@ class Observation(models.Model):
         default=0,
         validators=PERCENT_VALIDATORS,
     )
-    # 原始累计成本必须与其查询窗口一起解释；normalized_* 是通过区间增量重建的
-    # 同一官方周期累计值，selected_total_cost 则是归属区间内的派生累计值。
+    # 累计成本必须与其查询窗口一起解释；历史维护可用请求日志覆盖错误快照。
+    # normalized_* 是官方周期累计值，selected_total_cost 是归属区间派生值。
     raw_selected_total_cost = models.DecimalField(max_digits=18, decimal_places=6)
     selected_total_cost = models.DecimalField(max_digits=18, decimal_places=6)
     total_standard_cost = models.DecimalField(max_digits=18, decimal_places=6)
@@ -168,7 +167,7 @@ class ParticipantSnapshot(models.Model):
     observation = models.ForeignKey(Observation, on_delete=models.CASCADE, related_name="participant_snapshots")
     participant = models.ForeignKey(Participant, on_delete=models.CASCADE, related_name="snapshots")
     selected_cost = models.DecimalField(max_digits=18, decimal_places=6)
-    # 原始累计成本永久保留；selected_cost 是当前重放区间内的累计成本。
+    # 来源累计成本可由请求日志重建；selected_cost 是归属区间内的派生累计值。
     raw_selected_cost = models.DecimalField(max_digits=18, decimal_places=6)
     delta_cost = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     charged_delta_percent = models.DecimalField(max_digits=10, decimal_places=5, default=0)
@@ -266,10 +265,10 @@ class ParticipantUsageSample(models.Model):
 
 
 class Sub2APIUserUsageSample(models.Model):
-    """每次本地探测保存的全量 Sub2API 用户原始用量。
+    """一个时间点的全量 Sub2API 用户用量。
 
-    记录不依赖参与者配置；以后才绑定为参与者的用户，也能用这些不可变原始
-    事实补建历史账本。标准成本与实际成本同时保存，避免丢失采样时的计费口径。
+    记录不依赖参与者配置；历史维护会以请求日志为权威来源覆盖旧快照，
+    然后再生成规范累计值和参与者账本。
     """
 
     account_id = models.BigIntegerField(db_index=True)

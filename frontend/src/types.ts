@@ -527,59 +527,30 @@ export interface ReadOnlyAPIKeyGenerated {
   created_at: string;
 }
 
-export interface HistoricalUsageMaintenancePreview {
+export interface HistoricalRebuildPreview {
   account_id: number;
   observation_count: number;
-  segment_count: number;
-  compatible_segments: number;
-  incompatible_segments: number;
-  skipped_observations: number;
+  sample_point_count: number;
   request_log_count: number;
   user_count: number;
-  existing_samples: number;
-  missing_samples: number;
-  fillable_samples: number;
-  max_standard_gap_usd: number;
-  max_actual_gap_usd: number;
+  existing_user_samples: number;
+  rebuilt_user_samples: number;
+  participant_snapshot_count: number;
+  existing_participant_samples: number;
+  rebuilt_participant_samples: number;
+  fast_interval_count: number;
+  preserved_balance_facts: number;
+  invalidated_api_usage_snapshots: number;
+  nonzero_percent_without_cost: number;
   earliest_log_at: string | null;
   latest_log_at: string | null;
-  can_backfill: boolean;
+  can_rebuild: boolean;
 }
 
-export interface HistoricalUsageBackfillResult extends HistoricalUsageMaintenancePreview {
-  inserted_samples: number;
-  replayed_observations: number;
-  inferred_intervals?: number;
-  automatic_exclusions?: number;
-}
-
-export interface CostHistoryMaintenancePreview {
-  account_id: number;
-  observation_count: number;
-  user_sample_count: number;
-  request_log_count: number;
-  observation_interval_count: number;
-  user_interval_count: number;
-  coordinate_changes: number;
-  snapshot_conflicts: number;
-  max_standard_gap_usd: number;
-  max_actual_gap_usd: number;
-  earliest_log_at: string | null;
-  latest_log_at: string | null;
-  can_repair: boolean;
-}
-
-export interface CostHistoryRepairResult extends CostHistoryMaintenancePreview {
+export interface HistoricalRebuildResult extends HistoricalRebuildPreview {
   replayed_observations: number;
   inferred_intervals: number;
   automatic_exclusions: number;
-}
-
-export interface FullParticleReplayResult {
-  rebuilt_observations: number;
-  automatic_exclusions: number;
-  inferred_intervals: number;
-  latest_observation_id: number | null;
 }
 
 export type ConfirmDialogTone = "primary" | "warning" | "error";

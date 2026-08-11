@@ -5,6 +5,7 @@ from decimal import Decimal
 from urllib.parse import urlsplit
 
 from django.shortcuts import get_object_or_404
+from django.db import transaction
 
 from django.utils import timezone
 
@@ -190,9 +191,10 @@ class DashboardView(AdminAPIView):
 class ApplyParticipantRecommendationView(AdminAPIView):
     """仅响应管理员的显式点击，不会被后台监控或其他自动任务调用。"""
 
+    @transaction.atomic
     def post(self, _request, participant_id: int):
         participant = get_object_or_404(
-            Participant,
+            Participant.objects.select_for_update(),
             pk=participant_id,
             enabled=True,
         )
