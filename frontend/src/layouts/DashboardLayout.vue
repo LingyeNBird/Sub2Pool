@@ -10,7 +10,7 @@ const drawerOpen = ref(false);
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 
 function resetDemo() {
-  sessionStorage.removeItem("sub2pool:demo:v1:state");
+  sessionStorage.removeItem("sub2pool:demo:v2:state");
   window.location.reload();
 }
 

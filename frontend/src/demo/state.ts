@@ -21,7 +21,7 @@ import type {
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 
-const DEMO_STATE_KEY = "sub2pool:demo:v1:state";
+const DEMO_STATE_KEY = "sub2pool:demo:v2:state";
 const DEMO_AUTH_KEY = "sub2pool:demo:v1:auth";
 const DEMO_ANCHOR = Date.UTC(2026, 7, 12, 4, 0, 0);
 const HOUR = 3_600_000;
@@ -45,7 +45,7 @@ interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 1;
+  version: 2;
   clock: string;
   nextParticipantId: number;
   nextSystemUserId: number;
@@ -78,6 +78,10 @@ function hash(seed: number): number {
   value ^= value >>> 17;
   value ^= value << 5;
   return ((value >>> 0) % 10_000) / 10_000;
+}
+
+function signedNoise(seed: number): number {
+  return hash(seed) * 2 - 1;
 }
 
 function costBreakdown(total: number): CostBreakdown {
@@ -275,10 +279,10 @@ function buildPeriods(participants: Participant[]): {
     const count = counts[periodIndex];
     const start = DEMO_ANCHOR - (counts.length - periodIndex) * 7 * DAY;
     const reset = start + 7 * DAY;
-    const capacityBase = 2880 + periodIndex * 55;
+    const capacityBase = [2820, 3010, 2740, 3090, 2890][periodIndex]!;
     const periodObservationIds: number[] = [];
     const trajectory: ParticleTrajectoryPoint[] = [];
-    const trajectoryStride = Math.max(1, Math.floor(count / 42));
+    let previousCapacity = capacityBase + signedNoise(7000 + periodIndex) * 220;
 
     for (let index = 0; index < count; index += 1) {
       const progress = index / Math.max(1, count - 1);
@@ -309,12 +313,39 @@ function buildPeriods(participants: Participant[]): {
         Math.max(0, estimatedPercent - previousPercent),
         4,
       );
+      const volatilitySeed = 12000 + periodIndex * 1000 + index;
+      const targetCapacity =
+        capacityBase +
+        Math.sin(progress * Math.PI * 3.2 + periodIndex * 0.8) * 95 +
+        Math.sin(progress * Math.PI * 0.85 + periodIndex) * 70;
+      const regularInnovation =
+        (signedNoise(volatilitySeed) * 0.7 +
+          signedNoise(volatilitySeed + 41) * 0.3) *
+        (34 + 42 * (1 - progress));
+      const shockRoll = hash(volatilitySeed + 97);
+      const shockInnovation =
+        index > 2 && shockRoll < 0.125
+          ? (signedNoise(volatilitySeed + 131) >= 0 ? 1 : -1) *
+            (145 + hash(volatilitySeed + 157) * 360)
+          : 0;
       const capacity = rounded(
-        capacityBase + Math.sin(progress * 5 + periodIndex) * 85,
+        Math.min(
+          3900,
+          Math.max(
+            1550,
+            previousCapacity +
+              (targetCapacity - previousCapacity) * 0.08 +
+              regularInnovation +
+              shockInnovation,
+          ),
+        ),
         2,
       );
-      const lower = rounded(capacity - 180 - hash(observationId + 8) * 35, 2);
-      const upper = rounded(capacity + 205 + hash(observationId + 13) * 40, 2);
+      previousCapacity = capacity;
+      const lowerWidth = 330 + hash(volatilitySeed + 181) * 730;
+      const upperWidth = 320 + hash(volatilitySeed + 193) * 680;
+      const lower = rounded(Math.max(900, capacity - lowerWidth), 2);
+      const upper = rounded(Math.min(4700, capacity + upperWidth), 2);
       const source =
         index === 0
           ? "reset"
@@ -330,6 +361,14 @@ function buildPeriods(participants: Participant[]): {
         lower,
         upper,
       );
+      const essFraction = rounded(0.11 + hash(volatilitySeed + 211) * 0.86, 4);
+      const resampled = essFraction < 0.21 || shockInnovation !== 0;
+      itemDiagnostics.ess_fraction = essFraction;
+      itemDiagnostics.resampled = resampled;
+      itemDiagnostics.boundary_mass = {
+        lower: rounded(0.008 + hash(volatilitySeed + 223) * 0.12, 4),
+        upper: rounded(0.008 + hash(volatilitySeed + 227) * 0.12, 4),
+      };
       const itemSnapshots = participantSnapshots(
         participants,
         selectedCost,
@@ -386,44 +425,44 @@ function buildPeriods(participants: Participant[]): {
       observations.push(item);
       periodObservationIds.push(observationId);
 
-      if (index % trajectoryStride === 0 || index === count - 1) {
-        const particles = Array.from({ length: 88 }, (_, particleIndex) => {
-          const quantile = (particleIndex - 43.5) / 43.5;
-          return rounded(
-            capacity +
-              quantile * 235 +
-              Math.sin(particleIndex * 1.7 + index) * 18,
-            2,
-          );
-        }).sort((left, right) => left - right);
-        trajectory.push({
-          observation_id: observationId,
-          observed_at: item.observed_at,
-          source,
-          displayed_percent: displayedPercent,
-          estimated_percent: item.estimated_used_percent,
-          estimated_percent_lower: Math.max(
-            0,
-            item.estimated_used_percent - 1.25,
-          ),
-          estimated_percent_upper: Math.min(
-            100,
-            item.estimated_used_percent + 1.4,
-          ),
-          capacity_usd: capacity,
-          capacity_lower_usd: lower,
-          capacity_upper_usd: upper,
-          range_min_usd: 2200,
-          range_max_usd: 3700,
-          range_stage: periodIndex === 2 && index > count * 0.6 ? 1 : 0,
-          range_direction:
-            periodIndex === 2 && index > count * 0.6 ? "upper" : null,
-          ess_fraction: itemDiagnostics.ess_fraction,
-          resampled: itemDiagnostics.resampled,
-          boundary_mass: itemDiagnostics.boundary_mass,
-          particles_usd: particles,
-        });
-      }
+      const particles = Array.from({ length: 64 }, (_, particleIndex) => {
+        const particleQuantile = (particleIndex - 31.5) / 31.5;
+        const sideWidth = particleQuantile < 0 ? lowerWidth : upperWidth;
+        return rounded(
+          capacity +
+            particleQuantile * sideWidth * 0.88 +
+            signedNoise(volatilitySeed + particleIndex * 37 + 251) *
+              (22 + Math.abs(particleQuantile) * 34),
+          2,
+        );
+      }).sort((left, right) => left - right);
+      trajectory.push({
+        observation_id: observationId,
+        observed_at: item.observed_at,
+        source,
+        displayed_percent: displayedPercent,
+        estimated_percent: item.estimated_used_percent,
+        estimated_percent_lower: Math.max(
+          0,
+          item.estimated_used_percent - 1.25,
+        ),
+        estimated_percent_upper: Math.min(
+          100,
+          item.estimated_used_percent + 1.4,
+        ),
+        capacity_usd: capacity,
+        capacity_lower_usd: lower,
+        capacity_upper_usd: upper,
+        range_min_usd: 1400,
+        range_max_usd: 4700,
+        range_stage: periodIndex === 2 && index > count * 0.6 ? 1 : 0,
+        range_direction:
+          periodIndex === 2 && index > count * 0.6 ? "upper" : null,
+        ess_fraction: itemDiagnostics.ess_fraction,
+        resampled: itemDiagnostics.resampled,
+        boundary_mass: itemDiagnostics.boundary_mass,
+        particles_usd: particles,
+      });
       observationId += 1;
     }
 
@@ -593,7 +632,7 @@ function initializeState(): DemoState {
     participant.last_checked_at = latest.observed_at;
   }
   return {
-    version: 1,
+    version: 2,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextSystemUserId: 3,
@@ -649,7 +688,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 1) return parsed;
+      if (parsed.version === 2) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }
