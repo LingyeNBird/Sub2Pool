@@ -3,9 +3,21 @@ import vue from "@vitejs/plugin-vue";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 
-export default defineConfig(({ command }) => ({
-  // 生产资源由 Django 的 /static/frontend/ 提供；开发服务器仍保持根路径。
-  base: command === "build" ? "/static/frontend/" : "/",
+const demoBackend = fileURLToPath(
+  new URL("./src/demo/backend.ts", import.meta.url),
+);
+const disabledDemoBackend = fileURLToPath(
+  new URL("./src/demo/disabled.ts", import.meta.url),
+);
+
+export default defineConfig(({ command, mode }) => ({
+  // Django 构建继续使用 /static/frontend/；GitHub Pages 使用工作流注入的项目路径。
+  base:
+    mode === "demo"
+      ? process.env.VITE_PUBLIC_BASE || "/Sub2Pool/"
+      : command === "build"
+        ? "/static/frontend/"
+        : "/",
   plugins: [
     tailwindcss(),
     vue({
@@ -19,6 +31,7 @@ export default defineConfig(({ command }) => ({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@demo-backend": mode === "demo" ? demoBackend : disabledDemoBackend,
     },
   },
   server: {

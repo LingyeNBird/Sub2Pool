@@ -17,7 +17,7 @@ import {
 } from "@/config/navigation";
 import { useAuthStore } from "@/stores/auth";
 
-import SidebarAccountMenu from "./SidebarAccountMenu.vue";
+const faviconUrl = `${import.meta.env.BASE_URL}favicon.png`;
 
 const route = useRoute();
 const router = useRouter();
@@ -137,7 +137,7 @@ onBeforeUnmount(() => {
     ></label>
     <nav class="flex min-h-screen w-64 flex-col gap-2 bg-base-200 px-2 pt-10">
       <div class="mx-5 flex items-center gap-2 font-semibold">
-        <img src="/favicon.png" alt="" class="size-5 rounded-md" />
+        <img :src="faviconUrl" alt="" class="size-5 rounded-md" />
         Sub2API 拼车额度
       </div>
       <ul

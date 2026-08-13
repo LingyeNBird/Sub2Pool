@@ -31,6 +31,7 @@ const appliedParticipantIds = ref<number[]>([]);
 const actionToast = ref("");
 const rateBasisDialog = ref<DialogHandle | null>(null);
 const actionDialog = ref<RecommendationDialogHandle | null>(null);
+const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 
 async function load() {
   loading.value = true;
@@ -58,6 +59,13 @@ async function runCalibration() {
 }
 
 function openAdminApi() {
+  if (demoMode) {
+    actionToast.value = "公开演示不会连接真实 Sub2API 管理端";
+    window.setTimeout(() => {
+      actionToast.value = "";
+    }, 2600);
+    return;
+  }
   if (data.value?.sub2api_admin_url) {
     window.open(data.value.sub2api_admin_url, "_blank", "noopener,noreferrer");
   }

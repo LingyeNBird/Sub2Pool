@@ -115,6 +115,16 @@ docker compose up -d --build
 - [额度模型](docs/quota-models.md)
 - [时变额度粒子滤波](docs/particle-filter.md)
 
+## 在线演示
+
+GitHub Pages 提供不连接后端的公开演示：
+
+- 地址：<https://lingyenbird.github.io/Sub2Pool/>
+- 账号：`admin`
+- 密码：`123456`
+
+演示中的参与者、观测、统计、粒子轨迹、通知和登录记录均为确定性合成数据；所有写操作只影响当前浏览器标签页，不连接 Sub2API、数据库或邮件服务。
+
 ## CI 与镜像标签
 
 GitHub Actions 工作流采用“自动发布为主、手动触发兜底”的方式：

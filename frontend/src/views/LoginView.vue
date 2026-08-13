@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
-import { ApiError, api } from "@/services/api";
+import { ApiError, api, apiRaw } from "@/services/api";
 import {
   collectWebRtcNetworkInfo,
   type WebRtcNetworkInfo,
@@ -10,6 +10,7 @@ import {
 import { useAuthStore } from "@/stores/auth";
 
 const auth = useAuthStore();
+const route = useRoute();
 const router = useRouter();
 const username = ref("");
 const password = ref("");
@@ -17,6 +18,11 @@ const loading = ref(false);
 const networkReady = ref(false);
 const networkBlocked = ref(false);
 const message = ref("");
+const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
+const faviconUrl = `${import.meta.env.BASE_URL}favicon.png`;
+const demoCredentials = computed(() =>
+  demoMode ? "账号 admin，密码 123456" : "",
+);
 const clientNetwork = ref<WebRtcNetworkInfo>({
   webrtc_supported: false,
   webrtc_ips: [],
@@ -28,11 +34,10 @@ async function checkLoginNetwork() {
       webrtc_enabled: boolean;
       stun_url: string;
     }>("auth/client-config");
-    clientNetwork.value = await collectWebRtcNetworkInfo(
-      config.webrtc_enabled,
-      config.stun_url,
-    );
-    const response = await fetch("/api/auth/network-check", {
+    clientNetwork.value = demoMode
+      ? { webrtc_supported: false, webrtc_ips: [] }
+      : await collectWebRtcNetworkInfo(config.webrtc_enabled, config.stun_url);
+    const response = await apiRaw("auth/network-check", {
       method: "POST",
       credentials: "same-origin",
       headers: {
@@ -56,7 +61,13 @@ async function submit() {
   message.value = "";
   try {
     await auth.signIn(username.value, password.value, clientNetwork.value);
-    await router.replace(auth.isStaff ? "/" : "/statistics");
+    const next =
+      typeof route.query.next === "string" && route.query.next.startsWith("/")
+        ? route.query.next
+        : auth.isStaff
+          ? "/"
+          : "/statistics";
+    await router.replace(next);
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "登录失败";
   } finally {
@@ -77,10 +88,16 @@ onMounted(checkLoginNetwork);
         <div class="card-body gap-5">
           <div>
             <div class="mb-3 flex items-center gap-2 font-semibold">
-              <img src="/favicon.png" alt="" class="size-5 rounded-md" />
+              <img :src="faviconUrl" alt="" class="size-5 rounded-md" />
               Sub2API 拼车额度
             </div>
             <h1 class="card-title text-2xl">用户登录</h1>
+            <div v-if="demoMode" class="mt-4 alert text-sm alert-info">
+              <AppIcon name="information-circle" class="size-5" />
+              <span>
+                公开演示仅使用合成数据，不连接真实服务。{{ demoCredentials }}
+              </span>
+            </div>
           </div>
           <div v-if="message" class="alert alert-soft text-sm alert-error">
             <AppIcon name="exclamation-triangle" class="size-5" />

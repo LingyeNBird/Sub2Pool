@@ -17,6 +17,7 @@ import Sub2APIConnectionCard from "./components/Sub2APIConnectionCard.vue";
 import { useSettingsPage } from "./composables/useSettingsPage";
 
 const confirmDialog = ref<ConfirmDialogHandle | null>(null);
+const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 
 function confirmAction(options: ConfirmDialogOptions) {
   return confirmDialog.value?.open(options) ?? Promise.resolve(false);
@@ -176,6 +177,7 @@ async function handleRevokeReadOnlyAPIKey() {
     <DatabaseTransferCard
       :exporting="exportingDatabase"
       :importing="importingDatabase"
+      :demo="demoMode"
       @export="exportDatabase"
       @import="importDatabase"
     />

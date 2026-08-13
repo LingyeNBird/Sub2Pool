@@ -1,3 +1,5 @@
+import { demoRequest } from "@demo-backend";
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -14,6 +16,8 @@ interface ApiPayload {
   message?: string;
   details?: unknown;
 }
+
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 
 let accessToken = "";
 let refreshRequest: Promise<string> | null = null;
@@ -38,7 +42,7 @@ async function parsePayload(response: Response): Promise<ApiPayload> {
 }
 
 async function performRefresh(): Promise<string> {
-  const response = await fetch("/api/auth/refresh", {
+  const response = await rawRequest("auth/refresh", {
     method: "POST",
     credentials: "same-origin",
     headers: { Accept: "application/json" },
@@ -71,6 +75,26 @@ function mayRefresh(path: string): boolean {
   return path !== "auth/login" && path !== "auth/refresh";
 }
 
+async function rawRequest(
+  path: string,
+  options: RequestInit,
+): Promise<Response> {
+  if (DEMO_MODE) {
+    return demoRequest(apiPath(path), options);
+  }
+  return fetch(`/api/${apiPath(path)}`, {
+    ...options,
+    credentials: "same-origin",
+  });
+}
+
+export async function apiRaw(
+  path: string,
+  options: RequestInit = {},
+): Promise<Response> {
+  return rawRequest(apiPath(path), options);
+}
+
 async function requestResponse(
   path: string,
   options: RequestInit,
@@ -85,7 +109,7 @@ async function requestResponse(
   headers.set("Accept", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
 
-  const response = await fetch(`/api/${path}`, {
+  const response = await rawRequest(path, {
     ...options,
     headers,
     credentials: "same-origin",

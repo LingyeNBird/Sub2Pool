@@ -1,4 +1,8 @@
-import { createRouter, createWebHistory } from "vue-router";
+import {
+  createRouter,
+  createWebHashHistory,
+  createWebHistory,
+} from "vue-router";
 
 import DashboardLayout from "@/layouts/DashboardLayout.vue";
 import { useAuthStore } from "@/stores/auth";
@@ -8,8 +12,11 @@ import NotFoundView from "@/views/NotFoundView.vue";
 import { appRoutes } from "./routes";
 
 const router = createRouter({
-  // 资源位于 /static/frontend/，但业务路由始终从站点根路径开始。
-  history: createWebHistory("/"),
+  // Pages 只让服务器处理项目根路径，hash 后的业务深链由浏览器解释。
+  history:
+    import.meta.env.VITE_DEMO_MODE === "true"
+      ? createWebHashHistory(import.meta.env.BASE_URL)
+      : createWebHistory("/"),
   routes: [
     {
       path: "/login",

@@ -27,6 +27,7 @@ export interface PasswordForm {
 type ConfirmAction = (options: ConfirmDialogOptions) => Promise<boolean>;
 
 export function useSettingsPage(confirmAction: ConfirmAction) {
+  const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
   const auth = useAuthStore();
   const settings = ref<AppSettingsData | null>(null);
   const loading = ref(true);
@@ -263,12 +264,16 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `pinche-backup-${new Date()
-        .toISOString()
-        .replaceAll(":", "-")}.sqlite3`;
+      anchor.download = demoMode
+        ? `sub2pool-demo-${new Date().toISOString().slice(0, 10)}.json`
+        : `pinche-backup-${new Date()
+            .toISOString()
+            .replaceAll(":", "-")}.sqlite3`;
       anchor.click();
       URL.revokeObjectURL(url);
-      success.value = "数据库备份已导出";
+      success.value = demoMode
+        ? "合成演示数据已导出；该文件不是数据库备份"
+        : "数据库备份已导出";
     } catch (error) {
       message.value =
         error instanceof ApiError ? error.message : "导出数据库失败";
@@ -278,19 +283,20 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   }
 
   async function importDatabase(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
+    const input = event.target as HTMLInputElement | null;
+    const file = input?.files?.[0];
+    if (!demoMode && !file) return;
     if (
       !(await confirmAction({
-        title: "覆盖当前数据库？",
-        message:
-          "导入会完整覆盖当前数据库，并要求所有用户重新登录。覆盖前会在服务器数据目录保留一份当前数据库副本。",
-        confirmLabel: "导入并覆盖",
-        tone: "error",
+        title: demoMode ? "重置演示数据？" : "覆盖当前数据库？",
+        message: demoMode
+          ? "演示站不会读取数据库文件；此操作只会把当前标签页恢复到初始合成数据。"
+          : "导入会完整覆盖当前数据库，并要求所有用户重新登录。覆盖前会在服务器数据目录保留一份当前数据库副本。",
+        confirmLabel: demoMode ? "确认重置" : "导入并覆盖",
+        tone: demoMode ? "warning" : "error",
       }))
     ) {
-      input.value = "";
+      if (input) input.value = "";
       return;
     }
 
@@ -298,8 +304,15 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     message.value = "";
     success.value = "";
     try {
+      if (demoMode) {
+        await api("database/import", { method: "POST" });
+        success.value = "演示数据已恢复到初始状态";
+        window.dispatchEvent(new CustomEvent("sub2pool:demo-reset"));
+        window.location.reload();
+        return;
+      }
       const form = new FormData();
-      form.append("database", file);
+      form.append("database", file!);
       await api("database/import", { method: "POST", body: form });
       clearAccessToken();
       window.location.assign("/login");
@@ -308,7 +321,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         error instanceof ApiError ? error.message : "导入数据库失败";
     } finally {
       importingDatabase.value = false;
-      input.value = "";
+      if (input) input.value = "";
     }
   }
 
@@ -468,8 +481,13 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         method: "POST",
         body: kind === "sub2api" ? jsonBody(connectionPayload()) : undefined,
       });
-      success.value =
-        kind === "sub2api" ? "Sub2API 连接与额度读取正常" : "测试邮件已发送";
+      success.value = demoMode
+        ? kind === "sub2api"
+          ? "演示连接检查成功；未发起任何网络连接"
+          : "演示邮件检查成功；未发送真实邮件"
+        : kind === "sub2api"
+          ? "Sub2API 连接与额度读取正常"
+          : "测试邮件已发送";
     } catch (error) {
       message.value = error instanceof ApiError ? error.message : "测试失败";
     } finally {
@@ -498,7 +516,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         new_password: "",
         confirm_password: "",
       });
-      success.value = "登录密码已修改";
+      success.value = demoMode
+        ? "演示表单校验完成；未修改任何真实凭据"
+        : "登录密码已修改";
     } catch (error) {
       message.value =
         error instanceof ApiError ? error.message : "修改密码失败";
