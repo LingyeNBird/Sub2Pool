@@ -781,7 +781,10 @@ def test_initial_observation_respects_capacity_bounds_and_builds_recommendations
     config.save()
     owner = Participant.objects.create(name="车主", sub2api_user_id=1, share_percent=50, is_owner=True)
     rider = Participant.objects.create(name="车友", sub2api_user_id=2, share_percent=50)
-    reset_at = datetime(2026, 8, 14, tzinfo=datetime_timezone.utc)
+    now = datetime(2026, 8, 10, tzinfo=datetime_timezone.utc)
+    reset_after_seconds = int(timedelta(days=4).total_seconds())
+    reset_at = now + timedelta(seconds=reset_after_seconds)
+    monkeypatch.setattr(timezone, "now", lambda: now)
 
     class FakeClient:
         def __init__(self, _config):
@@ -796,7 +799,13 @@ def test_initial_observation_respects_capacity_bounds_and_builds_recommendations
         def query_weekly_window(self, account_id, mode):
             assert account_id == 7
             assert mode == "passive"
-            return WeeklyWindow(Decimal("40"), 604800, 345600, int(reset_at.timestamp()), "passive_snapshot")
+            return WeeklyWindow(
+                Decimal("40"),
+                604800,
+                reset_after_seconds,
+                int(reset_at.timestamp()),
+                "passive_snapshot",
+            )
 
         def usage_stats(self, *, user_id=None, **_kwargs):
             costs = {None: Decimal("400"), 1: Decimal("300"), 2: Decimal("100")}
