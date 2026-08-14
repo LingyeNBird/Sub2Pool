@@ -86,7 +86,7 @@ plan 创建阶段可以联网收集证据；apply 阶段禁止创建 Sub2API 客
 4. 按 schema_version 校验并应用 typed patch；
 5. 审计 staged-after 全部 point；
 6. 重建 legacy live projection；
-7. 再次审计、验证 fence，推进 fact revision 并记录 before/after hash。
+7. 再次审计、验证 fence 并推进 fact revision。
 
 监控采样使用同一 lease/fencing 协议。旧 owner 即使在租约过期后继续运行，也不能通过 token 检查提交。事务中任何 patch、审计或重放失败都会回滚整个事实组和派生结果。
 

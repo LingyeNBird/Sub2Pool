@@ -81,7 +81,3 @@ def canonical_object_digest(
 
 def expected_user_digest(user_ids: Iterable[int]) -> str:
     return canonical_digest(sorted({int(user_id) for user_id in user_ids}))
-
-
-def canonical_mapping_digest(rows: Iterable[Mapping[str, Any]]) -> str:
-    return canonical_rows_digest(rows)

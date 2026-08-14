@@ -230,3 +230,47 @@ def test_0025_adds_durable_balance_journal_without_rewriting_existing_facts():
     )
     assert operation.state == "prepared"
     assert operation.attempt_count == 0
+
+
+@pytest.mark.django_db(transaction=True)
+def test_0026_removes_unused_after_hashes_without_dropping_run_data():
+    source = [("monitor", "0025_participantbalanceoperation")]
+    target = [("monitor", "0026_remove_historicalrebuildrun_after_hashes")]
+    executor = MigrationExecutor(connection)
+    executor.migrate(source)
+    old_apps = executor.loader.project_state(source).apps
+    HistoricalRebuildRun = old_apps.get_model("monitor", "HistoricalRebuildRun")
+    run = HistoricalRebuildRun.objects.create(
+        account_id=7,
+        mode="audit_replay",
+        state="applied",
+        base_revision=3,
+        result_revision=4,
+        source_digest="source",
+        algorithm_version="algorithm",
+        build_id="build",
+        config_digest="config",
+        participant_policy_digest="policy",
+        expires_at=timezone.now() + timedelta(hours=1),
+        before_source_hash="before-source",
+        after_source_hash="after-source",
+        before_observable_hash="before-observable",
+        after_observable_hash="after-observable",
+    )
+
+    executor = MigrationExecutor(connection)
+    executor.migrate(target)
+    new_apps = executor.loader.project_state(target).apps
+    NewHistoricalRebuildRun = new_apps.get_model(
+        "monitor",
+        "HistoricalRebuildRun",
+    )
+    migrated = NewHistoricalRebuildRun.objects.get(pk=run.pk)
+    field_names = {field.name for field in NewHistoricalRebuildRun._meta.get_fields()}
+
+    assert migrated.state == "applied"
+    assert migrated.result_revision == 4
+    assert migrated.before_source_hash == "before-source"
+    assert migrated.before_observable_hash == "before-observable"
+    assert "after_source_hash" not in field_names
+    assert "after_observable_hash" not in field_names

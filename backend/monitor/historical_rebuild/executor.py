@@ -30,7 +30,6 @@ from .contracts import (
     ObservationCostPayload,
     UserCostPayload,
     config_digest,
-    observable_digest,
     participant_policy_digest,
     plan_digest,
     source_fact_digest,
@@ -341,8 +340,6 @@ def apply_rebuild_plan(run_id, digest: str) -> HistoricalRebuildRun:
             run.state = "applied"
             run.result_revision = state.fact_revision
             run.applied_at = timezone.now()
-            run.after_source_hash = source_fact_digest(run.account_id)
-            run.after_observable_hash = observable_digest(run.account_id)
             summary = dict(run.patch_summary)
             summary["replay"] = replay.as_dict()
             run.patch_summary = summary
@@ -351,8 +348,6 @@ def apply_rebuild_plan(run_id, digest: str) -> HistoricalRebuildRun:
                     "state",
                     "result_revision",
                     "applied_at",
-                    "after_source_hash",
-                    "after_observable_hash",
                     "patch_summary",
                 ]
             )
