@@ -1,3 +1,4 @@
+import importlib
 from datetime import timedelta
 from decimal import Decimal
 
@@ -5,6 +6,7 @@ import pytest
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.utils import timezone
+from monitor.historical_rebuild import apply_rebuild_plan
 
 
 FROM = [("monitor", "0023_appsettings_readonly_api_key_created_at_and_more")]
@@ -274,3 +276,130 @@ def test_0026_removes_unused_after_hashes_without_dropping_run_data():
     assert migrated.before_observable_hash == "before-observable"
     assert "after_source_hash" not in field_names
     assert "after_observable_hash" not in field_names
+
+
+@pytest.mark.django_db(transaction=True)
+def test_0027_removes_remote_repair_and_preserves_local_replay_results():
+    source = [("monitor", "0026_remove_historicalrebuildrun_after_hashes")]
+    target = [("monitor", "0027_remove_verified_remote_repair")]
+    executor = MigrationExecutor(connection)
+    executor.migrate(source)
+    old_apps = executor.loader.project_state(source).apps
+    AppSettings = old_apps.get_model("monitor", "AppSettings")
+    HistoricalRebuildRun = old_apps.get_model("monitor", "HistoricalRebuildRun")
+    expires_at = timezone.now() + timedelta(hours=1)
+    AppSettings.objects.create(pk=1)
+    local = HistoricalRebuildRun.objects.create(
+        account_id=7,
+        mode="audit_replay",
+        state="applied",
+        base_revision=3,
+        result_revision=4,
+        source_digest="source",
+        plan_digest="legacy-local-digest",
+        patch_summary={
+            "total": 0,
+            "replay": {
+                "rebuilt_observations": 2,
+                "automatic_exclusions": 0,
+            },
+        },
+        algorithm_version="algorithm",
+        build_id="build",
+        config_digest="config",
+        participant_policy_digest="policy",
+        expires_at=expires_at,
+    )
+    ready_local = HistoricalRebuildRun.objects.create(
+        account_id=7,
+        mode="audit_replay",
+        state="ready",
+        base_revision=3,
+        source_digest="ready-source",
+        plan_digest="obsolete-digest",
+        algorithm_version="algorithm",
+        build_id="build",
+        config_digest="config",
+        participant_policy_digest="policy",
+        expires_at=expires_at,
+    )
+    blocked_remote = HistoricalRebuildRun.objects.create(
+        account_id=7,
+        mode="verified_remote_repair",
+        state="blocked",
+        base_revision=3,
+        source_digest="remote-source",
+        algorithm_version="algorithm",
+        build_id="build",
+        config_digest="config",
+        participant_policy_digest="policy",
+        expires_at=expires_at,
+    )
+    applied_remote = HistoricalRebuildRun.objects.create(
+        account_id=7,
+        mode="verified_remote_repair",
+        state="applied",
+        base_revision=3,
+        result_revision=4,
+        source_digest="applied-remote-source",
+        algorithm_version="algorithm",
+        build_id="build",
+        config_digest="config",
+        participant_policy_digest="policy",
+        expires_at=expires_at,
+    )
+    migration = importlib.import_module(
+        "monitor.migrations.0027_remove_verified_remote_repair"
+    )
+    with pytest.raises(RuntimeError, match="已应用的远端修复"):
+        migration.prepare_local_replay_runs(old_apps, None)
+    applied_remote.delete()
+
+    executor = MigrationExecutor(connection)
+    executor.migrate(target)
+    new_apps = executor.loader.project_state(target).apps
+    NewSettings = new_apps.get_model("monitor", "AppSettings")
+    NewHistoricalRebuildRun = new_apps.get_model(
+        "monitor",
+        "HistoricalRebuildRun",
+    )
+    migrated = NewHistoricalRebuildRun.objects.get(pk=local.pk)
+    run_fields = {field.name for field in NewHistoricalRebuildRun._meta.get_fields()}
+    settings_fields = {
+        field.name for field in NewSettings._meta.get_fields()
+    }
+
+    assert migrated.replay_summary == {
+        "rebuilt_observations": 2,
+        "automatic_exclusions": 0,
+    }
+    assert migrated.state == "applied"
+    assert (
+        apply_rebuild_plan(local.pk, "legacy-local-digest").result_revision == 4
+    )
+    assert (
+        NewHistoricalRebuildRun.objects.get(pk=ready_local.pk).state == "stale"
+    )
+    assert not NewHistoricalRebuildRun.objects.filter(pk=blocked_remote.pk).exists()
+    assert {
+        "mode",
+        "cutoff",
+        "requested_started_at",
+        "requested_ended_at",
+        "patch_summary",
+        "before_source_hash",
+        "before_observable_hash",
+        "rollback_revision",
+        "rolled_back_at",
+    }.isdisjoint(run_fields)
+    assert "sub2api_usage_log_query_horizon_days" not in settings_fields
+    assert "rolled_back" not in {
+        value
+        for value, _label in NewHistoricalRebuildRun._meta.get_field(
+            "state"
+        ).choices
+    }
+    with pytest.raises(LookupError):
+        new_apps.get_model("monitor", "HistoricalRebuildCoverage")
+    with pytest.raises(LookupError):
+        new_apps.get_model("monitor", "HistoricalRebuildPatch")

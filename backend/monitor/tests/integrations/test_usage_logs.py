@@ -24,7 +24,7 @@ def _client(handler):
 
 
 @pytest.mark.django_db
-def test_usage_log_scan_is_fail_closed_but_does_not_claim_retention_coverage():
+def test_usage_logs_uses_strict_pagination_and_returns_sampling_rows():
     ended_at = timezone.now().replace(microsecond=0)
     started_at = ended_at - timedelta(hours=2)
     requests = []
@@ -42,7 +42,9 @@ def test_usage_log_scan_is_fail_closed_but_does_not_claim_retention_coverage():
                             "id": 10,
                             "user_id": 11,
                             "account_id": 7,
-                            "created_at": (started_at + timedelta(minutes=5)).isoformat(),
+                            "created_at": (
+                                started_at + timedelta(minutes=5)
+                            ).isoformat(),
                             "service_tier": "priority",
                             "total_cost": "4.5",
                             "actual_cost": "3.5",
@@ -59,7 +61,7 @@ def test_usage_log_scan_is_fail_closed_but_does_not_claim_retention_coverage():
         )
 
     with _client(handler) as client:
-        scan = client.usage_log_scan(
+        rows = client.usage_logs(
             account_id=7,
             started_at=started_at,
             ended_at=ended_at,
@@ -70,19 +72,13 @@ def test_usage_log_scan_is_fail_closed_but_does_not_claim_retention_coverage():
     assert requests[0].url.params["exact_total"] == "true"
     assert requests[0].url.params["sort_by"] == "created_at"
     assert requests[0].url.params["sort_order"] == "asc"
-    assert scan.returned_total == 1
-    assert scan.scanned_pages == 1
-    assert scan.out_of_range_count == 0
-    assert scan.rows[0].api_key_id == 91
-    assert scan.rows[0].api_key_name == "desktop"
-    assert scan.coverage_status("account_cost") == "policy_only"
-    assert scan.coverage_status("user_cost") == "policy_only"
-    assert scan.coverage_status("api_key") == "unavailable"
-    assert scan.expected_user_ids is None
+    assert len(rows) == 1
+    assert rows[0].api_key_id == 91
+    assert rows[0].api_key_name == "desktop"
 
 
 @pytest.mark.django_db
-def test_usage_log_scan_rejects_pagination_totals_that_change_mid_scan():
+def test_usage_logs_rejects_pagination_totals_that_change_mid_scan():
     ended_at = timezone.now().replace(microsecond=0)
     started_at = ended_at - timedelta(hours=2)
 
@@ -120,7 +116,7 @@ def test_usage_log_scan_rejects_pagination_totals_that_change_mid_scan():
 
     with _client(handler) as client:
         with pytest.raises(Sub2APIError, match="分页期间数据发生变化"):
-            client.usage_log_scan(
+            client.usage_logs(
                 account_id=7,
                 started_at=started_at,
                 ended_at=ended_at,
@@ -129,9 +125,10 @@ def test_usage_log_scan_rejects_pagination_totals_that_change_mid_scan():
 
 
 @pytest.mark.django_db
-def test_usage_log_scan_rejects_duplicate_rows_across_pages():
+def test_usage_logs_rejects_duplicate_rows_across_pages():
     ended_at = timezone.now().replace(microsecond=0)
     started_at = ended_at - timedelta(hours=2)
+
     def row(log_id: int) -> dict:
         return {
             "id": log_id,
@@ -168,7 +165,7 @@ def test_usage_log_scan_rejects_duplicate_rows_across_pages():
 
     with _client(handler) as client:
         with pytest.raises(Sub2APIError, match="重复行"):
-            client.usage_log_scan(
+            client.usage_logs(
                 account_id=7,
                 started_at=started_at,
                 ended_at=ended_at,
@@ -176,9 +173,8 @@ def test_usage_log_scan_rejects_duplicate_rows_across_pages():
             )
 
 
-
 @pytest.mark.django_db
-def test_usage_log_scan_rejects_reported_total_larger_than_actual_rows():
+def test_usage_logs_rejects_reported_total_larger_than_actual_rows():
     ended_at = timezone.now().replace(microsecond=0)
     started_at = ended_at - timedelta(hours=2)
     raw = {
@@ -209,7 +205,7 @@ def test_usage_log_scan_rejects_reported_total_larger_than_actual_rows():
 
     with _client(handler) as client:
         with pytest.raises(Sub2APIError, match="分页.*行数|总数"):
-            client.usage_log_scan(
+            client.usage_logs(
                 account_id=7,
                 started_at=started_at,
                 ended_at=ended_at,
@@ -218,7 +214,7 @@ def test_usage_log_scan_rejects_reported_total_larger_than_actual_rows():
 
 
 @pytest.mark.django_db
-def test_usage_log_scan_rejects_truncated_last_page():
+def test_usage_logs_rejects_truncated_last_page():
     ended_at = timezone.now().replace(microsecond=0)
     started_at = ended_at - timedelta(hours=2)
     raw = {
@@ -250,7 +246,7 @@ def test_usage_log_scan_rejects_truncated_last_page():
 
     with _client(handler) as client:
         with pytest.raises(Sub2APIError, match="分页.*行数|总数"):
-            client.usage_log_scan(
+            client.usage_logs(
                 account_id=7,
                 started_at=started_at,
                 ended_at=ended_at,

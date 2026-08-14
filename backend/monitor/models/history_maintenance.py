@@ -11,7 +11,7 @@ class UsageSamplePoint(models.Model):
     """One locally committed sampling fact group.
 
     ``write_status=complete`` only proves that this application's local rows were
-    committed together.  It is deliberately separate from remote-log coverage.
+    committed together; it does not prove older upstream logs were retained.
     """
 
     WRITE_STATUS_CHOICES = (
@@ -199,12 +199,8 @@ class HistoryMaintenanceState(models.Model):
 
 
 class HistoricalRebuildRun(models.Model):
-    """Immutable plan identity plus mutable apply/rollback lifecycle metadata."""
+    """Immutable local audit identity plus mutable apply metadata."""
 
-    MODE_CHOICES = (
-        ("audit_replay", "本地审计并重放"),
-        ("verified_remote_repair", "远端验证修复"),
-    )
     STATE_CHOICES = (
         ("generating", "生成中"),
         ("ready", "可应用"),
@@ -212,22 +208,16 @@ class HistoricalRebuildRun(models.Model):
         ("stale", "已过期"),
         ("applying", "应用中"),
         ("applied", "已应用"),
-        ("rolled_back", "已回滚"),
         ("failed", "失败"),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     account_id = models.BigIntegerField(db_index=True)
-    mode = models.CharField(max_length=32, choices=MODE_CHOICES)
     state = models.CharField(
         max_length=16, choices=STATE_CHOICES, default="generating"
     )
     base_revision = models.PositiveBigIntegerField()
     result_revision = models.PositiveBigIntegerField(null=True, blank=True)
-    rollback_revision = models.PositiveBigIntegerField(null=True, blank=True)
-    cutoff = models.DateTimeField(null=True, blank=True)
-    requested_started_at = models.DateTimeField(null=True, blank=True)
-    requested_ended_at = models.DateTimeField(null=True, blank=True)
     source_digest = models.CharField(max_length=64)
     plan_digest = models.CharField(max_length=64, blank=True)
     algorithm_version = models.CharField(max_length=64)
@@ -236,12 +226,9 @@ class HistoricalRebuildRun(models.Model):
     participant_policy_digest = models.CharField(max_length=64)
     expires_at = models.DateTimeField()
     blockers = models.JSONField(default=list, blank=True)
-    patch_summary = models.JSONField(default=dict, blank=True)
-    before_source_hash = models.CharField(max_length=64, blank=True)
-    before_observable_hash = models.CharField(max_length=64, blank=True)
+    replay_summary = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     applied_at = models.DateTimeField(null=True, blank=True)
-    rolled_back_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -250,130 +237,4 @@ class HistoricalRebuildRun(models.Model):
                 fields=["account_id", "-created_at"],
                 name="history_run_account_time",
             )
-        ]
-
-
-class HistoricalRebuildCoverage(models.Model):
-    """Evidence status for one exact half-open range and fact dimension."""
-
-    DIMENSION_CHOICES = (
-        ("account_cost", "账号成本"),
-        ("user_cost", "用户成本"),
-        ("fast_cost", "FAST 成本"),
-        ("request_count", "请求数"),
-        ("api_key", "API Key"),
-    )
-    STATUS_CHOICES = (
-        ("verified", "已验证"),
-        ("verified_empty", "已验证为空"),
-        ("captured_local", "本地完整写入"),
-        ("out_of_scope", "目标范围外"),
-        ("policy_only", "仅策略推定"),
-        ("unknown", "未知"),
-        ("unavailable", "不可用"),
-    )
-
-    run = models.ForeignKey(
-        HistoricalRebuildRun,
-        on_delete=models.CASCADE,
-        related_name="coverage_rows",
-    )
-    point = models.ForeignKey(
-        UsageSamplePoint,
-        on_delete=models.PROTECT,
-        related_name="rebuild_coverage_rows",
-        null=True,
-        blank=True,
-    )
-    started_at = models.DateTimeField()
-    ended_at = models.DateTimeField()
-    dimension = models.CharField(max_length=24, choices=DIMENSION_CHOICES)
-    status = models.CharField(max_length=24, choices=STATUS_CHOICES)
-    evidence_type = models.CharField(max_length=64)
-    evidence_digest = models.CharField(max_length=64, blank=True)
-    blocker = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["started_at", "dimension", "id"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["run", "point", "started_at", "ended_at", "dimension"],
-                name="unique_rebuild_coverage",
-            ),
-            models.CheckConstraint(
-                condition=Q(ended_at__gt=models.F("started_at")),
-                name="coverage_nonempty_range",
-            ),
-        ]
-
-
-class HistoricalRebuildPatch(models.Model):
-    """Typed before/after source patch protected by the immutable plan digest."""
-
-    KIND_CHOICES = (
-        ("observation_cost", "观测/采样点成本"),
-        ("user_cost", "用户成本"),
-        ("fast_fact", "FAST 事实"),
-    )
-
-    run = models.ForeignKey(
-        HistoricalRebuildRun,
-        on_delete=models.CASCADE,
-        related_name="patches",
-    )
-    sequence = models.PositiveIntegerField()
-    kind = models.CharField(max_length=24, choices=KIND_CHOICES)
-    sample_point = models.ForeignKey(
-        UsageSamplePoint,
-        on_delete=models.PROTECT,
-        related_name="rebuild_patches",
-    )
-    observation = models.ForeignKey(
-        "Observation",
-        on_delete=models.PROTECT,
-        related_name="rebuild_patches",
-        null=True,
-        blank=True,
-    )
-    user_sample = models.ForeignKey(
-        "Sub2APIUserUsageSample",
-        on_delete=models.PROTECT,
-        related_name="rebuild_patches",
-        null=True,
-        blank=True,
-    )
-    sub2api_user_id = models.BigIntegerField(null=True, blank=True)
-    natural_key = models.JSONField()
-    schema_version = models.PositiveSmallIntegerField(default=1)
-    before_payload = models.JSONField(null=True, blank=True)
-    after_payload = models.JSONField()
-    required_coverage_ids = models.JSONField(default=list)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["sequence"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["run", "sequence"],
-                name="unique_rebuild_patch_sequence",
-            ),
-            models.CheckConstraint(
-                condition=(
-                    Q(
-                        kind="observation_cost",
-                        sub2api_user_id__isnull=True,
-                    )
-                    | Q(
-                        kind="user_cost",
-                        sub2api_user_id__isnull=False,
-                    )
-                    | Q(
-                        kind="fast_fact",
-                        observation__isnull=False,
-                        sub2api_user_id__isnull=True,
-                    )
-                ),
-                name="rebuild_patch_natural_key",
-            ),
         ]

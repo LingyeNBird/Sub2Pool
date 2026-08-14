@@ -37,14 +37,13 @@ const emit = defineEmits<{ save: [] }>();
           当前周期有
           {{ settings.fast_correction_missing_intervals }}
           个采样区间缺少 FAST
-          事实。历史补齐只能在下方“数据维护”中创建“远端验证修复”计划；coverage
-          未验证时只显示阻断，不会覆盖现有历史。
+          事实。旧记录无法证明完整请求日志时会保持未知，不会根据当前可查询数据推测或覆盖。
         </span>
       </div>
 
       <p class="text-sm leading-6 opacity-70">
-        开启后只影响后续完整采样。历史 FAST
-        事实与账号、逐用户成本作为同一事实组应用，不再提供独立重建或强制覆盖入口。
+        开启后只影响后续完整采样；已有 FAST
+        事实不会删除，缺失的历史事实不会自动补写。
       </p>
 
       <button

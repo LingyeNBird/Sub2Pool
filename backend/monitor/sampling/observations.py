@@ -38,7 +38,7 @@ def create_raw_observation(
     fast_interval: FastCorrectionInterval | None = None,
     fast_error: str = "",
 ) -> Observation:
-    """保存采样证据；历史成本仅可由带 verified coverage 的计划替换。"""
+    """保存采样证据；历史维护不会根据后续请求日志替换来源成本。"""
 
     selected_total = local.total.selected(config.cost_basis)
     (

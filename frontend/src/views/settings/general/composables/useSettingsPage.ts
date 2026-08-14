@@ -13,7 +13,6 @@ import type {
   AppSettingsData,
   ConfirmDialogOptions,
   HistoricalRebuildPlan,
-  HistoricalRebuildMode,
   ReadOnlyAPIKeyGenerated,
   OpenAIAccountOption,
 } from "@/types";
@@ -43,9 +42,8 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   const exportingDatabase = ref(false);
   const importingDatabase = ref(false);
   const historyRebuildPlan = ref<HistoricalRebuildPlan | null>(null);
-  const planningHistory = ref<HistoricalRebuildMode | "">("");
+  const planningHistory = ref(false);
   const applyingHistory = ref(false);
-  const rollingBackHistory = ref(false);
   const generatingReadOnlyApiKey = ref(false);
   const revokingReadOnlyApiKey = ref(false);
   const passwordForm = reactive<PasswordForm>({
@@ -162,7 +160,6 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         "openai_account_id",
         "quota_query_mode",
         "request_timeout_seconds",
-        "sub2api_usage_log_query_horizon_days",
         "verify_tls",
         "timezone",
       ],
@@ -325,25 +322,22 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     }
   }
 
-  async function createHistoricalRebuildPlan(mode: HistoricalRebuildMode) {
-    planningHistory.value = mode;
+  async function createHistoricalRebuildPlan() {
+    planningHistory.value = true;
     message.value = "";
     success.value = "";
     historyRebuildPlan.value = null;
     try {
       const plan = await api<HistoricalRebuildPlan>(
         "settings/data-maintenance/history-rebuild-plans",
-        { method: "POST", body: jsonBody({ mode }) },
+        { method: "POST" },
       );
       historyRebuildPlan.value = plan;
       if (plan.state === "ready") {
         success.value =
-          mode === "audit_replay"
-            ? "本地全点审计完成：计划已冻结，应用阶段不会连接 Sub2API。"
-            : `远端候选计划已冻结：${plan.patch_summary.total} 个 typed patch 可安全应用。`;
+          "本地全点审计完成：计划已冻结，应用阶段不会连接 Sub2API。";
       } else if (plan.state === "blocked") {
-        success.value =
-          "计划已保存但被 coverage 或源事实不变量阻断；系统不会执行不安全覆盖。";
+        success.value = "计划已保存但被源事实不变量阻断。";
       } else {
         success.value = `计划状态：${plan.state}`;
       }
@@ -351,7 +345,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
       message.value =
         error instanceof ApiError ? error.message : "创建历史维护计划失败";
     } finally {
-      planningHistory.value = "";
+      planningHistory.value = false;
     }
   }
 
@@ -362,7 +356,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
       !(await confirmAction({
         title: "应用已冻结的历史维护计划？",
         message:
-          "系统只消费当前 plan id 与 digest，应用阶段不会访问 Sub2API。源事实会按 typed patch 原子更新并确定性重放；成功后可按维护栈逆序业务回滚。",
+          "系统只消费当前 plan id 与 digest，应用阶段不会访问 Sub2API，也不会改写来源成本；通过审计后只确定性重放派生结果。",
         confirmLabel: "应用计划",
         tone: "warning",
       }))
@@ -377,10 +371,11 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         `settings/data-maintenance/history-rebuild-plans/${plan.id}/apply`,
         { method: "POST", body: jsonBody({ digest: plan.digest }) },
       );
-      const replay = historyRebuildPlan.value.patch_summary.replay;
-      success.value = replay
-        ? `计划已应用：重放 ${replay.rebuilt_observations} 条观测，fact revision 为 ${historyRebuildPlan.value.result_revision}。`
-        : "计划已应用。";
+      const replay = historyRebuildPlan.value.replay_summary;
+      success.value =
+        replay.rebuilt_observations !== undefined
+          ? `计划已应用：重放 ${replay.rebuilt_observations} 条观测，fact revision 为 ${historyRebuildPlan.value.result_revision}。`
+          : "计划已应用。";
     } catch (error) {
       message.value =
         error instanceof ApiError ? error.message : "应用历史维护计划失败";
@@ -393,37 +388,6 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
       }
     } finally {
       applyingHistory.value = false;
-    }
-  }
-
-  async function rollbackHistoricalRebuildPlan() {
-    const plan = historyRebuildPlan.value;
-    if (!plan?.can_rollback) return;
-    if (
-      !(await confirmAction({
-        title: "回滚最近一次历史维护？",
-        message:
-          "只恢复本次 touched source before-image，并使用同版本算法重放；cutoff 后新增采样会保留，不承诺字节级数据库还原。",
-        confirmLabel: "业务回滚",
-        tone: "warning",
-      }))
-    ) {
-      return;
-    }
-    rollingBackHistory.value = true;
-    message.value = "";
-    success.value = "";
-    try {
-      historyRebuildPlan.value = await api<HistoricalRebuildPlan>(
-        `settings/data-maintenance/history-rebuild-plans/${plan.id}/rollback`,
-        { method: "POST" },
-      );
-      success.value = `业务回滚完成，fact revision 为 ${historyRebuildPlan.value.rollback_revision}。`;
-    } catch (error) {
-      message.value =
-        error instanceof ApiError ? error.message : "业务回滚失败";
-    } finally {
-      rollingBackHistory.value = false;
     }
   }
 
@@ -544,7 +508,6 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     historyRebuildPlan,
     planningHistory,
     applyingHistory,
-    rollingBackHistory,
     generatingReadOnlyApiKey,
     revokingReadOnlyApiKey,
     passwordForm,
@@ -559,7 +522,6 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     saveFastCorrection,
     createHistoricalRebuildPlan,
     applyHistoricalRebuildPlan,
-    rollbackHistoricalRebuildPlan,
     test,
     changePassword,
     generateReadOnlyApiKey,

@@ -1,13 +1,12 @@
 """Structural interfaces consumed by sampling and correction services."""
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from .dto import (
     Sub2APIUsageLog,
     Sub2APIUserUsage,
     UsageStats,
-    UsageLogScan,
     UserBalance,
     WeeklyWindow,
 )
@@ -38,17 +37,6 @@ class Sub2APIReader(Protocol):
         end_date: date,
         timezone_name: str,
     ) -> list[Sub2APIUserUsage]: ...
-    def usage_log_scan(
-        self,
-        *,
-        account_id: int,
-        started_at: datetime | None,
-        ended_at: datetime,
-        timezone_name: str,
-        user_id: int | None = None,
-        row_consumer: Callable[[Sub2APIUsageLog], None] | None = None,
-        collect_rows: bool = True,
-    ) -> UsageLogScan: ...
     def usage_logs(
         self,
         *,

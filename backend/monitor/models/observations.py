@@ -8,7 +8,7 @@ from .participants import Participant
 
 
 class Observation(models.Model):
-    """一次上游百分比采样；成本只有在逐维 coverage 已验证时才可替换。"""
+    """一次上游百分比采样；已保存成本是历史维护不会替换的来源事实。"""
     SOURCE_CHOICES = (("scheduled", "定时"), ("manual", "手动"), ("exhausted", "额度耗尽触发"), ("reset", "重置临近"))
     EXCLUSION_CHOICES = (
         ("", "未排除"),

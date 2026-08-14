@@ -17,7 +17,6 @@ from .views.maintenance import (
     HistoricalRebuildApplyView,
     HistoricalRebuildPlanDetailView,
     HistoricalRebuildPlanListView,
-    HistoricalRebuildRollbackView,
 )
 from .views.monitoring import RunMonitorView
 from .views.participants import (
@@ -131,10 +130,6 @@ urlpatterns = [
     path(
         "settings/data-maintenance/history-rebuild-plans/<uuid:plan_id>/apply",
         HistoricalRebuildApplyView.as_view(),
-    ),
-    path(
-        "settings/data-maintenance/history-rebuild-plans/<uuid:plan_id>/rollback",
-        HistoricalRebuildRollbackView.as_view(),
     ),
     path("monitor/run", RunMonitorView.as_view()),
 ]

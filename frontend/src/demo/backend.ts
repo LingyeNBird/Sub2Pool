@@ -3,7 +3,6 @@ import type {
   AppSettingsData,
   BlockedIPAddress,
   FastCorrectionDetail,
-  HistoricalCoverageDimension,
   HistoricalRebuildPlan,
   LoginEventData,
   NotificationListData,
@@ -445,69 +444,21 @@ function fastCorrectionData(
   };
 }
 
-function createPlan(state: DemoState, mode: string): HistoricalRebuildPlan {
-  const ready = true;
-  const now = Date.parse(state.clock);
+function createPlan(state: DemoState): HistoricalRebuildPlan {
+  const now = Date.now();
   const id = `demo-plan-${state.plans.length + 1}`;
-  const dimensions: HistoricalCoverageDimension[] = [
-    "account_cost",
-    "user_cost",
-    "fast_cost",
-    "request_count",
-    "api_key",
-  ];
   const plan: HistoricalRebuildPlan = {
     id,
     account_id: 8801,
-    mode:
-      mode === "verified_remote_repair"
-        ? "verified_remote_repair"
-        : "audit_replay",
-    state: ready ? "ready" : "blocked",
+    state: "ready",
     digest: `demo_digest_${String(state.revision).padStart(4, "0")}_${state.observations.length}`,
     created_at: new Date(now).toISOString(),
-    expires_at: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+    expires_at: new Date(now + 30 * 60 * 1000).toISOString(),
     base_revision: state.revision,
     result_revision: null,
-    rollback_revision: null,
-    cutoff: state.observations.at(-1)?.observed_at ?? null,
-    coverage: dimensions.map((dimension, index) => ({
-      id: index + 1,
-      point_id: null,
-      started_at: state.periods[0].startedAt,
-      ended_at: state.periods.at(-1)!.endedAt,
-      dimension,
-      status:
-        dimension === "api_key"
-          ? "unavailable"
-          : mode === "audit_replay"
-            ? "captured_local"
-            : "verified",
-      evidence_type:
-        mode === "audit_replay" ? "demo_local_fact" : "demo_verified_log",
-      evidence_digest: `demo_evidence_${index + 1}`,
-      blocker:
-        dimension === "api_key" ? "上游未提供历史 API Key 完整性证明" : "",
-    })),
-    blockers: [
-      {
-        code: "api_key_history_unavailable",
-        severity: "warning",
-        point_id: null,
-        message: "API Key 历史构成不可验证，保留现有事实；不阻断本地重放。",
-      },
-    ],
-    patch_summary: {
-      total: mode === "verified_remote_repair" ? 36 : 0,
-      observation_cost: mode === "verified_remote_repair" ? 12 : 0,
-      user_cost: mode === "verified_remote_repair" ? 12 : 0,
-      fast_fact: mode === "verified_remote_repair" ? 12 : 0,
-    },
+    blockers: [],
+    replay_summary: {},
     safe_to_apply: true,
-    unknown_coverage: true,
-    applied_with_unknown_coverage: false,
-    can_rollback: false,
-    rollback_boundary: "touched_source_then_deterministic_replay",
     algorithm_version: "demo-replay-v1",
     build_id: "github-pages-demo",
   };
@@ -894,12 +845,15 @@ export async function demoRequest(
     method === "POST" &&
     pathname === "settings/data-maintenance/history-rebuild-plans"
   ) {
-    const plan = createPlan(state, String(payload.mode ?? "audit_replay"));
+    if (Object.keys(payload).length > 0) {
+      return failure("本地历史维护计划不接受 mode 或时间范围参数", 400);
+    }
+    const plan = createPlan(state);
     saveDemoState(state);
     return envelope(plan, 201);
   }
   const planMatch =
-    /^settings\/data-maintenance\/history-rebuild-plans\/([^/]+)(?:\/(apply|rollback))?$/.exec(
+    /^settings\/data-maintenance\/history-rebuild-plans\/([^/]+)(?:\/(apply))?$/.exec(
       pathname,
     );
   if (planMatch) {
@@ -907,22 +861,36 @@ export async function demoRequest(
     if (!plan) return failure("维护计划不存在", 404);
     if (method === "GET" && !planMatch[2]) return envelope(plan);
     if (method === "POST" && planMatch[2] === "apply") {
+      const digest = payload.digest;
+      if (typeof digest !== "string" || !digest) {
+        return failure("apply 必须提交计划 digest", 400);
+      }
+      if (plan.state === "applied") {
+        return digest === plan.digest
+          ? envelope(plan)
+          : failure("计划已经应用且 digest 不匹配", 409);
+      }
+      if (plan.state !== "ready" || !plan.safe_to_apply) {
+        return failure("计划当前不可应用", 409);
+      }
+      if (digest !== plan.digest) {
+        return failure("计划 digest 不匹配", 409);
+      }
+      if (Date.parse(plan.expires_at) <= Date.now()) {
+        plan.state = "stale";
+        plan.safe_to_apply = false;
+        saveDemoState(state);
+        return failure("计划已过期，请重新创建", 409);
+      }
       plan.state = "applied";
       plan.result_revision = ++state.revision;
-      plan.can_rollback = true;
-      plan.patch_summary.replay = {
+      plan.safe_to_apply = false;
+      plan.replay_summary = {
         rebuilt_observations: state.observations.length,
         automatic_exclusions: 0,
         inferred_intervals: 0,
         latest_observation_id: state.observations.at(-1)?.id ?? null,
       };
-      saveDemoState(state);
-      return envelope(plan);
-    }
-    if (method === "POST" && planMatch[2] === "rollback") {
-      plan.state = "rolled_back";
-      plan.rollback_revision = ++state.revision;
-      plan.can_rollback = false;
       saveDemoState(state);
       return envelope(plan);
     }

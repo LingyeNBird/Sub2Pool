@@ -45,7 +45,6 @@ SETTINGS_FIELDS = (
     "openai_account_id",
     "quota_query_mode",
     "request_timeout_seconds",
-    "sub2api_usage_log_query_horizon_days",
     "verify_tls",
     "timezone",
     "cost_basis",

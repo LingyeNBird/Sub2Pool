@@ -14,8 +14,6 @@ from .fast_correction import ObservationFastCorrection
 from .api_usage import ParticipantAPIUsageSnapshot
 from .audit import BlockedIPAddress, LoginEvent, NotificationEvent
 from .history_maintenance import (
-    HistoricalRebuildCoverage,
-    HistoricalRebuildPatch,
     HistoricalRebuildRun,
     HistoryMaintenanceState,
     ParticipantBalanceOperation,
@@ -26,8 +24,6 @@ from .history_maintenance import (
 __all__ = [
     "AppSettings",
     "BlockedIPAddress",
-    "HistoricalRebuildCoverage",
-    "HistoricalRebuildPatch",
     "HistoricalRebuildRun",
     "HistoryMaintenanceState",
     "LoginEvent",

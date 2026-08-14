@@ -28,11 +28,9 @@
 
 0024 以前的数据迁移为 `legacy_unknown`。迁移只建立 point、外键和余额证据，不联网、不修改历史金额，也不把旧行宣称为原子完整采样。
 
-### 可验证远端事实
+### 历史缺失事实
 
-账号成本、逐用户成本、FAST/service-tier 成本和请求数在**特定半开区间**内可能由请求日志重新计算，但只有独立证据证明该维度完整覆盖时才允许覆盖本地事实。当前 Sub2API 的分页总数、`exact_total`、可查询天数或“返回了若干行”只证明本次分页一致，状态是 `policy_only`，不能证明更早日志未被清理。
-
-API Key 构成没有独立历史覆盖证明时为 `unavailable`。系统不长期镜像请求日志；维护计划只持久化证据摘要、coverage 和需要应用的 typed before/after patch。
+请求日志只用于形成后续完整采样。当前能够查询到某段日志、分页总数一致或返回非空，都不能证明更早日志没有被清理。因此，旧采样缺失的 FAST/service-tier 成本或请求数保持 unknown；历史维护不会据此发明或覆盖来源事实。
 
 ### 派生结果
 
@@ -40,18 +38,17 @@ API Key 构成没有独立历史覆盖证明时为 `unavailable`。系统不长�
 
 ## 不可变维护计划
 
-历史维护采用持久化 plan，而不是一个“mode 参数 + 立即执行”的请求。
+历史维护采用持久化的本地审计 plan，而不是立即执行请求：
 
-1. `POST /api/settings/data-maintenance/history-rebuild-plans` 创建计划；
-2. 计划冻结账号、cutoff、fact revision、源事实/配置/参与者策略摘要、算法版本、构建版本、过期时间、逐维 coverage、blocker 和 typed before/after patch；
-3. `POST .../<plan-id>/apply` 必须提交相同 digest；
-4. `POST .../<plan-id>/rollback` 只允许按 applied 栈逆序业务回滚。
+1. `POST /api/settings/data-maintenance/history-rebuild-plans` 创建零联网审计计划；
+2. 计划冻结账号、fact revision、源事实/配置/参与者策略摘要、算法版本、构建版本、过期时间和 blocker；
+3. `POST .../<plan-id>/apply` 必须提交相同 digest。
 
-计划或 patch journal 内容被修改、过期，或者源事实、fact revision、配置、参与者策略、算法/构建版本发生变化时，apply 与 rollback 都会按 plan digest fail closed。数据库本身不宣称提供 patch 表的 append-only 强制约束；不可变性由每次采用/回滚前重新计算 journal digest 验证。每个账号的单调 `fact_revision` 标识来源事实代次；采样、管理员余额事件、人工边界操作、参与者策略和相关设置变化都会推进 revision。
+计划内容被修改、过期，或者源事实、fact revision、配置、参与者策略、算法/构建版本发生变化时，apply 会 fail closed。每个账号的单调 `fact_revision` 标识来源事实代次；采样、管理员余额事件、人工边界操作、参与者策略和相关设置变化都会推进 revision。
 
 ### 本地审计并重放
 
-`audit_replay` 对所有 observation 与非 observation point 进行零联网审计，包括：
+本地计划对所有 observation 与非 observation point 进行零联网审计，包括：
 
 - 账号及逐用户窗口、相邻区间连续性与累计差值；
 - expected-user 完整性；
@@ -60,53 +57,25 @@ API Key 构成没有独立历史覆盖证明时为 `unavailable`。系统不长�
 - FAST 父级与逐用户明细、请求数一致性；
 - orphan source rows。
 
-存在 hard blocker 时计划不可应用；通过后 apply 只做确定性重放，不改写来源成本。
-
-### 远端验证修复
-
-`verified_remote_repair` 的查询 horizon 只是远端查询预算，不是 retention，也不是 coverage。目标范围外的健康点记录为 `out_of_scope` 诊断，不会因 coverage 阻断目标范围；真实全局 source invariant 仍会阻断。目标范围内按 point 和最多一天的日期块流式扫描，跨累计 point 复用相同块的聚合摘要，不持有或持久化整段请求日志。
-
-- `account_cost`；
-- `user_cost`；
-- `fast_cost`；
-- `request_count`；
-- `api_key`。
-
-coverage 状态包括 `verified`、`verified_empty`、`captured_local`、`out_of_scope`、`policy_only`、`unknown` 和 `unavailable`。远端 patch 只引用 `verified` 或 `verified_empty` coverage；验证为空是有效证据，可以把错误的非零事实修复为零。缺少 expected-user 集合、出现集合外用户或任一原子事实组所需维度未验证时，只保存 blocker，不生成可应用覆盖。
-
-账号、逐用户和 FAST 是一个原子采用单元。系统不提供 unsafe force，也不再提供独立 FAST 历史重建端点；FAST 历史修复只能作为 `verified_remote_repair` plan 中受 coverage 约束的 typed patch。
+存在 hard blocker 时计划不可应用；通过后 apply 只做确定性重放，不改写来源成本。系统不提供根据当前请求日志覆盖历史来源事实的远端修复模式。
 
 ## Apply 与并发
 
-plan 创建阶段可以联网收集证据；apply 阶段禁止创建 Sub2API 客户端，只读取持久化 coverage 和 patch journal。apply 在一个数据库事务中完成：
+apply 在一个数据库事务中完成：
 
 1. 获取账号级可续期 lease 和单调 fencing token；
-2. 锁定 plan、维护状态、设置及 touched source rows；
-3. 验证 digest、TTL、revision、源事实/配置/策略摘要和每个 patch 的 coverage；
-4. 按 schema_version 校验并应用 typed patch；
-5. 审计 staged-after 全部 point；
-6. 重建 legacy live projection；
-7. 再次审计、验证 fence 并推进 fact revision。
+2. 锁定 plan、维护状态和设置；
+3. 验证 digest、TTL、revision、源事实/配置/策略摘要；
+4. 再次审计全部 point；
+5. 重建 legacy live projection；
+6. 重验来源事实不变量与 fence，推进 fact revision 并保存重放结果。
 
-监控采样使用同一 lease/fencing 协议。旧 owner 即使在租约过期后继续运行，也不能通过 token 检查提交。事务中任何 patch、审计或重放失败都会回滚整个事实组和派生结果。
+监控采样使用同一 lease/fencing 协议。旧 owner 即使在租约过期后继续运行，也不能通过 token 检查提交。事务中任何审计或重放失败都会回滚维护状态和派生结果。
 
 参与者 create/update/delete、人工重放/排除/恢复/起点、影响重放的设置、运维重放命令和数据库导入也使用同一协议。数据库导入持有全局 lease，并把同一 owner 与更高 fencing token 写入待导入快照后再覆盖文件；因此替换 SQLite 的窗口不会擦除正在生效的 fence。
 
 管理员一键余额调整在联网前持久化 `ParticipantBalanceOperation`。远端成功先独立记录为 `remote_confirmed`，再以原 revision 和 fence 原子提交余额证据；本地提交失败时重试不会再次写远端。网络结果不确定时操作保持 `reconciliation_required`，后续重试先读取远端余额，匹配目标则直接完成，否则幂等重设同一目标。未完成操作会阻断其他来源写入，避免远端成功但本地事件永久丢失。
 
-## 业务回滚
-
-rollback 不是数据库字节恢复。它只恢复该 plan touched source 的 typed before-image，然后用同一算法和配置重放 legacy projection：
-
-- 只能回滚账号最近一次 applied plan；
-- 当前 touched source 必须仍等于 plan 的 after-image；
-- plan digest 必须重新证明 coverage 与 typed patch journal 未被修改或追加；
-- 每条 touched source 恢复后必须逐项等于 typed before-image，新增行必须证明确已删除；
-- 算法、构建、配置和参与者策略必须仍满足计划承诺；
-- cutoff 后新增且未触碰的采样及后续管理员余额事件保留；
-- 没有后续来源写入时，source 和 API 可观察 hash 必须恢复到 before hash。
-
-回滚成功同样推进 fact revision，因此旧计划不会重新变为可应用。
 
 ## 归属区间
 
@@ -128,7 +97,7 @@ Sub2API 累计统计按自然日期查询；查询起点变化时累计值不能
 
 ## 确定性重放
 
-新增末尾观测从当前区间起点重放；历史插入、人工起点、排除、恢复或算法升级从最早受影响边界向后重放。维护 apply/rollback 在来源事实事务内重放全部受影响结果。
+新增末尾观测从当前区间起点重放；历史插入、人工起点、排除、恢复或算法升级从最早受影响边界向后重放。维护 apply 在来源事实事务内重放全部受影响结果。
 
 粒子滤波随机种子必须来自稳定事实，例如：
 

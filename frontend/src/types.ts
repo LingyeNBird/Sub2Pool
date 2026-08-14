@@ -467,7 +467,6 @@ export interface AppSettingsData {
   openai_account_id: number | null;
   quota_query_mode: string;
   request_timeout_seconds: number;
-  sub2api_usage_log_query_horizon_days: number;
   verify_tls: boolean;
   timezone: string;
   cost_basis: string;
@@ -518,48 +517,23 @@ export interface ReadOnlyAPIKeyGenerated {
   created_at: string;
 }
 
-export type HistoricalRebuildMode = "audit_replay" | "verified_remote_repair";
-
-export type HistoricalCoverageDimension =
-  | "account_cost"
-  | "user_cost"
-  | "fast_cost"
-  | "request_count"
-  | "api_key";
-
-export type HistoricalCoverageStatus =
-  | "verified"
-  | "verified_empty"
-  | "captured_local"
-  | "out_of_scope"
-  | "policy_only"
-  | "unknown"
-  | "unavailable";
-
-export interface HistoricalRebuildCoverage {
-  id: number;
-  point_id: number | null;
-  started_at: string;
-  ended_at: string;
-  dimension: HistoricalCoverageDimension;
-  status: HistoricalCoverageStatus;
-  evidence_type: string;
-  evidence_digest: string;
-  blocker: string;
-}
-
 export interface HistoricalRebuildBlocker {
   code: string;
   severity: "hard" | "warning";
   point_id: number | null;
   message: string;
-  resolved_by_patch?: boolean;
+}
+
+export interface HistoricalReplaySummary {
+  rebuilt_observations?: number;
+  automatic_exclusions?: number;
+  inferred_intervals?: number;
+  latest_observation_id?: number | null;
 }
 
 export interface HistoricalRebuildPlan {
   id: string;
   account_id: number;
-  mode: HistoricalRebuildMode;
   state:
     | "generating"
     | "ready"
@@ -567,34 +541,15 @@ export interface HistoricalRebuildPlan {
     | "stale"
     | "applying"
     | "applied"
-    | "rolled_back"
     | "failed";
   digest: string;
   created_at: string;
   expires_at: string;
   base_revision: number;
   result_revision: number | null;
-  rollback_revision: number | null;
-  cutoff: string | null;
-  coverage: HistoricalRebuildCoverage[];
   blockers: HistoricalRebuildBlocker[];
-  patch_summary: {
-    total: number;
-    observation_cost: number;
-    user_cost: number;
-    fast_fact: number;
-    replay?: {
-      rebuilt_observations: number;
-      automatic_exclusions: number;
-      inferred_intervals: number;
-      latest_observation_id: number | null;
-    };
-  };
+  replay_summary: HistoricalReplaySummary;
   safe_to_apply: boolean;
-  unknown_coverage: boolean;
-  applied_with_unknown_coverage: boolean;
-  can_rollback: boolean;
-  rollback_boundary: "touched_source_then_deterministic_replay";
   algorithm_version: string;
   build_id: string;
 }

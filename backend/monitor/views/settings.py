@@ -35,7 +35,6 @@ PLAN_RELEVANT_SETTINGS = frozenset(
         "initial_usd_per_percent",
         "safety_factor",
         "daily_estimate_min_percent_span",
-        "sub2api_usage_log_query_horizon_days",
     }
 )
 

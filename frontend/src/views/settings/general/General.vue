@@ -42,7 +42,6 @@ const {
   revokingReadOnlyApiKey,
   planningHistory,
   applyingHistory,
-  rollingBackHistory,
   passwordForm,
   loadOpenAIAccounts,
   saveConnection,
@@ -55,7 +54,6 @@ const {
   importDatabase,
   createHistoricalRebuildPlan,
   applyHistoricalRebuildPlan,
-  rollbackHistoricalRebuildPlan,
   test,
   generateReadOnlyApiKey,
   revokeReadOnlyApiKey,
@@ -169,10 +167,8 @@ async function handleRevokeReadOnlyAPIKey() {
       :plan="historyRebuildPlan"
       :planning="planningHistory"
       :applying="applyingHistory"
-      :rolling-back="rollingBackHistory"
       @create-plan="createHistoricalRebuildPlan"
       @apply="applyHistoricalRebuildPlan"
-      @rollback="rollbackHistoricalRebuildPlan"
     />
     <DatabaseTransferCard
       :exporting="exportingDatabase"

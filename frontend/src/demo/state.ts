@@ -21,7 +21,7 @@ import type {
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 
-const DEMO_STATE_KEY = "sub2pool:demo:v2:state";
+const DEMO_STATE_KEY = "sub2pool:demo:v3:state";
 const DEMO_AUTH_KEY = "sub2pool:demo:v1:auth";
 const DEMO_ANCHOR = Date.UTC(2026, 7, 12, 4, 0, 0);
 const HOUR = 3_600_000;
@@ -45,7 +45,7 @@ interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 2;
+  version: 3;
   clock: string;
   nextParticipantId: number;
   nextSystemUserId: number;
@@ -572,7 +572,6 @@ function baseSettings(): AppSettingsData {
     openai_account_id: 8801,
     quota_query_mode: "passive",
     request_timeout_seconds: 20,
-    sub2api_usage_log_query_horizon_days: 90,
     verify_tls: true,
     timezone: "Asia/Shanghai",
     cost_basis: "actual",
@@ -632,7 +631,7 @@ function initializeState(): DemoState {
     participant.last_checked_at = latest.observed_at;
   }
   return {
-    version: 2,
+    version: 3,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextSystemUserId: 3,
@@ -688,7 +687,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 2) return parsed;
+      if (parsed.version === 3) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }

@@ -19,7 +19,7 @@ class ObservationFastCorrection(models.Model):
     sub2api_user_id = models.BigIntegerField(db_index=True)
     fast_request_count = models.PositiveIntegerField(default=0)
     # 该用户在区间内的全部请求数；FAST 与非 FAST 请求均计入。
-    # NULL 表示旧版本明细缺失；只有 verified request_count coverage 才可补齐。
+    # NULL 表示旧版本明细缺失；没有当时的完整采样证据时保持未知。
     request_count = models.PositiveIntegerField(null=True, blank=True)
     fast_standard_cost = models.DecimalField(max_digits=18, decimal_places=6)
     fast_actual_cost = models.DecimalField(max_digits=18, decimal_places=6)

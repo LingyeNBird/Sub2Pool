@@ -58,31 +58,6 @@ class Sub2APIUsageLog:
 
 
 @dataclass(frozen=True)
-class UsageLogScan:
-    """One internally consistent request-log pagination scan.
-
-    Pagination consistency is not historical-retention coverage.  Current
-    Sub2API responses therefore report ``policy_only`` until a future upstream
-    certificate supplies independent per-dimension evidence.
-    """
-
-    rows: tuple[Sub2APIUsageLog, ...]
-    started_at: datetime | None
-    ended_at: datetime
-    returned_total: int
-    returned_pages: int
-    scanned_pages: int
-    out_of_range_count: int
-    scan_digest: str
-    evidence_type: str
-    coverage: tuple[tuple[str, str], ...]
-    expected_user_ids: tuple[int, ...] | None = None
-
-    def coverage_status(self, dimension: str) -> str:
-        return dict(self.coverage).get(dimension, "unknown")
-
-
-@dataclass(frozen=True)
 class UserBalance:
     """Sub2API 用户的全局余额；该余额会被该用户的所有用量共同消耗。"""
 

@@ -15,7 +15,7 @@ const message = ref("");
 const dateTime = useDateTime();
 
 function requestCount(value: number | null) {
-  return value === null ? "待重建" : String(value);
+  return value === null ? "未知" : String(value);
 }
 
 async function open(observation: Observation) {
@@ -97,8 +97,7 @@ defineExpose<DialogController<[Observation]>>({ open, close });
         >
           <AppIcon name="exclamation-triangle" class="size-5 shrink-0" />
           <span>
-            这条旧记录没有保存完整请求数。只有“远端验证修复”计划取得
-            request_count coverage 后才能补齐；未知状态不会被推测或强制覆盖。
+            这条旧记录没有保存完整请求数。系统不会根据当前仍可查询的日志推测历史完整性，未知状态会保持不变。
           </span>
         </div>
         <div
