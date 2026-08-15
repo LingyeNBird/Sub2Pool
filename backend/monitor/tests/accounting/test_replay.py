@@ -28,6 +28,7 @@ from monitor.models import (
     ParticipantSnapshot,
     ParticipantUsageSample,
     Sub2APIUserUsageSample,
+    UsageSamplePoint,
 )
 from monitor.notifications import send_notification
 from monitor.replay import (
@@ -1383,6 +1384,49 @@ def test_startup_replay_recovers_pending_row_with_current_version_marker():
     observation.refresh_from_db()
     assert observation.sample_note != "等待派生计算"
     assert observation.model_diagnostics["algorithm"] == RATE_METHOD
+
+
+@pytest.mark.django_db
+def test_replay_handles_more_than_sqlite_expression_depth_sample_points():
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save(update_fields=["openai_account_id"])
+    now = timezone.now().replace(microsecond=0)
+    reset_at = now + timedelta(days=7)
+    points = UsageSamplePoint.objects.bulk_create(
+        [
+            UsageSamplePoint(
+                account_id=7,
+                observed_at=now + timedelta(seconds=index),
+            )
+            for index in range(1001)
+        ],
+        batch_size=500,
+    )
+    observations = Observation.objects.bulk_create(
+        [
+            Observation(
+                account_id=7,
+                sample_point=point,
+                source="manual",
+                observed_at=point.observed_at,
+                upstream_resets_at=reset_at,
+                upstream_used_percent=Decimal("0"),
+                raw_selected_total_cost=Decimal("0"),
+                selected_total_cost=Decimal("0"),
+                total_standard_cost=Decimal("0"),
+                total_actual_cost=Decimal("0"),
+                effective_usd_per_percent=Decimal("16"),
+            )
+            for point in points
+        ],
+        batch_size=100,
+    )
+
+    result = rebuild_account(7, config)
+
+    assert result.rebuilt_observations == 1
+    assert result.latest_observation_id == observations[-1].id
 
 
 @pytest.mark.django_db

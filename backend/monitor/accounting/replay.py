@@ -235,6 +235,7 @@ def rebuild_account(
     config = config or AppSettings.load()
     all_observations = list(
         Observation.objects.select_for_update()
+        .select_related("sample_point")
         .filter(account_id=account_id)
         .prefetch_related(
             "participant_snapshots__participant",
