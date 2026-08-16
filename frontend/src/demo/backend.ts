@@ -702,11 +702,55 @@ export async function demoRequest(
     );
     if (!observation) return failure("观测不存在", 404);
     const enabled = method === "POST";
-    observation.is_manual_start = enabled;
-    observation.manual_start_reason = enabled
-      ? String(payload.reason ?? "")
-      : "";
-    observation.manual_start_set_at = enabled ? state.clock : null;
+    if (enabled) {
+      const endObservationId =
+        typeof payload.end_observation_id === "number"
+          ? payload.end_observation_id
+          : observation.id;
+      const endObservation = state.observations.find(
+        (item) => item.id === endObservationId,
+      );
+      if (!endObservation) return failure("起点区间终点记录不存在", 404);
+      const compare = (left: Observation, right: Observation) =>
+        Date.parse(left.observed_at) - Date.parse(right.observed_at) ||
+        left.id - right.id;
+      if (
+        observation.account_id !== endObservation.account_id ||
+        compare(endObservation, observation) < 0
+      )
+        return failure("起点区间终点记录无效", 400);
+      for (const item of state.observations) {
+        if (item.id === observation.id || !item.is_manual_start) continue;
+        const existingEnd =
+          state.observations.find(
+            (candidate) => candidate.id === item.manual_start_end_id,
+          ) ?? item;
+        const overlaps =
+          compare(item, endObservation) <= 0 &&
+          compare(observation, existingEnd) <= 0;
+        if (!overlaps) continue;
+        const contained =
+          compare(observation, item) <= 0 &&
+          compare(existingEnd, endObservation) <= 0;
+        if (!contained) return failure("起点区间与现有区间部分重叠", 400);
+        item.is_manual_start = false;
+        item.manual_start_reason = "";
+        item.manual_start_set_at = null;
+        item.manual_start_end_id = null;
+        item.manual_start_end_observed_at = null;
+      }
+      observation.is_manual_start = true;
+      observation.manual_start_reason = String(payload.reason ?? "");
+      observation.manual_start_set_at = state.clock;
+      observation.manual_start_end_id = endObservation.id;
+      observation.manual_start_end_observed_at = endObservation.observed_at;
+    } else {
+      observation.is_manual_start = false;
+      observation.manual_start_reason = "";
+      observation.manual_start_set_at = null;
+      observation.manual_start_end_id = null;
+      observation.manual_start_end_observed_at = null;
+    }
     saveDemoState(state);
     return envelope({ replayed: true });
   }

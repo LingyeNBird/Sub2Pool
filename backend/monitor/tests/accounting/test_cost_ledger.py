@@ -188,8 +188,10 @@ def test_local_trend_keeps_normalized_cost_across_query_window_change():
         normalized_standard_cost=Decimal("1229"),
         normalized_actual_cost=Decimal("1229"),
         effective_usd_per_percent=Decimal("20"),
-        is_manual_start=True,
     )
+    latest.is_manual_start = True
+    latest.manual_start_end = latest
+    latest.save(update_fields=["is_manual_start", "manual_start_end"])
     ParticipantSnapshot.objects.create(
         observation=latest,
         participant=participant,

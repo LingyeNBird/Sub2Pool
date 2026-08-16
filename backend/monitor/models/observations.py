@@ -125,8 +125,15 @@ class Observation(models.Model):
         blank=True,
         default="",
     )
-    # 管理员可把一个真实观测点固定为最高优先级起点；该观测的成本和百分比均作为零基线。
+    # 管理员起点以真实观测建立零基线；结束记录定义禁止再次切分周期的保护范围。
     is_manual_start = models.BooleanField(default=False)
+    manual_start_end = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        related_name="+",
+        null=True,
+        blank=True,
+    )
     manual_start_reason = models.CharField(max_length=255, blank=True)
     manual_start_set_at = models.DateTimeField(null=True, blank=True)
     exclusion_reason = models.CharField(max_length=255, blank=True)
@@ -165,6 +172,21 @@ class Observation(models.Model):
                 fields=["account_id", "attribution_started_at"],
                 name="observation_replay_segment",
             ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        is_manual_start=False,
+                        manual_start_end__isnull=True,
+                    )
+                    | models.Q(
+                        is_manual_start=True,
+                        manual_start_end__isnull=False,
+                    )
+                ),
+                name="manual_start_end_matches_flag",
+            )
         ]
 
 

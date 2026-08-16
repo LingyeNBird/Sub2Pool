@@ -9,17 +9,19 @@ import type { DialogController } from "../types";
 
 defineProps<{ submitting: boolean }>();
 const emit = defineEmits<{
-  confirm: [observation: Observation, reason: string];
+  confirm: [start: Observation, end: Observation, reason: string];
 }>();
 
 const dialog = ref<HTMLDialogElement | null>(null);
-const observation = ref<Observation | null>(null);
+const startObservation = ref<Observation | null>(null);
+const endObservation = ref<Observation | null>(null);
 const reason = ref("");
 const dateTime = useDateTime();
 
-function open(value: Observation) {
-  observation.value = value;
-  reason.value = "";
+function open(start: Observation, end: Observation) {
+  startObservation.value = start;
+  endObservation.value = end;
+  reason.value = start.manual_start_reason || "";
   dialog.value?.showModal();
 }
 
@@ -28,27 +30,52 @@ function close() {
 }
 
 function confirm() {
-  if (observation.value) emit("confirm", observation.value, reason.value);
+  if (startObservation.value && endObservation.value)
+    emit("confirm", startObservation.value, endObservation.value, reason.value);
 }
 
-defineExpose<DialogController<[Observation]>>({ open, close });
+defineExpose<DialogController<[Observation, Observation]>>({ open, close });
 </script>
 
 <template>
   <dialog ref="dialog" class="modal">
     <div class="modal-box">
-      <h2 class="text-lg font-bold">设置管理员区间起点</h2>
+      <h2 class="text-lg font-bold">设置管理员起点区间</h2>
       <p class="mt-3 text-sm leading-6 opacity-70">
-        管理员起点优先于上游重置时间。系统会把所选观测的累计成本和上游百分比作为零基线，只重算该点及其后续记录；请仅在确认这里发生了官方赠送刷新或其他真实边界时使用。
+        开始记录提供周期的累计成本和上游百分比零基线。开始至结束记录（均包含）强制属于同一周期，区间内的
+        0%、重置时间变化和其他起点不会再次切分周期。开始与结束可以选择同一条记录。
       </p>
-      <div v-if="observation" class="mt-4 rounded-box bg-base-300 p-4">
-        <div class="font-medium">
-          {{ dateTime(observation.observed_at) }}
+      <div
+        v-if="startObservation && endObservation"
+        class="mt-4 grid gap-3 sm:grid-cols-2"
+      >
+        <div class="rounded-box bg-base-300 p-4">
+          <div class="text-xs font-medium tracking-wide opacity-60">
+            开始记录
+          </div>
+          <div class="mt-1 font-medium">
+            {{ dateTime(startObservation.observed_at) }}
+          </div>
+          <div class="mt-1 text-sm opacity-70">
+            上游已用
+            {{ formatPercent(startObservation.upstream_used_percent) }} ·
+            原始累计成本
+            {{ formatCurrency(startObservation.raw_selected_total_cost) }}
+          </div>
         </div>
-        <div class="mt-1 text-sm opacity-70">
-          上游已用 {{ formatPercent(observation.upstream_used_percent) }} ·
-          原始累计成本
-          {{ formatCurrency(observation.raw_selected_total_cost) }}
+        <div class="rounded-box bg-base-300 p-4">
+          <div class="text-xs font-medium tracking-wide opacity-60">
+            结束记录
+          </div>
+          <div class="mt-1 font-medium">
+            {{ dateTime(endObservation.observed_at) }}
+          </div>
+          <div class="mt-1 text-sm opacity-70">
+            上游已用
+            {{ formatPercent(endObservation.upstream_used_percent) }} ·
+            原始累计成本
+            {{ formatCurrency(endObservation.raw_selected_total_cost) }}
+          </div>
         </div>
       </div>
       <fieldset class="mt-4 fieldset">
@@ -74,7 +101,7 @@ defineExpose<DialogController<[Observation]>>({ open, close });
             v-if="submitting"
             class="loading loading-xs loading-spinner"
           ></span>
-          确认设为起点
+          确认起点区间
         </button>
       </div>
     </div>

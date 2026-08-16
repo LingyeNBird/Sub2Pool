@@ -51,17 +51,61 @@ def observed_baseline_segment(
         percent_baseline=percent_baseline,
     )
 
+
+def observation_key(observation: Observation) -> tuple[datetime, int]:
+    return observation.observed_at, observation.id
+
+
+def manual_start_interval_end_key(
+    observation: Observation,
+) -> tuple[datetime, int] | None:
+    if not observation.is_manual_start:
+        return None
+    end = observation.manual_start_end
+    if end is None:
+        raise ValueError("管理员起点缺少区间终点")
+    if end.account_id != observation.account_id:
+        raise ValueError("管理员起点区间不能跨账号")
+    start_key = observation_key(observation)
+    end_key = observation_key(end)
+    if end_key < start_key:
+        raise ValueError("管理员起点区间终点早于起点")
+    return end_key
+
+
+def manual_start_protected_ids(
+    observations: list[Observation],
+) -> set[int]:
+    protected: set[int] = set()
+    active_end: tuple[datetime, int] | None = None
+    for observation in observations:
+        key = observation_key(observation)
+        if active_end is not None and key <= active_end:
+            protected.add(observation.id)
+            continue
+        active_end = None
+        end_key = manual_start_interval_end_key(observation)
+        if end_key is not None:
+            protected.add(observation.id)
+            active_end = end_key
+    return protected
+
+
 def defer_redundant_zero_observations(
     observations: list[Observation],
 ) -> tuple[list[Observation], list[Observation]]:
-    """连续 0% 尚不能确认周期；仅保留最接近首次消费的候选基线。"""
+    """连续 0% 仅保留末点，但管理员起点区间内的观测全部参与同一周期。"""
 
+    protected_ids = manual_start_protected_ids(observations)
     candidates: list[Observation] = []
     deferred: list[Observation] = []
     index = 0
     while index < len(observations):
         observation = observations[index]
-        if observation.is_manual_start or observation.upstream_used_percent != ZERO:
+        if (
+            observation.id in protected_ids
+            or observation.upstream_used_percent != ZERO
+        ):
             candidates.append(observation)
             index += 1
             continue
@@ -70,7 +114,10 @@ def defer_redundant_zero_observations(
         scan = index + 1
         while scan < len(observations):
             candidate = observations[scan]
-            if candidate.is_manual_start or candidate.upstream_used_percent != ZERO:
+            if (
+                candidate.id in protected_ids
+                or candidate.upstream_used_percent != ZERO
+            ):
                 break
             zero_run.append(candidate)
             scan += 1
@@ -287,7 +334,11 @@ def infer_segments(
     observations: list[Observation],
     cost_basis: str,
 ) -> tuple[list[ReplaySegment], list[Observation], list[Observation]]:
-    """按“管理员起点 > 官方窗口 > 异常检测”识别派生区间。
+    """按“管理员起点区间 > 官方窗口 > 异常检测”识别派生区间。
+
+    管理员区间从开始记录到结束记录（均包含）强制属于同一周期；区间内的
+    0% 观测、官方重置时间变化和其他起点标记都不会再次切分周期。开始与
+    结束相同时保持旧版单点起点语义。
 
     连续 0% 只说明账号尚未开始消费，不能用持续漂移的重置时间建立多个
     空周期。系统保留全部原始点，但只把最后一个 0% 作为待确认基线；首次
@@ -295,22 +346,34 @@ def infer_segments(
 
     官方重置时间没有变化时，百分比回退与七天窗口证据矛盾，不能再凭
     连续低点擅自建立新区间。此类低点保持自动排除，直到 reset_at
-    变化或管理员明确把某个观测设为起点。
+    变化或管理员明确设置起点区间。
     """
 
     segments: list[ReplaySegment] = []
     automatic: list[Observation] = []
     current: ReplaySegment | None = None
+    active_manual_end: tuple[datetime, int] | None = None
     observations, deferred = defer_redundant_zero_observations(observations)
     index = 0
 
     while index < len(observations):
         observation = observations[index]
+        key = observation_key(observation)
+        if active_manual_end is not None:
+            if key <= active_manual_end:
+                if current is None:
+                    raise ValueError("管理员起点区间缺少开始记录")
+                current.resets_at = observation.upstream_resets_at
+                current.observations.append(observation)
+                index += 1
+                continue
+            active_manual_end = None
         if observation.is_manual_start:
             if current is not None and current.observations:
                 segments.append(current)
             current = manual_start_segment(observation, cost_basis)
             current.observations.append(observation)
+            active_manual_end = manual_start_interval_end_key(observation)
             index += 1
             continue
 

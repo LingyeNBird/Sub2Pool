@@ -13,6 +13,7 @@ defineProps<{
   filters: ObservationFilters;
   restoringId: number | null;
   manualStartId: number | null;
+  manualRangeStart: Observation | null;
   rebuilding: boolean;
   fastCorrectionEnabled: boolean;
 }>();
@@ -24,7 +25,9 @@ const emit = defineEmits<{
   fastCorrectionDetail: [row: Observation];
   exclude: [row: Observation];
   restore: [row: Observation];
-  manualStart: [row: Observation];
+  beginManualRange: [row: Observation];
+  endManualRange: [row: Observation];
+  cancelManualRange: [];
   clearManualStart: [row: Observation];
   pageChange: [page: number];
   rebuild: [];
@@ -41,6 +44,12 @@ function sourceLabel(value: string) {
       reset: "临近重置",
     }[value] ?? value
   );
+}
+
+function isAtOrAfter(row: Observation, start: Observation) {
+  const timeDifference =
+    Date.parse(row.observed_at) - Date.parse(start.observed_at);
+  return timeDifference > 0 || (timeDifference === 0 && row.id >= start.id);
 }
 </script>
 
@@ -63,6 +72,24 @@ function sourceLabel(value: string) {
           ></span>
           <AppIcon v-else name="arrow-path" class="size-4" />
           {{ rebuilding ? "重建中" : "重建计算" }}
+        </button>
+      </div>
+      <div v-if="manualRangeStart" class="alert py-3 alert-info">
+        <AppIcon name="arrows-right-left" class="size-5" />
+        <div class="grow text-sm">
+          <div class="font-medium">已选择开始记录</div>
+          <div class="opacity-75">
+            {{
+              dateTime(manualRangeStart.observed_at)
+            }}。请在当前页或翻页后选择同一条或更晚的记录作为结束。
+          </div>
+        </div>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          @click="emit('cancelManualRange')"
+        >
+          取消选择
         </button>
       </div>
       <div v-if="loading" class="flex justify-center py-10">
@@ -145,7 +172,17 @@ function sourceLabel(value: string) {
                       v-if="row.is_manual_start"
                       class="badge badge-sm badge-primary"
                     >
-                      管理员起点
+                      起点区间
+                    </span>
+                    <span
+                      v-if="
+                        row.is_manual_start &&
+                        row.manual_start_end_observed_at &&
+                        row.manual_start_end_id !== row.id
+                      "
+                      class="badge badge-ghost badge-sm"
+                    >
+                      至 {{ dateTime(row.manual_start_end_observed_at) }}
                     </span>
                   </div>
                 </td>
@@ -202,19 +239,42 @@ function sourceLabel(value: string) {
                     >
                       详情
                     </button>
-                    <button
-                      v-if="row.excluded"
-                      class="btn btn-ghost text-success btn-xs"
-                      :disabled="restoringId === row.id"
-                      @click="emit('restore', row)"
-                    >
-                      <span
-                        v-if="restoringId === row.id"
-                        class="loading loading-xs loading-spinner"
-                      ></span>
-                      恢复
-                    </button>
+                    <template v-if="manualRangeStart">
+                      <button
+                        v-if="isAtOrAfter(row, manualRangeStart)"
+                        class="btn btn-ghost text-primary btn-xs"
+                        @click="emit('endManualRange', row)"
+                      >
+                        {{
+                          row.id === manualRangeStart.id
+                            ? "同记录作终点"
+                            : "设为终点"
+                        }}
+                      </button>
+                      <span v-else class="px-2 text-xs opacity-45">
+                        早于开始
+                      </span>
+                    </template>
+                    <template v-else-if="row.excluded">
+                      <button
+                        class="btn btn-ghost text-success btn-xs"
+                        :disabled="restoringId === row.id"
+                        @click="emit('restore', row)"
+                      >
+                        <span
+                          v-if="restoringId === row.id"
+                          class="loading loading-xs loading-spinner"
+                        ></span>
+                        恢复
+                      </button>
+                    </template>
                     <template v-else>
+                      <button
+                        class="btn btn-ghost text-primary btn-xs"
+                        @click="emit('beginManualRange', row)"
+                      >
+                        {{ row.is_manual_start ? "调整区间" : "设置区间" }}
+                      </button>
                       <button
                         v-if="row.is_manual_start"
                         class="btn btn-ghost text-primary btn-xs"
@@ -225,14 +285,7 @@ function sourceLabel(value: string) {
                           v-if="manualStartId === row.id"
                           class="loading loading-xs loading-spinner"
                         ></span>
-                        取消起点
-                      </button>
-                      <button
-                        v-else
-                        class="btn btn-ghost text-primary btn-xs"
-                        @click="emit('manualStart', row)"
-                      >
-                        设为起点
+                        取消区间
                       </button>
                       <button
                         class="btn btn-ghost text-warning btn-xs"

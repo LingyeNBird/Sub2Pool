@@ -1002,6 +1002,170 @@ def test_manual_replay_writers_and_management_replay_respect_active_fence():
 
 
 @pytest.mark.django_db
+def test_manual_start_interval_keeps_protected_observations_in_one_cycle():
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save(update_fields=["openai_account_id"])
+    now = timezone.now().replace(microsecond=0)
+    resets = [
+        now + timedelta(days=7, minutes=index)
+        for index in range(4)
+    ]
+    percents = [
+        Decimal("0"),
+        Decimal("0"),
+        Decimal("0"),
+        Decimal("1"),
+        Decimal("2"),
+    ]
+    observations = [
+        Observation.objects.create(
+            account_id=7,
+            source="manual",
+            observed_at=now + timedelta(minutes=index),
+            window_seconds=604800,
+            upstream_resets_at=resets[min(index, 3)],
+            upstream_used_percent=percent,
+            raw_selected_total_cost=Decimal(index * 20),
+            selected_total_cost=Decimal(index * 20),
+            total_standard_cost=Decimal(index * 20),
+            total_actual_cost=Decimal(index * 20),
+            effective_usd_per_percent=Decimal("20"),
+        )
+        for index, percent in enumerate(percents)
+    ]
+    start, _middle, nested_start, end, _after = observations
+    start.is_manual_start = True
+    start.manual_start_end = end
+    start.save(update_fields=["is_manual_start", "manual_start_end"])
+    nested_start.is_manual_start = True
+    nested_start.manual_start_end = nested_start
+    nested_start.save(update_fields=["is_manual_start", "manual_start_end"])
+
+    result = rebuild_account(7, config)
+
+    assert result.inferred_intervals == 1
+    replayed = list(Observation.objects.order_by("observed_at", "id"))
+    assert all(item.excluded_at is None for item in replayed)
+    assert all(item.attribution_started_at == start.observed_at for item in replayed)
+    assert [item.interval_used_percent for item in replayed] == percents
+
+
+@pytest.mark.django_db
+def test_manual_start_interval_api_validates_and_merges_existing_starts():
+    get_user_model().objects.create_superuser(
+        username="interval-owner",
+        password="very-strong-password",
+        email="interval-owner@example.com",
+    )
+    client = Client()
+    headers, _ = jwt_login(client, username="interval-owner")
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save(update_fields=["openai_account_id"])
+    now = timezone.now().replace(microsecond=0)
+
+    def raw_observation(index: int, *, account_id: int = 7) -> Observation:
+        return Observation.objects.create(
+            account_id=account_id,
+            source="manual",
+            observed_at=now + timedelta(minutes=index),
+            window_seconds=604800,
+            upstream_resets_at=now + timedelta(days=7),
+            upstream_used_percent=Decimal(index),
+            raw_selected_total_cost=Decimal(index * 20),
+            selected_total_cost=Decimal(index * 20),
+            total_standard_cost=Decimal(index * 20),
+            total_actual_cost=Decimal(index * 20),
+            effective_usd_per_percent=Decimal("20"),
+        )
+
+    start = raw_observation(0)
+    nested = raw_observation(1)
+    end = raw_observation(2)
+    later = raw_observation(3)
+    other_account = raw_observation(4, account_id=8)
+
+    legacy_shape = client.post(
+        f"/api/observations/{nested.id}/manual-start",
+        data=json.dumps({"reason": "原单点起点"}),
+        content_type="application/json",
+        **headers,
+    )
+    assert legacy_shape.status_code == 200
+    nested.refresh_from_db()
+    assert nested.manual_start_end_id == nested.id
+
+    merged = client.post(
+        f"/api/observations/{start.id}/manual-start",
+        data=json.dumps(
+            {
+                "end_observation_id": end.id,
+                "reason": "覆盖 0% 到首次消费",
+            }
+        ),
+        content_type="application/json",
+        **headers,
+    )
+    assert merged.status_code == 200
+    assert merged.json()["data"]["absorbed_manual_starts"] == 1
+    start.refresh_from_db()
+    nested.refresh_from_db()
+    assert start.manual_start_end_id == end.id
+    assert nested.is_manual_start is False
+    assert nested.manual_start_end_id is None
+
+    listed = client.get("/api/observations", **headers).json()["data"]["items"]
+    listed_start = next(item for item in listed if item["id"] == start.id)
+    assert listed_start["manual_start_end_id"] == end.id
+    assert (
+        listed_start["manual_start_end_observed_at"]
+        == end.observed_at.isoformat()
+    )
+
+    same_record = client.post(
+        f"/api/observations/{later.id}/manual-start",
+        data=json.dumps({"end_observation_id": later.id}),
+        content_type="application/json",
+        **headers,
+    )
+    assert same_record.status_code == 200
+    later.refresh_from_db()
+    assert later.manual_start_end_id == later.id
+
+    partial_overlap = client.post(
+        f"/api/observations/{nested.id}/manual-start",
+        data=json.dumps({"end_observation_id": later.id}),
+        content_type="application/json",
+        **headers,
+    )
+    assert partial_overlap.status_code == 400
+    assert "部分重叠" in partial_overlap.json()["message"]
+    start.refresh_from_db()
+    later.refresh_from_db()
+    assert start.manual_start_end_id == end.id
+    assert later.manual_start_end_id == later.id
+
+    reversed_range = client.post(
+        f"/api/observations/{end.id}/manual-start",
+        data=json.dumps({"end_observation_id": start.id}),
+        content_type="application/json",
+        **headers,
+    )
+    assert reversed_range.status_code == 400
+    assert "不能早于起点" in reversed_range.json()["message"]
+
+    cross_account = client.post(
+        f"/api/observations/{start.id}/manual-start",
+        data=json.dumps({"end_observation_id": other_account.id}),
+        content_type="application/json",
+        **headers,
+    )
+    assert cross_account.status_code == 400
+    assert "不能跨账号" in cross_account.json()["message"]
+
+
+@pytest.mark.django_db
 def test_exclusion_restore_and_manual_start_cancellation_replay_affected_suffix():
     """回退点可恢复为管理员起点，也可取消后重新由异常检测排除。"""
     get_user_model().objects.create_superuser(

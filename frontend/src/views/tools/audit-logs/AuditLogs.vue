@@ -55,6 +55,7 @@ const message = ref("");
 const excluding = ref(false);
 const restoringId = ref<number | null>(null);
 const manualStartId = ref<number | null>(null);
+const manualRangeStart = ref<Observation | null>(null);
 const rebuilding = ref(false);
 const success = ref("");
 const fastCorrectionEnabled = ref(true);
@@ -161,19 +162,41 @@ async function restore(row: Observation) {
   }
 }
 
-async function confirmManualStart(row: Observation, reason: string) {
-  manualStartId.value = row.id;
+function beginManualRange(row: Observation) {
+  manualRangeStart.value = row;
+  message.value = "";
+}
+
+function endManualRange(row: Observation) {
+  const start = manualRangeStart.value;
+  if (start) manualStartDialog.value?.open(start, row);
+}
+
+function cancelManualRange() {
+  manualRangeStart.value = null;
+}
+
+async function confirmManualStart(
+  start: Observation,
+  end: Observation,
+  reason: string,
+) {
+  manualStartId.value = start.id;
   message.value = "";
   try {
-    await api(`observations/${row.id}/manual-start`, {
+    await api(`observations/${start.id}/manual-start`, {
       method: "POST",
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({
+        reason,
+        end_observation_id: end.id,
+      }),
     });
     manualStartDialog.value?.close();
+    manualRangeStart.value = null;
     await load();
   } catch (error) {
     message.value =
-      error instanceof ApiError ? error.message : "设置区间起点失败";
+      error instanceof ApiError ? error.message : "设置起点区间失败";
   } finally {
     manualStartId.value = null;
   }
@@ -187,7 +210,7 @@ async function clearManualStart(row: Observation) {
     await load();
   } catch (error) {
     message.value =
-      error instanceof ApiError ? error.message : "取消区间起点失败";
+      error instanceof ApiError ? error.message : "取消起点区间失败";
   } finally {
     manualStartId.value = null;
   }
@@ -198,7 +221,7 @@ async function rebuildCalculations() {
     !(await confirmDialog.value?.open({
       title: "重建当前区间计算？",
       message:
-        "系统会保留全部原始采样、排除记录和管理员起点，从当前区间起点重新计算成本增量、百分比增量、折算率与参与者归属。",
+        "系统会保留全部原始采样、排除记录和管理员起点区间，从当前区间起点重新计算成本增量、百分比增量、折算率与参与者归属。",
       confirmLabel: "开始重建",
       tone: "warning",
     }))
@@ -280,6 +303,7 @@ onMounted(load);
     :filters="filters"
     :restoring-id="restoringId"
     :manual-start-id="manualStartId"
+    :manual-range-start="manualRangeStart"
     :rebuilding="rebuilding"
     :fast-correction-enabled="fastCorrectionEnabled"
     @filter="openFilter"
@@ -288,7 +312,9 @@ onMounted(load);
     @fast-correction-detail="fastCorrectionDetailDialog?.open($event)"
     @exclude="excludeDialog?.open($event)"
     @restore="restore"
-    @manual-start="manualStartDialog?.open($event)"
+    @begin-manual-range="beginManualRange"
+    @end-manual-range="endManualRange"
+    @cancel-manual-range="cancelManualRange"
     @clear-manual-start="clearManualStart"
     @rebuild="rebuildCalculations"
     @page-change="changePage"

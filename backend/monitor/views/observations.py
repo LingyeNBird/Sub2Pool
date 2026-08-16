@@ -31,9 +31,9 @@ from ..replay import (
 class ObservationListView(AdminAPIView):
     def get(self, request):
         config = AppSettings.load()
-        queryset = Observation.objects.prefetch_related(
-            "participant_snapshots__participant"
-        )
+        queryset = Observation.objects.select_related(
+            "manual_start_end"
+        ).prefetch_related("participant_snapshots__participant")
         try:
             observed_from = query_datetime(request, "from")
             observed_to = query_datetime(request, "to")
@@ -166,6 +166,12 @@ class ObservationListView(AdminAPIView):
                     "is_manual_start": item.is_manual_start,
                     "manual_start_reason": item.manual_start_reason,
                     "manual_start_set_at": iso(item.manual_start_set_at),
+                    "manual_start_end_id": item.manual_start_end_id,
+                    "manual_start_end_observed_at": iso(
+                        item.manual_start_end.observed_at
+                        if item.manual_start_end is not None
+                        else None
+                    ),
                     "participants": [
                         snapshot_data(snapshot)
                         for snapshot in item.participant_snapshots.all()
@@ -349,14 +355,35 @@ class ObservationRestoreView(AdminAPIView):
 
 
 class ObservationManualStartView(AdminAPIView):
-    """设置或取消最高优先级的管理员观测起点。"""
+    """设置或取消最高优先级的管理员观测起点区间。"""
 
     def post(self, request, observation_id: int):
         observation = get_object_or_404(Observation, pk=observation_id)
         reason = request.data.get("reason", "")
         if not isinstance(reason, str):
             return error("起点说明格式无效", 400)
-        return ok(set_manual_start(observation, reason))
+        end_observation_id = request.data.get(
+            "end_observation_id",
+            observation.id,
+        )
+        if isinstance(end_observation_id, bool) or not isinstance(
+            end_observation_id,
+            int,
+        ):
+            return error("起点区间终点记录无效", 400)
+        end_observation = get_object_or_404(
+            Observation,
+            pk=end_observation_id,
+        )
+        try:
+            result = set_manual_start(
+                observation,
+                reason,
+                end_observation=end_observation,
+            )
+        except ValueError as exc:
+            return error(str(exc), 400)
+        return ok(result)
 
     def delete(self, _request, observation_id: int):
         observation = get_object_or_404(Observation, pk=observation_id)

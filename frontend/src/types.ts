@@ -187,6 +187,8 @@ export interface Observation {
   is_manual_start: boolean;
   manual_start_reason: string;
   manual_start_set_at: string | null;
+  manual_start_end_id: number | null;
+  manual_start_end_observed_at: string | null;
 }
 
 export interface FastCorrectionUserDetail {

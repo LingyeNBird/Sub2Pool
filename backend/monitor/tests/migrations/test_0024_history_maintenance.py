@@ -403,3 +403,51 @@ def test_0027_removes_remote_repair_and_preserves_local_replay_results():
         new_apps.get_model("monitor", "HistoricalRebuildCoverage")
     with pytest.raises(LookupError):
         new_apps.get_model("monitor", "HistoricalRebuildPatch")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_0028_migrates_legacy_manual_starts_to_single_record_intervals():
+    source = [("monitor", "0027_remove_verified_remote_repair")]
+    target = [("monitor", "0028_manual_start_intervals")]
+    executor = MigrationExecutor(connection)
+    executor.migrate(source)
+    old_apps = executor.loader.project_state(source).apps
+    Observation = old_apps.get_model("monitor", "Observation")
+    observed_at = timezone.now().replace(microsecond=0)
+    common = {
+        "account_id": 7,
+        "source": "manual",
+        "window_seconds": 604800,
+        "upstream_resets_at": observed_at + timedelta(days=3),
+        "upstream_used_percent": Decimal("0"),
+        "raw_selected_total_cost": Decimal("0"),
+        "selected_total_cost": Decimal("0"),
+        "total_standard_cost": Decimal("0"),
+        "total_actual_cost": Decimal("0"),
+        "effective_usd_per_percent": Decimal("16"),
+    }
+    legacy_start = Observation.objects.create(
+        **common,
+        observed_at=observed_at,
+        is_manual_start=True,
+        manual_start_reason="旧版单点起点",
+        manual_start_set_at=observed_at,
+    )
+    ordinary = Observation.objects.create(
+        **common,
+        observed_at=observed_at + timedelta(minutes=1),
+    )
+
+    executor = MigrationExecutor(connection)
+    executor.migrate(target)
+    new_apps = executor.loader.project_state(target).apps
+    NewObservation = new_apps.get_model("monitor", "Observation")
+    migrated_start = NewObservation.objects.get(pk=legacy_start.pk)
+    migrated_ordinary = NewObservation.objects.get(pk=ordinary.pk)
+
+    assert migrated_start.is_manual_start is True
+    assert migrated_start.manual_start_end_id == migrated_start.id
+    assert migrated_start.manual_start_reason == "旧版单点起点"
+    assert migrated_start.manual_start_set_at == observed_at
+    assert migrated_ordinary.is_manual_start is False
+    assert migrated_ordinary.manual_start_end_id is None

@@ -21,7 +21,7 @@ import type {
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 
-const DEMO_STATE_KEY = "sub2pool:demo:v3:state";
+const DEMO_STATE_KEY = "sub2pool:demo:v4:state";
 const DEMO_AUTH_KEY = "sub2pool:demo:v1:auth";
 const DEMO_ANCHOR = Date.UTC(2026, 7, 12, 4, 0, 0);
 const HOUR = 3_600_000;
@@ -45,7 +45,7 @@ interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 3;
+  version: 4;
   clock: string;
   nextParticipantId: number;
   nextSystemUserId: number;
@@ -421,6 +421,8 @@ function buildPeriods(participants: Participant[]): {
         is_manual_start: index === 0,
         manual_start_reason: index === 0 ? "演示周期起点" : "",
         manual_start_set_at: index === 0 ? iso(observedAt) : null,
+        manual_start_end_id: index === 0 ? observationId : null,
+        manual_start_end_observed_at: index === 0 ? iso(observedAt) : null,
       };
       observations.push(item);
       periodObservationIds.push(observationId);
@@ -631,7 +633,7 @@ function initializeState(): DemoState {
     participant.last_checked_at = latest.observed_at;
   }
   return {
-    version: 3,
+    version: 4,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextSystemUserId: 3,
@@ -687,7 +689,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 3) return parsed;
+      if (parsed.version === 4) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }
