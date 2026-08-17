@@ -50,7 +50,11 @@ def normalize_observation_costs(
         interval_actual = row.interval_actual_cost
 
         if same_window_epoch and previous is not None:
-            if interval_standard is None or interval_actual is None:
+            if (
+                interval_standard is None
+                or interval_actual is None
+                or row.interval_cost_source == "window_total"
+            ):
                 if _same_known_window(
                     previous.cost_window_started_at,
                     row.cost_window_started_at,
@@ -61,6 +65,9 @@ def normalize_observation_costs(
                     interval_actual = (
                         row.total_actual_cost - previous.total_actual_cost
                     )
+                elif row.interval_cost_source == "window_total":
+                    interval_standard = None
+                    interval_actual = None
             if interval_standard is not None and interval_actual is not None:
                 previous_standard = previous.normalized_standard_cost
                 previous_actual = previous.normalized_actual_cost
@@ -116,7 +123,11 @@ def normalize_user_sample(
     interval_standard = row.interval_standard_cost
     interval_actual = row.interval_actual_cost
     if same_window_epoch and previous is not None:
-        if interval_standard is None or interval_actual is None:
+        if (
+            interval_standard is None
+            or interval_actual is None
+            or row.interval_source == "window_total"
+        ):
             if _same_known_window(
                 previous.window_started_at,
                 row.window_started_at,
@@ -127,6 +138,9 @@ def normalize_user_sample(
                 interval_actual = (
                     row.total_actual_cost - previous.total_actual_cost
                 )
+            elif row.interval_source == "window_total":
+                interval_standard = None
+                interval_actual = None
         if interval_standard is not None and interval_actual is not None:
             previous_standard = previous.normalized_standard_cost
             previous_actual = previous.normalized_actual_cost

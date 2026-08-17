@@ -11,7 +11,7 @@ from ..models import Observation, ParticipantSnapshot
 ZERO = Decimal("0")
 RATE_METHOD = ALGORITHM_VERSION
 RESET_ROLLBACK_TOLERANCE = Decimal("0.1")
-RESET_TIME_TOLERANCE = timedelta(minutes=5)
+RESET_TIME_TOLERANCE = timedelta(minutes=10)
 
 
 def same_official_reset(left: datetime, right: datetime) -> bool:

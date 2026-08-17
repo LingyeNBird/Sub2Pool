@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from django.utils import timezone
 
+from monitor.accounting.cost_ledger import normalize_cost_history
 from monitor.engine import run_monitor
 from monitor.sampling.local_usage import save_local_bundle
 from monitor.sampling.types import (
@@ -259,3 +260,76 @@ def test_local_trend_keeps_normalized_cost_across_query_window_change():
     assert trend.selected_cost == Decimal("18")
     participant.refresh_from_db()
     assert participant.latest_selected_cost == Decimal("18")
+
+
+@pytest.mark.django_db
+def test_replay_does_not_add_overlapping_window_totals_after_reset_jitter():
+    observed_at = timezone.now().replace(microsecond=0)
+    cost_window_started_at = observed_at - timedelta(days=3)
+    reset_at = observed_at + timedelta(days=4)
+    first = Observation.objects.create(
+        account_id=7,
+        source="scheduled",
+        observed_at=observed_at,
+        window_seconds=604800,
+        upstream_resets_at=reset_at,
+        upstream_used_percent=Decimal("26"),
+        raw_selected_total_cost=Decimal("806"),
+        selected_total_cost=Decimal("806"),
+        total_standard_cost=Decimal("806"),
+        total_actual_cost=Decimal("806"),
+        cost_window_started_at=cost_window_started_at,
+        cost_window_ended_at=observed_at,
+        interval_cost_started_at=cost_window_started_at,
+        interval_standard_cost=Decimal("806"),
+        interval_actual_cost=Decimal("806"),
+        interval_cost_source="window_total",
+        effective_usd_per_percent=Decimal("20"),
+    )
+    second = Observation.objects.create(
+        account_id=7,
+        source="reset",
+        observed_at=observed_at + timedelta(minutes=10),
+        window_seconds=604800,
+        upstream_resets_at=reset_at + timedelta(minutes=7),
+        upstream_used_percent=Decimal("26"),
+        raw_selected_total_cost=Decimal("807"),
+        selected_total_cost=Decimal("807"),
+        total_standard_cost=Decimal("807"),
+        total_actual_cost=Decimal("807"),
+        cost_window_started_at=cost_window_started_at,
+        cost_window_ended_at=observed_at + timedelta(minutes=10),
+        interval_cost_started_at=cost_window_started_at,
+        interval_standard_cost=Decimal("807"),
+        interval_actual_cost=Decimal("807"),
+        interval_cost_source="window_total",
+        effective_usd_per_percent=Decimal("20"),
+    )
+    for observation, total in ((first, Decimal("806")), (second, Decimal("807"))):
+        Sub2APIUserUsageSample.objects.create(
+            account_id=7,
+            sub2api_user_id=1,
+            observed_at=observation.observed_at,
+            window_started_at=cost_window_started_at,
+            window_ended_at=observation.observed_at,
+            window_resets_at=observation.upstream_resets_at,
+            total_standard_cost=total,
+            total_actual_cost=total,
+            interval_started_at=cost_window_started_at,
+            interval_standard_cost=total,
+            interval_actual_cost=total,
+            interval_source="window_total",
+        )
+
+    normalize_cost_history(7)
+
+    first.refresh_from_db()
+    second.refresh_from_db()
+    assert first.normalized_actual_cost == Decimal("806")
+    assert second.normalized_actual_cost == Decimal("807")
+    assert list(
+        Sub2APIUserUsageSample.objects.order_by("observed_at").values_list(
+            "normalized_actual_cost",
+            flat=True,
+        )
+    ) == [Decimal("806"), Decimal("807")]

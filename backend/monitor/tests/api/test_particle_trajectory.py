@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from monitor.models import AppSettings, Observation
 from monitor.replay import rebuild_account, rebuild_observation_suffix
+from monitor.particle_trajectory import _trajectory_periods
 from monitor.tests.helpers import jwt_login
 
 
@@ -67,7 +68,7 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["available"] is True
-    assert data["algorithm"] == "particle_filter_v4"
+    assert data["algorithm"] == "particle_filter_v6"
     assert data["particle_count"] == 480
     assert data["representative_particle_count"] == 96
     assert data["segment"]["observation_count"] == 2
@@ -141,13 +142,13 @@ def test_particle_trajectory_selects_historical_period():
         )
 
     old_first = create_observation(
-        old_start,
+        old_start + timedelta(days=2),
         old_start + timedelta(days=7),
-        "0",
-        "0",
+        "5",
+        "90",
     )
     old_second = create_observation(
-        old_start + timedelta(days=1),
+        old_start + timedelta(days=3),
         old_start + timedelta(days=7),
         "10",
         "180",
@@ -193,6 +194,17 @@ def test_particle_trajectory_selects_historical_period():
         old_first.id,
         old_second.id,
     ]
+    old_period = historical_data["periods"][0]
+    assert old_period["started_at"] == old_start.isoformat()
+    assert (
+        old_period["first_observed_at"]
+        == historical_data["points"][0]["observed_at"]
+    )
+    assert (
+        old_period["last_observed_at"]
+        == historical_data["points"][-1]["observed_at"]
+    )
+    assert old_period["first_observed_at"] != old_period["started_at"]
 
     invalid_response = client.get(
         "/api/particle-trajectory?period=999999",
@@ -200,6 +212,48 @@ def test_particle_trajectory_selects_historical_period():
     )
     assert invalid_response.status_code == 400
     assert invalid_response.json()["message"] == "所选历史周期不存在"
+
+
+@pytest.mark.django_db
+def test_trajectory_periods_use_actual_observation_order_for_current():
+    now = timezone.now()
+
+    def observation(
+        observed_at,
+        attribution_started_at,
+    ):
+        return Observation.objects.create(
+            account_id=7,
+            source="scheduled",
+            observed_at=observed_at,
+            window_seconds=604800,
+            upstream_resets_at=now + timedelta(days=5),
+            attribution_started_at=attribution_started_at,
+            upstream_used_percent=Decimal("10"),
+            raw_selected_total_cost=Decimal("100"),
+            selected_total_cost=Decimal("100"),
+            total_standard_cost=Decimal("100"),
+            total_actual_cost=Decimal("100"),
+            effective_usd_per_percent=Decimal("10"),
+        )
+
+    older_observation = observation(
+        now - timedelta(hours=2),
+        now - timedelta(days=1),
+    )
+    latest_observation = observation(
+        now - timedelta(hours=1),
+        now - timedelta(days=2),
+    )
+
+    periods = _trajectory_periods(7)
+
+    assert [period["id"] for period in periods] == [
+        older_observation.id,
+        latest_observation.id,
+    ]
+    assert [period["sequence"] for period in periods] == [1, 2]
+    assert [period["is_current"] for period in periods] == [False, True]
 
 
 @pytest.mark.django_db
@@ -339,4 +393,26 @@ def test_particle_trajectory_reports_unavailable_without_account():
     assert response.json()["data"] == {
         "available": False,
         "message": "尚未配置 OpenAI 上游账号",
+    }
+
+
+@pytest.mark.django_db
+def test_particle_trajectory_reports_unavailable_without_observations():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    config = AppSettings.load()
+    config.openai_account_id = 7
+    config.save(update_fields=["openai_account_id"])
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    response = client.get("/api/particle-trajectory", **headers)
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "available": False,
+        "message": "尚无可重放的观测记录",
     }

@@ -150,7 +150,7 @@ function periodDate(value: string) {
 }
 
 function periodLabel(period: ParticleTrajectoryPeriod) {
-  return `第 ${period.sequence} 周期 · ${periodDate(period.started_at)}至${periodDate(period.ended_at)}`;
+  return `第 ${period.sequence} 周期 · ${periodDate(period.first_observed_at)}至${periodDate(period.last_observed_at)}`;
 }
 
 function loadSelectedPeriod() {

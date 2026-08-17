@@ -15,6 +15,9 @@ from ..models import AppSettings, Sub2APIUserUsageSample
 
 ZERO = Decimal("0")
 RESIDUAL_SUBJECT = None
+# Replay-boundary metadata can advance without perturbing unchanged model paths.
+# Preserve the validated v4 random stream until the particle model itself changes.
+PARTICLE_SEED_VERSION = "particle_filter_v4"
 
 
 @dataclass(frozen=True)
@@ -33,7 +36,7 @@ class DynamicReplayInput:
 
 def stable_segment_seed(account_id: int, segment: ReplaySegment) -> int:
     material = (
-        f"{ALGORITHM_VERSION}|{account_id}|"
+        f"{PARTICLE_SEED_VERSION}|{account_id}|"
         f"{segment.started_at.isoformat()}"
     ).encode()
     return int.from_bytes(hashlib.sha256(material).digest()[:8], "big")

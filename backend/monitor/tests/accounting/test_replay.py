@@ -186,7 +186,7 @@ def test_statistics_use_endpoint_ratio_independent_of_particle_filter():
 
 @pytest.mark.django_db
 def test_passive_reset_timestamp_drift_keeps_the_same_cycle(monkeypatch):
-    """被动快照重置时间漂移几十秒时不能误建一个新的官方周期。"""
+    """被动快照重置时间漂移数分钟时不能误建一个新的官方周期。"""
     config = AppSettings.load()
     config.openai_account_id = 7
     config.save()
@@ -216,7 +216,12 @@ def test_passive_reset_timestamp_drift_keeps_the_same_cycle(monkeypatch):
                 Decimal("10") + self.step,
                 604800,
                 345600,
-                int((reset_at + timedelta(seconds=70 * self.step)).timestamp()),
+                int(
+                    (
+                        reset_at
+                        + timedelta(minutes=7, seconds=30) * self.step
+                    ).timestamp()
+                ),
                 "passive_snapshot",
             )
 

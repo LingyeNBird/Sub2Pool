@@ -27,13 +27,15 @@ REASON_LABELS = {
 
 
 def _trajectory_periods(account_id: int) -> list[dict]:
+    """同时返回推断周期边界和图表实际使用的首末观测时间。"""
+
     rows = (
         Observation.objects.filter(
             account_id=account_id,
             excluded_at__isnull=True,
             attribution_started_at__isnull=False,
         )
-        .order_by("attribution_started_at", "observed_at", "id")
+        .order_by("observed_at", "id")
         .values(
             "id",
             "observed_at",
@@ -59,12 +61,21 @@ def _trajectory_periods(account_id: int) -> list[dict]:
         period["resets_at"] = row["upstream_resets_at"]
         period["observation_count"] += 1
 
-    periods = list(grouped.values())
+    periods = sorted(
+        grouped.values(),
+        key=lambda period: (period["first_observed_at"], period["id"]),
+    )
+    if not periods:
+        return periods
+    current_period = max(
+        periods,
+        key=lambda period: (period["last_observed_at"], period["id"]),
+    )
     for index, period in enumerate(periods):
         period["sequence"] = index + 1
-        period["is_current"] = index == len(periods) - 1
+        period["is_current"] = period["id"] == current_period["id"]
         period["ended_at"] = (
-            periods[index + 1]["started_at"]
+            periods[index + 1]["first_observed_at"]
             if index + 1 < len(periods)
             else period["resets_at"]
         )
@@ -146,7 +157,7 @@ def particle_trajectory_data(
             "available": False,
             "message": "尚无可重放的观测记录",
         }
-    selected_period = periods[-1]
+    selected_period = next(period for period in periods if period["is_current"])
     if period_id is not None:
         selected_period = next(
             (period for period in periods if period["id"] == period_id),
