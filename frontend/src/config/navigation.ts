@@ -26,6 +26,12 @@ export const navigation: NavigationGroup[] = [
     adminOnly: true,
   },
   {
+    label: "账号状态",
+    icon: "server",
+    to: "/account-status",
+    adminOnly: true,
+  },
+  {
     label: "参与者",
     icon: "user-group",
     to: "/participants",

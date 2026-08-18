@@ -1,6 +1,7 @@
 import type {
   APIUsageBreakdown,
   AppSettingsData,
+  AccountStatusData,
   BlockedIPAddress,
   FastCorrectionDetail,
   HistoricalRebuildPlan,
@@ -506,6 +507,118 @@ function createPlan(
   return plan;
 }
 
+function accountStatusData(state: DemoState): AccountStatusData {
+  const sampledAt = new Date(state.clock).getTime();
+  const fixtures = [
+    {
+      usedPercent: 72.4,
+      requests: 1842,
+      tokens: 8_745_120,
+      accountCost: 142.68,
+      concurrency: 3,
+    },
+    {
+      usedPercent: 28.15,
+      requests: 694,
+      tokens: 3_126_480,
+      accountCost: 54.32,
+      concurrency: 1,
+    },
+  ];
+  return {
+    configured: state.monitoredAccounts.length > 0,
+    sampled_at: state.clock,
+    stats_days: 30,
+    connection_error: null,
+    accounts: state.monitoredAccounts.map((account, index) => {
+      const fixture = fixtures[index % fixtures.length]!;
+      const resetAt = new Date(
+        sampledAt + (index === 0 ? 52 : 91) * 3_600_000,
+      ).toISOString();
+      return {
+        id: account.id,
+        external_account_id: account.external_account_id,
+        name: account.name,
+        enabled: account.enabled,
+        quota_query_mode: account.quota_query_mode,
+        runtime: {
+          name: account.name,
+          account_type: "oauth",
+          status: "active",
+          schedulable: true,
+          current_concurrency: fixture.concurrency,
+          concurrency_limit: 10,
+          last_used_at: new Date(
+            sampledAt - (index + 1) * 85_000,
+          ).toISOString(),
+          rate_limited_at: null,
+          rate_limit_reset_at: null,
+          overload_until: null,
+          temp_unschedulable_until: null,
+          temp_unschedulable_reason: null,
+          error_message: null,
+        },
+        usage: {
+          source: "passive",
+          updated_at: new Date(sampledAt - 95_000).toISOString(),
+          five_hour: {
+            used_percent: index === 0 ? 18.2 : 6.75,
+            reset_at: new Date(sampledAt + 2 * 3_600_000).toISOString(),
+            remaining_seconds: 7200,
+            request_count: null,
+            token_count: null,
+            account_cost_usd: null,
+            standard_cost_usd: null,
+            user_cost_usd: null,
+          },
+          seven_day: {
+            used_percent: fixture.usedPercent,
+            reset_at: resetAt,
+            remaining_seconds: Math.floor(
+              (new Date(resetAt).getTime() - sampledAt) / 1000,
+            ),
+            request_count: fixture.requests,
+            token_count: fixture.tokens,
+            account_cost_usd: fixture.accountCost,
+            standard_cost_usd: Number((fixture.accountCost / 1.12).toFixed(2)),
+            user_cost_usd: Number((fixture.accountCost * 1.08).toFixed(2)),
+          },
+          needs_verify: false,
+          is_banned: false,
+          needs_reauth: false,
+          error_code: null,
+          error: null,
+        },
+        stats: {
+          days: 30,
+          actual_days_used: 26,
+          account_cost_usd: Number((fixture.accountCost * 3.6).toFixed(2)),
+          standard_cost_usd: Number((fixture.accountCost * 3.2).toFixed(2)),
+          user_cost_usd: Number((fixture.accountCost * 3.9).toFixed(2)),
+          request_count: fixture.requests * 4,
+          token_count: fixture.tokens * 4,
+          avg_daily_cost_usd: Number(
+            ((fixture.accountCost * 3.6) / 26).toFixed(2),
+          ),
+          avg_daily_request_count: Number(
+            ((fixture.requests * 4) / 26).toFixed(1),
+          ),
+          avg_daily_token_count: Math.round((fixture.tokens * 4) / 26),
+          avg_duration_ms: index === 0 ? 1348 : 1126,
+          today: {
+            date: state.clock.slice(0, 10),
+            account_cost_usd: Number((fixture.accountCost * 0.12).toFixed(2)),
+            user_cost_usd: Number((fixture.accountCost * 0.13).toFixed(2)),
+            request_count: Math.round(fixture.requests * 0.14),
+            token_count: Math.round(fixture.tokens * 0.14),
+          },
+        },
+        warnings: [],
+      };
+    }),
+  };
+}
+
 function authorized(): Response | null {
   return demoIdentity() ? null : failure("登录已过期，请重新登录", 401);
 }
@@ -564,6 +677,9 @@ export async function demoRequest(
   if (method === "GET" && pathname === "dashboard") {
     const accountId = Number(url.searchParams.get("account_id"));
     return envelope(dashboardData(state, accountId));
+  }
+  if (method === "GET" && pathname === "account-status") {
+    return envelope(accountStatusData(state));
   }
   if (pathname === "monitor/run" && method === "GET") {
     const enabledAccounts = state.monitoredAccounts.filter(

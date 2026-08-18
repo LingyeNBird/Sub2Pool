@@ -8,6 +8,12 @@ export const appRoutes: RouteRecordRaw[] = [
     meta: { title: "额度总览", adminOnly: true },
   },
   {
+    path: "account-status",
+    name: "account-status",
+    component: () => import("@/views/account-status/AccountStatusView.vue"),
+    meta: { title: "账号状态", adminOnly: true },
+  },
+  {
     path: "participants",
     name: "participants",
     component: () => import("@/views/users/participants/ParticipantsView.vue"),
