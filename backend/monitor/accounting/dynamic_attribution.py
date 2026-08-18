@@ -363,7 +363,7 @@ def replay_dynamic_segment(
             item.participant_id
             for item in snapshots
             if (
-                float(item.participant.share_percent)
+                float(item.share_percent)
                 - projected_attribution[
                     row,
                     replay_input.participant_subject_indices[
@@ -412,7 +412,7 @@ def replay_dynamic_segment(
                 charged_upper_value,
                 PERCENT_PRECISION,
             )
-            remaining = max(ZERO, snapshot.participant.share_percent - charged)
+            remaining = max(ZERO, snapshot.share_percent - charged)
 
             charged_lower = min(charged_lower, charged)
             charged_upper = max(charged_upper, charged)
@@ -498,7 +498,7 @@ def replay_dynamic_segment(
                         or (exhausted and remaining > ZERO)
                     )
                 )
-            overused = charged_lower > snapshot.participant.share_percent
+            overused = charged_lower > snapshot.share_percent
             if overused and not rights_exhausted:
                 needs_update = False
             if rights_exhausted:

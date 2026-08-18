@@ -49,7 +49,13 @@ from monitor.integrations.sub2api import (
     WeeklyWindow,
 )
 from monitor import database_transfer
-from monitor.tests.helpers import create_recommendation_snapshot, jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    create_participant_snapshot,
+    create_recommendation_snapshot,
+    jwt_login,
+)
 
 @pytest.mark.django_db
 def test_dashboard_only_lists_participants_that_need_manual_adjustment():
@@ -58,23 +64,21 @@ def test_dashboard_only_lists_participants_that_need_manual_adjustment():
         password="very-strong-password",
         email="owner@example.com",
     )
-    actionable = Participant.objects.create(
-        name="需要调整",
-        sub2api_user_id=51,
-        share_percent=50,
-    )
-    settled = Participant.objects.create(
-        name="当前无需调整",
-        sub2api_user_id=52,
-        share_percent=40,
-    )
-    Participant.objects.create(
-        name="等待测算",
-        sub2api_user_id=53,
-        share_percent=10,
-    )
+    actionable = create_participant(name="需要调整",
+    sub2api_user_id=51,
+    share_percent=50,)
+    settled = create_participant(name="当前无需调整",
+    sub2api_user_id=52,
+    share_percent=40,
+    latest_balance_usd=Decimal("760"),)
+    create_participant(name="等待测算",
+    sub2api_user_id=53,
+    share_percent=10,)
     create_recommendation_snapshot(actionable)
-    settled_snapshot = create_recommendation_snapshot(settled)
+    settled_snapshot = create_recommendation_snapshot(
+        settled,
+        recommended=Decimal("80"),
+    )
     settled_snapshot.needs_manual_update = False
     settled_snapshot.save(update_fields=["needs_manual_update"])
     client = Client()
@@ -96,19 +100,15 @@ def test_usage_deviation_is_not_a_dashboard_suggestion_and_can_clear():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.weekly_quota_model = "time_varying"
     config.save()
-    confirmed = Participant.objects.create(
-        name="确认偏差",
-        sub2api_user_id=61,
-        share_percent=40,
-    )
-    uncertain = Participant.objects.create(
-        name="尚不确定",
-        sub2api_user_id=62,
-        share_percent=40,
-    )
+    confirmed = create_participant(name="确认偏差",
+    sub2api_user_id=61,
+    share_percent=40,)
+    uncertain = create_participant(name="尚不确定",
+    sub2api_user_id=62,
+    share_percent=40,)
     now = timezone.now()
     starts_at = now - timedelta(days=4)
     observation = Observation.objects.create(
@@ -125,28 +125,24 @@ def test_usage_deviation_is_not_a_dashboard_suggestion_and_can_clear():
         total_actual_cost=Decimal("1000"),
         effective_usd_per_percent=Decimal("20"),
     )
-    ParticipantSnapshot.objects.create(
-        observation=observation,
-        participant=confirmed,
-        raw_selected_cost=Decimal("860"),
-        selected_cost=Decimal("860"),
-        charged_cycle_percent=Decimal("43"),
-        charged_percent_lower=Decimal("41"),
-        charged_percent_upper=Decimal("45"),
-        remaining_share_percent=Decimal("0"),
-        needs_manual_update=False,
-    )
-    ParticipantSnapshot.objects.create(
-        observation=observation,
-        participant=uncertain,
-        raw_selected_cost=Decimal("820"),
-        selected_cost=Decimal("820"),
-        charged_cycle_percent=Decimal("41"),
-        charged_percent_lower=Decimal("39"),
-        charged_percent_upper=Decimal("43"),
-        remaining_share_percent=Decimal("0"),
-        needs_manual_update=False,
-    )
+    create_participant_snapshot(observation=observation,
+    participant=confirmed,
+    raw_selected_cost=Decimal("860"),
+    selected_cost=Decimal("860"),
+    charged_cycle_percent=Decimal("43"),
+    charged_percent_lower=Decimal("41"),
+    charged_percent_upper=Decimal("45"),
+    remaining_share_percent=Decimal("0"),
+    needs_manual_update=False,)
+    create_participant_snapshot(observation=observation,
+    participant=uncertain,
+    raw_selected_cost=Decimal("820"),
+    selected_cost=Decimal("820"),
+    charged_cycle_percent=Decimal("41"),
+    charged_percent_lower=Decimal("39"),
+    charged_percent_upper=Decimal("43"),
+    remaining_share_percent=Decimal("0"),
+    needs_manual_update=False,)
     client = Client()
     headers, _ = jwt_login(client)
 
@@ -154,10 +150,14 @@ def test_usage_deviation_is_not_a_dashboard_suggestion_and_can_clear():
     assert dashboard["participants"] == []
     visible = client.get("/api/participants", **headers).json()["data"]
     confirmed_snapshot = next(
-        item["snapshot"] for item in visible if item["id"] == confirmed.id
+        item["account_breakdowns"][0]["snapshot"]
+        for item in visible
+        if item["id"] == confirmed.id
     )
     uncertain_snapshot = next(
-        item["snapshot"] for item in visible if item["id"] == uncertain.id
+        item["account_breakdowns"][0]["snapshot"]
+        for item in visible
+        if item["id"] == uncertain.id
     )
     assert confirmed_snapshot["is_overused"] is True
     assert confirmed_snapshot["overused_percent"] == 3.0
@@ -179,21 +179,19 @@ def test_usage_deviation_is_not_a_dashboard_suggestion_and_can_clear():
         total_actual_cost=Decimal("1020"),
         effective_usd_per_percent=Decimal("21"),
     )
-    ParticipantSnapshot.objects.create(
-        observation=revised,
-        participant=confirmed,
-        raw_selected_cost=Decimal("870"),
-        selected_cost=Decimal("870"),
-        charged_cycle_percent=Decimal("39"),
-        charged_percent_lower=Decimal("38"),
-        charged_percent_upper=Decimal("40"),
-        remaining_share_percent=Decimal("1"),
-        needs_manual_update=False,
-    )
+    create_participant_snapshot(observation=revised,
+    participant=confirmed,
+    raw_selected_cost=Decimal("870"),
+    selected_cost=Decimal("870"),
+    charged_cycle_percent=Decimal("39"),
+    charged_percent_lower=Decimal("38"),
+    charged_percent_upper=Decimal("40"),
+    remaining_share_percent=Decimal("1"),
+    needs_manual_update=False,)
 
     revised_visible = client.get("/api/participants", **headers).json()["data"]
     revised_snapshot = next(
-        item["snapshot"]
+        item["account_breakdowns"][0]["snapshot"]
         for item in revised_visible
         if item["id"] == confirmed.id
     )
@@ -209,14 +207,12 @@ def test_dashboard_uses_particle_filter_residual_attribution():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.weekly_quota_model = "time_varying"
     config.save()
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=51,
-        share_percent=50,
-    )
+    participant = create_participant(name="车友",
+    sub2api_user_id=51,
+    share_percent=50,)
     now = timezone.now()
     observation = Observation.objects.create(
         account_id=7,
@@ -234,14 +230,12 @@ def test_dashboard_uses_particle_filter_residual_attribution():
         estimated_used_percent=Decimal("20"),
         model_diagnostics={"residual_attributed_percent": 7.25},
     )
-    ParticipantSnapshot.objects.create(
-        observation=observation,
-        participant=participant,
-        raw_selected_cost=Decimal("200"),
-        selected_cost=Decimal("200"),
-        charged_cycle_percent=Decimal("12"),
-        remaining_share_percent=Decimal("38"),
-    )
+    create_participant_snapshot(observation=observation,
+    participant=participant,
+    raw_selected_cost=Decimal("200"),
+    selected_cost=Decimal("200"),
+    charged_cycle_percent=Decimal("12"),
+    remaining_share_percent=Decimal("38"),)
     client = Client()
     headers, _ = jwt_login(client)
 
@@ -261,14 +255,12 @@ def test_constant_average_model_changes_only_presented_attribution():
     )
     config = AppSettings.load()
     config.weekly_quota_model = "constant_average"
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=51,
-        share_percent=50,
-        latest_balance_usd=Decimal("80"),
-    )
+    participant = create_participant(name="车友",
+    sub2api_user_id=51,
+    share_percent=50,
+    latest_balance_usd=Decimal("80"),)
     now = timezone.now()
     observation = Observation.objects.create(
         account_id=7,
@@ -284,28 +276,28 @@ def test_constant_average_model_changes_only_presented_attribution():
         total_actual_cost=Decimal("400"),
         effective_usd_per_percent=Decimal("15"),
     )
-    stored = ParticipantSnapshot.objects.create(
-        observation=observation,
-        participant=participant,
-        raw_selected_cost=Decimal("100"),
-        selected_cost=Decimal("100"),
-        charged_cycle_percent=Decimal("12"),
-        remaining_share_percent=Decimal("38"),
-        current_balance_usd=Decimal("80"),
-        recommended_balance_usd=Decimal("722"),
-        needs_manual_update=True,
-    )
+    stored = create_participant_snapshot(observation=observation,
+    participant=participant,
+    raw_selected_cost=Decimal("100"),
+    selected_cost=Decimal("100"),
+    charged_cycle_percent=Decimal("12"),
+    remaining_share_percent=Decimal("38"),
+    current_balance_usd=Decimal("80"),
+    recommended_balance_usd=Decimal("722"),
+    needs_manual_update=True,)
     client = Client()
     headers, _ = jwt_login(client)
 
     constant = client.get("/api/participants", **headers).json()["data"][0]
 
-    assert constant["snapshot"]["allocation_model"] == "constant_average"
-    assert constant["snapshot"]["charged_cycle_percent"] == 5.0
-    assert constant["snapshot"]["remaining_share_percent"] == 45.0
-    assert constant["snapshot"]["recommended_balance_usd"] == 834.55
-    assert constant["snapshot"]["recommended_balance_min_usd"] == 814.09
-    assert constant["snapshot"]["recommended_balance_max_usd"] == 855.0
+    assert constant["snapshot"]["allocation_model"] == "pooled_account_sum"
+    constant_snapshot = constant["account_breakdowns"][0]["snapshot"]
+    assert constant_snapshot["allocation_model"] == "constant_average"
+    assert constant_snapshot["charged_cycle_percent"] == 5.0
+    assert constant_snapshot["remaining_share_percent"] == 45.0
+    assert constant_snapshot["recommended_balance_usd"] == 834.55
+    assert constant_snapshot["recommended_balance_min_usd"] == 814.09
+    assert constant_snapshot["recommended_balance_max_usd"] == 855.0
     dashboard = client.get("/api/dashboard", **headers).json()["data"]
     assert dashboard["weekly_quota_model"] == "constant_average"
     assert dashboard["cycle"]["effective_usd_per_percent"] == 20.0
@@ -313,15 +305,12 @@ def test_constant_average_model_changes_only_presented_attribution():
     assert dashboard["cycle"]["rate_calculated"] is True
     assert dashboard["cycle"]["estimated_used_percent"] == 20.0
     assert dashboard["cycle"]["unattributed_used_percent"] == 15.0
-    assert dashboard["participants"][0]["snapshot"][
-        "recommended_balance_usd"
-    ] == 834.55
-    assert dashboard["participants"][0]["snapshot"][
-        "recommended_balance_min_usd"
-    ] == 814.09
-    assert dashboard["participants"][0]["snapshot"][
-        "recommended_balance_max_usd"
-    ] == 855.0
+    dashboard_snapshot = dashboard["participants"][0]["account_breakdowns"][0][
+        "snapshot"
+    ]
+    assert dashboard_snapshot["recommended_balance_usd"] == 834.55
+    assert dashboard_snapshot["recommended_balance_min_usd"] == 814.09
+    assert dashboard_snapshot["recommended_balance_max_usd"] == 855.0
     stored.refresh_from_db()
     assert stored.charged_cycle_percent == Decimal("12")
     assert stored.recommended_balance_usd == Decimal("722")
@@ -332,8 +321,10 @@ def test_constant_average_model_changes_only_presented_attribution():
         "/api/participants",
         **headers,
     ).json()["data"][0]
-    assert time_varying["snapshot"]["allocation_model"] == "time_varying"
-    assert time_varying["snapshot"]["charged_cycle_percent"] == 12.0
+    assert time_varying["snapshot"]["allocation_model"] == "pooled_account_sum"
+    time_varying_snapshot = time_varying["account_breakdowns"][0]["snapshot"]
+    assert time_varying_snapshot["allocation_model"] == "time_varying"
+    assert time_varying_snapshot["charged_cycle_percent"] == 12.0
     time_varying_dashboard = client.get(
         "/api/dashboard",
         **headers,
@@ -342,15 +333,12 @@ def test_constant_average_model_changes_only_presented_attribution():
         time_varying_dashboard["cycle"]["effective_usd_per_percent"] == 15.0
     )
     assert time_varying_dashboard["cycle"]["rate_calculated"] is False
-    assert time_varying_dashboard["participants"][0]["snapshot"][
-        "recommended_balance_usd"
-    ] == 722.0
-    assert time_varying_dashboard["participants"][0]["snapshot"][
-        "recommended_balance_min_usd"
-    ] is None
-    assert time_varying_dashboard["participants"][0]["snapshot"][
-        "recommended_balance_max_usd"
-    ] is None
+    time_varying_account = time_varying_dashboard["participants"][0][
+        "account_breakdowns"
+    ][0]["snapshot"]
+    assert time_varying_account["recommended_balance_usd"] == 722.0
+    assert time_varying_account["recommended_balance_min_usd"] == 722.0
+    assert time_varying_account["recommended_balance_max_usd"] == 722.0
 
 @pytest.mark.django_db(transaction=True)
 def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
@@ -364,14 +352,12 @@ def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
     config = AppSettings.load()
     config.sub2api_base_url = "https://admin.example:8443/internal/path"
     config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=51,
-        share_percent=50,
-        latest_balance_usd=Decimal("80"),
-    )
+    participant = create_participant(name="车友",
+    sub2api_user_id=51,
+    share_percent=50,
+    latest_balance_usd=Decimal("80"),)
     snapshot = create_recommendation_snapshot(participant)
     captured: dict = {}
 
@@ -393,6 +379,13 @@ def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
     monkeypatch.setattr("monitor.views.dashboard.Sub2APIClient", FakeClient)
     client = Client()
     headers, _ = jwt_login(client)
+    expected = Decimal(
+        str(
+            client.get("/api/participants", **headers).json()["data"][0][
+                "snapshot"
+            ]["recommended_balance_usd"]
+        )
+    )
 
     applied = client.post(
         f"/api/dashboard/participants/{participant.id}/apply-recommendation",
@@ -400,15 +393,15 @@ def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
     )
 
     assert applied.status_code == 200
-    assert applied.json()["data"]["applied_balance_usd"] == 123.45
-    assert captured == {"user_id": 51, "balance": Decimal("123.45")}
+    assert applied.json()["data"]["applied_balance_usd"] == float(expected)
+    assert captured == {"user_id": 51, "balance": expected}
     snapshot.refresh_from_db()
     participant.refresh_from_db()
     assert snapshot.recommendation_applied is True
     assert snapshot.needs_manual_update is False
-    assert snapshot.current_balance_usd == Decimal("123.45")
+    assert snapshot.current_balance_usd == expected
     assert snapshot.balance_difference_usd == Decimal("0")
-    assert participant.latest_balance_usd == Decimal("123.45")
+    assert participant.latest_balance_usd == expected
     state = HistoryMaintenanceState.objects.get(account_id=7)
     assert state.fact_revision == 1
 
@@ -426,14 +419,12 @@ def test_balance_rpc_blocks_concurrent_participant_policy_write(monkeypatch):
     )
     config = AppSettings.load()
     config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=51,
-        share_percent=50,
-        latest_balance_usd=Decimal("80"),
-    )
+    participant = create_participant(name="车友",
+    sub2api_user_id=51,
+    share_percent=50,
+    latest_balance_usd=Decimal("80"),)
     snapshot = create_recommendation_snapshot(participant)
     client = Client()
     headers, _ = jwt_login(client)
@@ -488,14 +479,12 @@ def test_remote_success_survives_local_commit_failure_and_retries_idempotently(
     )
     config = AppSettings.load()
     config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=51,
-        share_percent=50,
-        latest_balance_usd=Decimal("80"),
-    )
+    participant = create_participant(name="车友",
+    sub2api_user_id=51,
+    share_percent=50,
+    latest_balance_usd=Decimal("80"),)
     snapshot = create_recommendation_snapshot(participant)
     remote_calls: list[Decimal] = []
 
@@ -531,6 +520,13 @@ def test_remote_success_survives_local_commit_failure_and_retries_idempotently(
     )
     client = Client()
     headers, _ = jwt_login(client)
+    expected = Decimal(
+        str(
+            client.get("/api/participants", **headers).json()["data"][0][
+                "snapshot"
+            ]["recommended_balance_usd"]
+        )
+    )
 
     first = client.post(
         f"/api/dashboard/participants/{participant.id}/apply-recommendation",
@@ -540,7 +536,7 @@ def test_remote_success_survives_local_commit_failure_and_retries_idempotently(
     assert first.status_code == 503, first.json()
     operation = ParticipantBalanceOperation.objects.get()
     assert operation.state == "remote_confirmed"
-    assert operation.confirmed_balance_usd == Decimal("123.450000")
+    assert operation.confirmed_balance_usd == expected
     snapshot.refresh_from_db()
     assert snapshot.recommendation_applied is False
     monkeypatch.setattr(
@@ -568,7 +564,7 @@ def test_remote_success_survives_local_commit_failure_and_retries_idempotently(
     snapshot.refresh_from_db()
     assert operation.state == "committed"
     assert snapshot.recommendation_applied is True
-    assert remote_calls == [Decimal("123.45")]
+    assert remote_calls == [expected]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -580,14 +576,12 @@ def test_ambiguous_remote_failure_reconciles_before_idempotent_retry(monkeypatch
     )
     config = AppSettings.load()
     config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=51,
-        share_percent=50,
-        latest_balance_usd=Decimal("80"),
-    )
+    participant = create_participant(name="车友",
+    sub2api_user_id=51,
+    share_percent=50,
+    latest_balance_usd=Decimal("80"),)
     snapshot = create_recommendation_snapshot(participant)
     remote_balance = {"value": Decimal("80")}
     calls = {"set": 0, "read": 0}
@@ -658,14 +652,12 @@ def test_constant_average_one_click_applies_recommendation_midpoint(monkeypatch)
     config = AppSettings.load()
     config.weekly_quota_model = "constant_average"
     config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=51,
-        share_percent=50,
-        latest_balance_usd=Decimal("80"),
-    )
+    participant = create_participant(name="车友",
+    sub2api_user_id=51,
+    share_percent=50,
+    latest_balance_usd=Decimal("80"),)
     now = timezone.now()
     observation = Observation.objects.create(
         account_id=7,
@@ -681,15 +673,13 @@ def test_constant_average_one_click_applies_recommendation_midpoint(monkeypatch)
         total_actual_cost=Decimal("400"),
         effective_usd_per_percent=Decimal("15"),
     )
-    snapshot = ParticipantSnapshot.objects.create(
-        observation=observation,
-        participant=participant,
-        raw_selected_cost=Decimal("100"),
-        selected_cost=Decimal("100"),
-        current_balance_usd=Decimal("80"),
-        recommended_balance_usd=Decimal("722"),
-        needs_manual_update=True,
-    )
+    snapshot = create_participant_snapshot(observation=observation,
+    participant=participant,
+    raw_selected_cost=Decimal("100"),
+    selected_cost=Decimal("100"),
+    current_balance_usd=Decimal("80"),
+    recommended_balance_usd=Decimal("722"),
+    needs_manual_update=True,)
     captured: dict = {}
 
     class FakeClient:
@@ -709,6 +699,13 @@ def test_constant_average_one_click_applies_recommendation_midpoint(monkeypatch)
     monkeypatch.setattr("monitor.views.dashboard.Sub2APIClient", FakeClient)
     client = Client()
     headers, _ = jwt_login(client)
+    expected = Decimal(
+        str(
+            client.get("/api/participants", **headers).json()["data"][0][
+                "snapshot"
+            ]["recommended_balance_usd"]
+        )
+    )
 
     applied = client.post(
         f"/api/dashboard/participants/{participant.id}/apply-recommendation",
@@ -716,12 +713,12 @@ def test_constant_average_one_click_applies_recommendation_midpoint(monkeypatch)
     )
 
     assert applied.status_code == 200
-    assert applied.json()["data"]["applied_balance_usd"] == 834.55
-    assert captured == {"user_id": 51, "balance": Decimal("834.55")}
+    assert applied.json()["data"]["applied_balance_usd"] == float(expected)
+    assert captured == {"user_id": 51, "balance": expected}
     snapshot.refresh_from_db()
     participant.refresh_from_db()
-    assert snapshot.current_balance_usd == Decimal("834.55")
-    assert participant.latest_balance_usd == Decimal("834.55")
+    assert snapshot.current_balance_usd == expected
+    assert participant.latest_balance_usd == expected
 
 @pytest.mark.django_db
 def test_apply_recommendation_failure_keeps_snapshot_actionable(monkeypatch):
@@ -730,14 +727,12 @@ def test_apply_recommendation_failure_keeps_snapshot_actionable(monkeypatch):
         password="very-strong-password",
         email="owner@example.com",
     )
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=51,
-        share_percent=50,
-    )
+    participant = create_participant(name="车友",
+    sub2api_user_id=51,
+    share_percent=50,)
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
+    create_monitored_account(7)
+    config.save()
     snapshot = create_recommendation_snapshot(participant)
 
     class FailingClient:
@@ -774,13 +769,12 @@ def test_apply_recommendation_failure_keeps_snapshot_actionable(monkeypatch):
 @pytest.mark.django_db
 def test_initial_observation_respects_capacity_bounds_and_builds_recommendations(monkeypatch):
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.quota_query_mode = "passive"
+    create_monitored_account(7)
     config.initial_usd_per_percent = Decimal("16")
     config.safety_factor = Decimal("0.95")
     config.save()
-    owner = Participant.objects.create(name="车主", sub2api_user_id=1, share_percent=50, is_owner=True)
-    rider = Participant.objects.create(name="车友", sub2api_user_id=2, share_percent=50)
+    owner = create_participant(name="车主", sub2api_user_id=1, share_percent=50, is_owner=True)
+    rider = create_participant(name="车友", sub2api_user_id=2, share_percent=50)
     now = datetime(2026, 8, 10, tzinfo=datetime_timezone.utc)
     reset_after_seconds = int(timedelta(days=4).total_seconds())
     reset_at = now + timedelta(seconds=reset_after_seconds)
@@ -816,7 +810,7 @@ def test_initial_observation_respects_capacity_bounds_and_builds_recommendations
             return UserBalance(balance, Decimal("0"))
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
-    result = run_monitor(force_upstream=True, source="manual")
+    result = run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     assert result["status"] == "calibrated"
     snapshots = {
@@ -852,20 +846,16 @@ def test_constant_average_removes_safety_factor_for_only_remaining_participant()
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.weekly_quota_model = "constant_average"
     config.safety_factor = Decimal("0.5")
     config.save()
-    exhausted = Participant.objects.create(
-        name="已跑完",
-        sub2api_user_id=71,
-        share_percent=50,
-    )
-    remaining = Participant.objects.create(
-        name="唯一剩余",
-        sub2api_user_id=72,
-        share_percent=50,
-    )
+    exhausted = create_participant(name="已跑完",
+    sub2api_user_id=71,
+    share_percent=50,)
+    remaining = create_participant(name="唯一剩余",
+    sub2api_user_id=72,
+    share_percent=50,)
     now = timezone.now()
     observation = Observation.objects.create(
         account_id=7,
@@ -881,26 +871,24 @@ def test_constant_average_removes_safety_factor_for_only_remaining_participant()
         total_actual_cost=Decimal("400"),
         effective_usd_per_percent=Decimal("5"),
     )
-    ParticipantSnapshot.objects.create(
-        observation=observation,
-        participant=exhausted,
-        raw_selected_cost=Decimal("300"),
-        selected_cost=Decimal("300"),
-        current_balance_usd=Decimal("5"),
-    )
-    ParticipantSnapshot.objects.create(
-        observation=observation,
-        participant=remaining,
-        raw_selected_cost=Decimal("100"),
-        selected_cost=Decimal("100"),
-        current_balance_usd=Decimal("0"),
-    )
+    create_participant_snapshot(observation=observation,
+    participant=exhausted,
+    raw_selected_cost=Decimal("300"),
+    selected_cost=Decimal("300"),
+    current_balance_usd=Decimal("5"),)
+    create_participant_snapshot(observation=observation,
+    participant=remaining,
+    raw_selected_cost=Decimal("100"),
+    selected_cost=Decimal("100"),
+    current_balance_usd=Decimal("0"),)
     client = Client()
     headers, _ = jwt_login(client)
 
     rows = client.get("/api/participants", **headers).json()["data"]
     exhausted_snapshot = next(
-        item["snapshot"] for item in rows if item["id"] == exhausted.id
+        item["account_breakdowns"][0]["snapshot"]
+        for item in rows
+        if item["id"] == exhausted.id
     )
     assert exhausted_snapshot["remaining_share_percent"] == 0.0
     assert exhausted_snapshot["recommended_balance_usd"] == 0.0
@@ -911,7 +899,9 @@ def test_constant_average_removes_safety_factor_for_only_remaining_participant()
         "百分比权益已用尽，建议清零 Sub2API 用户余额"
     )
     snapshot = next(
-        item["snapshot"] for item in rows if item["id"] == remaining.id
+        item["account_breakdowns"][0]["snapshot"]
+        for item in rows
+        if item["id"] == remaining.id
     )
 
     assert snapshot["remaining_share_percent"] == 30.0

@@ -7,6 +7,7 @@ import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import type {
   ParticleRangePromotion,
+  MonitoredAccount,
   ParticleTrajectoryData,
   ParticleTrajectoryPeriod,
   ParticleTrajectoryPoint,
@@ -19,6 +20,8 @@ import { trajectoryFrame } from "./trajectory";
 const PLAYBACK_DURATION_MS = 12_000;
 
 const data = ref<ParticleTrajectoryData | null>(null);
+const accounts = ref<MonitoredAccount[]>([]);
+const selectedAccountId = ref<number | null>(null);
 const loading = ref(true);
 const message = ref("");
 const playbackProgress = ref(0);
@@ -157,14 +160,23 @@ function loadSelectedPeriod() {
   void load(selectedPeriodId.value);
 }
 
+function selectAccount() {
+  selectedPeriodId.value = null;
+  void load(null);
+}
+
 async function load(periodId: number | null = selectedPeriodId.value) {
   loading.value = true;
   message.value = "";
   stopPlayback();
   try {
-    const query = periodId === null ? "" : `?period=${periodId}`;
+    const query = new URLSearchParams();
+    if (periodId !== null) query.set("period", String(periodId));
+    if (selectedAccountId.value !== null) {
+      query.set("account_id", String(selectedAccountId.value));
+    }
     data.value = await api<ParticleTrajectoryData>(
-      `particle-trajectory${query}`,
+      `particle-trajectory?${query}`,
     );
     selectedPeriodId.value = data.value.selected_period_id ?? null;
     if (points.value.length) {
@@ -187,12 +199,25 @@ function syncReducedMotion(event: MediaQueryList | MediaQueryListEvent) {
   }
 }
 
-onMounted(() => {
+async function initialize() {
   motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
   syncReducedMotion(motionQuery);
   motionQuery.addEventListener("change", syncReducedMotion);
-  void load();
-});
+  try {
+    accounts.value = await api<MonitoredAccount[]>(
+      "settings/monitored-accounts",
+    );
+    selectedAccountId.value =
+      accounts.value.find((item) => item.enabled)?.id ??
+      accounts.value[0]?.id ??
+      null;
+  } catch (error) {
+    message.value = error instanceof ApiError ? error.message : "加载账号失败";
+  }
+  await load();
+}
+
+onMounted(initialize);
 
 onBeforeUnmount(() => {
   stopPlayback();
@@ -210,6 +235,23 @@ onBeforeUnmount(() => {
         </ul>
       </div>
     </div>
+    <label v-if="accounts.length" class="form-control w-full gap-1 lg:w-64">
+      <span class="text-xs font-medium opacity-60">监控账号</span>
+      <select
+        v-model.number="selectedAccountId"
+        class="select w-full select-sm"
+        :disabled="loading"
+        @change="selectAccount"
+      >
+        <option
+          v-for="account in accounts"
+          :key="account.id"
+          :value="account.id"
+        >
+          {{ account.name }}
+        </option>
+      </select>
+    </label>
     <label v-if="periods.length" class="form-control w-full gap-1 lg:w-72">
       <span class="text-xs font-medium opacity-60">历史周期</span>
       <select

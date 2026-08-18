@@ -2,8 +2,8 @@
 from .validators import PERCENT_VALIDATORS, validate_service_url
 
 
-from .settings import AppSettings
-from .participants import Participant
+from .settings import AppSettings, MonitoredAccount
+from .participants import AccountParticipant, Participant
 from .observations import (
     Observation,
     ParticipantSnapshot,
@@ -17,15 +17,18 @@ from .history_maintenance import (
     HistoricalRebuildRun,
     HistoryMaintenanceState,
     ParticipantBalanceOperation,
+    ParticipantBalanceOperationSource,
     ParticipantBalanceSample,
     UsageSamplePoint,
 )
 
 __all__ = [
+    "AccountParticipant",
     "AppSettings",
     "BlockedIPAddress",
     "HistoricalRebuildRun",
     "HistoryMaintenanceState",
+    "MonitoredAccount",
     "LoginEvent",
     "NotificationEvent",
     "Observation",
@@ -34,6 +37,7 @@ __all__ = [
     "Participant",
     "ParticipantSnapshot",
     "ParticipantBalanceOperation",
+    "ParticipantBalanceOperationSource",
     "ParticipantBalanceSample",
     "ParticipantUsageSample",
     "Sub2APIUserUsageSample",

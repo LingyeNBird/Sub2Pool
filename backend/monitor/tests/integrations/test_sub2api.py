@@ -20,6 +20,7 @@ from monitor.models import (
     AppSettings,
     BlockedIPAddress,
     LoginEvent,
+    MonitoredAccount,
     NotificationEvent,
     Observation,
     ObservationFastCorrection,
@@ -46,11 +47,20 @@ from monitor.integrations.sub2api import (
     WeeklyWindow,
 )
 from monitor import database_transfer
-from monitor.tests.helpers import create_recommendation_snapshot, jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    create_recommendation_snapshot,
+    jwt_login,
+)
 
 @pytest.mark.django_db
 def test_default_query_mode_is_passive():
-    assert AppSettings.load().quota_query_mode == "passive"
+    account = MonitoredAccount.objects.create(
+        external_account_id=7,
+        name="主账号",
+    )
+    assert account.quota_query_mode == "passive"
 
 @pytest.mark.django_db
 def test_passive_quota_reads_account_snapshot_without_official_quota_endpoint():
@@ -427,9 +437,7 @@ def test_connection_test_uses_unsaved_form_without_persisting(monkeypatch):
         "account_id": 91,
         "mode": "direct",
     }
-    config = AppSettings.load()
-    assert config.openai_account_id is None
-    assert config.quota_query_mode == "passive"
+    assert not MonitoredAccount.objects.exists()
 
 @pytest.mark.django_db
 def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch):
@@ -440,17 +448,13 @@ def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch)
     )
     client = Client()
     headers, _ = jwt_login(client)
-    participant = Participant.objects.create(
-        name="测试车友",
-        sub2api_user_id=51,
-        share_percent=Decimal("50"),
-    )
-    blank_name_participant = Participant.objects.create(
-        name="不应作为账号身份",
-        sub2api_user_id=52,
-        sub2api_username="错误的旧缓存",
-        share_percent=Decimal("50"),
-    )
+    participant = create_participant(name="测试车友",
+    sub2api_user_id=51,
+    share_percent=Decimal("50"),)
+    blank_name_participant = create_participant(name="不应作为账号身份",
+    sub2api_user_id=52,
+    sub2api_username="错误的旧缓存",
+    share_percent=Decimal("50"),)
 
     class FakeClient:
         def __init__(self, _config):

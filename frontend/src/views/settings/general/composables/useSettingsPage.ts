@@ -15,6 +15,7 @@ import type {
   HistoricalRebuildPlan,
   ReadOnlyAPIKeyGenerated,
   OpenAIAccountOption,
+  MonitoredAccount,
 } from "@/types";
 
 export interface PasswordForm {
@@ -38,6 +39,10 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   const smtpPassword = ref("");
   const resendApiKey = ref("");
   const openAIAccounts = ref<OpenAIAccountOption[]>([]);
+  const monitoredAccounts = ref<MonitoredAccount[]>([]);
+  const selectedTestAccountId = ref<number | null>(null);
+  const maintenanceAccountId = ref<number | null>(null);
+  const savingAccountId = ref<number | "new" | null>(null);
   const loadingAccounts = ref(false);
   const exportingDatabase = ref(false);
   const importingDatabase = ref(false);
@@ -57,8 +62,11 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     return {
       sub2api_base_url: settings.value.sub2api_base_url,
       sub2api_admin_token: adminToken.value,
-      openai_account_id: settings.value.openai_account_id,
-      quota_query_mode: settings.value.quota_query_mode,
+      openai_account_id: selectedTestAccountId.value,
+      quota_query_mode:
+        monitoredAccounts.value.find(
+          (item) => item.id === selectedTestAccountId.value,
+        )?.quota_query_mode ?? "passive",
       request_timeout_seconds: settings.value.request_timeout_seconds,
       verify_tls: settings.value.verify_tls,
     };
@@ -90,10 +98,35 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     }
   }
 
+  async function loadMonitoredAccounts() {
+    monitoredAccounts.value = await api<MonitoredAccount[]>(
+      "settings/monitored-accounts",
+    );
+    const firstEnabled =
+      monitoredAccounts.value.find((item) => item.enabled) ??
+      monitoredAccounts.value[0] ??
+      null;
+    if (
+      !monitoredAccounts.value.some(
+        (item) => item.id === selectedTestAccountId.value,
+      )
+    ) {
+      selectedTestAccountId.value = firstEnabled?.id ?? null;
+    }
+    if (
+      !monitoredAccounts.value.some(
+        (item) => item.id === maintenanceAccountId.value,
+      )
+    ) {
+      maintenanceAccountId.value = firstEnabled?.id ?? null;
+    }
+  }
+
   async function load() {
     loading.value = true;
     try {
       settings.value = await api<AppSettingsData>("settings");
+      await loadMonitoredAccounts();
       if (settings.value.sub2api_token_configured) {
         await loadOpenAIAccounts(false);
       }
@@ -155,16 +188,74 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     return saveSection(
       "connection",
       "Sub2API 连接设置",
-      [
-        "sub2api_base_url",
-        "openai_account_id",
-        "quota_query_mode",
-        "request_timeout_seconds",
-        "verify_tls",
-        "timezone",
-      ],
+      ["sub2api_base_url", "request_timeout_seconds", "verify_tls", "timezone"],
       { sub2api_admin_token: adminToken.value },
     );
+  }
+
+  async function saveMonitoredAccount(
+    account: Pick<
+      MonitoredAccount,
+      "id" | "external_account_id" | "name" | "enabled" | "quota_query_mode"
+    >,
+    create = false,
+  ) {
+    savingAccountId.value = create ? "new" : account.id;
+    message.value = "";
+    success.value = "";
+    try {
+      await api(
+        create
+          ? "settings/monitored-accounts"
+          : `settings/monitored-accounts/${account.id}`,
+        {
+          method: create ? "POST" : "PUT",
+          body: jsonBody({
+            external_account_id: account.external_account_id,
+            name: account.name,
+            enabled: account.enabled,
+            quota_query_mode: account.quota_query_mode,
+          }),
+        },
+      );
+      await loadMonitoredAccounts();
+      historyRebuildPlan.value = null;
+      success.value = create ? "监控账号已添加" : "监控账号已保存";
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "保存监控账号失败";
+    } finally {
+      savingAccountId.value = null;
+    }
+  }
+
+  async function removeMonitoredAccount(account: MonitoredAccount) {
+    if (
+      !(await confirmAction({
+        title: `删除监控账号“${account.name}”？`,
+        message: "已有历史事实的账号不能删除，只能停用。",
+        confirmLabel: "删除",
+        tone: "error",
+      }))
+    ) {
+      return;
+    }
+    savingAccountId.value = account.id;
+    message.value = "";
+    success.value = "";
+    try {
+      await api(`settings/monitored-accounts/${account.id}`, {
+        method: "DELETE",
+      });
+      await loadMonitoredAccounts();
+      historyRebuildPlan.value = null;
+      success.value = "监控账号已删除";
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "删除监控账号失败";
+    } finally {
+      savingAccountId.value = null;
+    }
   }
 
   function saveAllocation() {
@@ -323,6 +414,10 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   }
 
   async function createHistoricalRebuildPlan() {
+    if (maintenanceAccountId.value == null) {
+      message.value = "请先选择要维护的监控账号";
+      return;
+    }
     planningHistory.value = true;
     message.value = "";
     success.value = "";
@@ -330,7 +425,10 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     try {
       const plan = await api<HistoricalRebuildPlan>(
         "settings/data-maintenance/history-rebuild-plans",
-        { method: "POST" },
+        {
+          method: "POST",
+          body: jsonBody({ account_id: maintenanceAccountId.value }),
+        },
       );
       historyRebuildPlan.value = plan;
       if (plan.state === "ready") {
@@ -502,6 +600,10 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     smtpPassword,
     resendApiKey,
     openAIAccounts,
+    monitoredAccounts,
+    selectedTestAccountId,
+    maintenanceAccountId,
+    savingAccountId,
     loadingAccounts,
     exportingDatabase,
     importingDatabase,
@@ -512,7 +614,10 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     revokingReadOnlyApiKey,
     passwordForm,
     loadOpenAIAccounts,
+    loadMonitoredAccounts,
     saveConnection,
+    saveMonitoredAccount,
+    removeMonitoredAccount,
     saveAllocation,
     saveSampling,
     saveEmail,

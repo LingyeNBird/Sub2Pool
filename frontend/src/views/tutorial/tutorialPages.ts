@@ -62,8 +62,8 @@ export const tutorialGroups: TutorialGroup[] = [
           {
             title: "首次使用流程",
             steps: [
-              "连接 Sub2API，并选择实际承载套餐的 OpenAI 上游账号。",
-              "添加车主和车友，填写双方约定的完整周期权益比例。",
+              "连接 Sub2API，并把实际承载套餐的一个或多个 OpenAI 上游账号加入监控列表。",
+              "添加全局 Sub2API 用户，并为其填写一份适用于全部上游账号的混池车主角色与完整周期权益比例。",
               "如需让车友查看数据，创建普通系统用户并绑定参与者。",
               "让上游账号产生正常业务请求，再执行首次测算。",
               "核对首页建议，到 Sub2API 手动调整，或明确使用一键设置。",
@@ -85,7 +85,7 @@ export const tutorialGroups: TutorialGroup[] = [
         group: "开始使用",
         title: "连接 Sub2API",
         summary:
-          "配置服务地址与 Admin Token，读取上游账号，并选择安全的额度查询方式。",
+          "配置服务地址与 Admin Token，读取并管理多个上游账号及各自的额度查询方式。",
         icon: "code-bracket",
         sections: [
           {
@@ -93,8 +93,8 @@ export const tutorialGroups: TutorialGroup[] = [
             steps: [
               "填写当前容器能够访问的 Sub2API 地址。Sub2API 在宿主机运行时，Docker Desktop 通常可使用 host.docker.internal。",
               "填写 Sub2API Admin Token。Token 只保存在服务端，不会发送到浏览器之外的第三方。",
-              "点击“读取账号”，从返回列表中选择实际承载套餐的 OpenAI 上游账号。",
-              "点击“测试连接”确认地址、Token 和账号可用，然后保存连接设置。",
+              "点击“读取账号”，把实际承载套餐的一个或多个 OpenAI 上游账号加入监控列表。",
+              "为每个监控账号选择被动或主动查询，保存后可逐个执行连接测试。",
             ],
             notes: [
               {
@@ -107,8 +107,8 @@ export const tutorialGroups: TutorialGroup[] = [
           {
             title: "选择查询方式",
             paragraphs: [
-              "默认使用“被动查询”：只读取 Sub2API 已保存的额度快照，不会为了查询而额外调用 OpenAI 官方额度接口。快照会在 Sub2API 正常转发业务请求时更新。",
-              "只有明确接受额外官方请求及其潜在风控影响时，才应切换为主动查询。日常拼车监控建议保持被动查询。",
+              "每个监控账号独立选择查询方式。默认使用“被动查询”：只读取 Sub2API 已保存的额度快照，不会为了查询而额外调用 OpenAI 官方额度接口。快照会在 Sub2API 正常转发该账号的业务请求时更新。",
+              "只有明确接受额外官方请求及其潜在风控影响时，才应把对应账号切换为主动查询。日常拼车监控建议保持被动查询。",
             ],
           },
           {
@@ -127,23 +127,23 @@ export const tutorialGroups: TutorialGroup[] = [
         group: "开始使用",
         title: "参与者与系统用户",
         summary:
-          "把 Sub2API 用户映射为拼车参与者，并按合同约定填写完整周期权益。",
+          "把一个全局 Sub2API 用户映射为参与者，并配置一份覆盖所有启用上游账号的混池合同权益。",
         icon: "user-group",
         sections: [
           {
             title: "添加参与者",
             steps: [
-              "进入参与者页面，添加车主和每一位车友。",
-              "从 Sub2API 用户列表选择对应账号，不要手工猜测用户 ID。",
-              "填写合同权益比例。所有启用参与者的权益总和不得超过 100%。",
-              "按需填写备注，并确认需要参与后台监控的账号已经启用。",
+              "进入参与者页面，添加车主和每一位车友。一个参与者只绑定一个全局 Sub2API 用户。",
+              "从 Sub2API 用户列表选择对应用户，不要手工猜测用户 ID。",
+              "填写参与者唯一的混池合同权益比例与车主角色。所有启用参与者的权益合计不得超过 100%。",
+              "启用的参与者会自动参与全部启用上游账号；停用参与者才会停止其整体测算。",
             ],
           },
           {
             title: "权益比例怎么填",
             paragraphs: [
-              "权益始终填写双方约定的完整周期份额，而不是添加参与者时的剩余份额。例如上游已经由车主使用 10%，此时双方约定各占 50%，仍应分别填写 50%。",
-              "只要此前用量记录在车主对应的 Sub2API 用户下面，首次测算就会把已用部分归属给车主，得到车主剩余 40%、车友剩余 50% 的结果。",
+              "权益填写双方约定的完整混池周期份额，而不是添加参与者时的剩余份额。例如车主已经使用 10%，双方仍约定各占 50%，就分别填写 50%。",
+              "各账号独立归属用量，但权益债权先跨账号相加、再统一截断为零并换算成一个 Sub2API 全局余额。某个账号超用会抵扣其他账号尚未使用的权益，不会重复生成余额。",
             ],
             notes: [
               {
@@ -552,10 +552,10 @@ export const tutorialGroups: TutorialGroup[] = [
               "每个数组项的 id 是 Sub2Pool 参与者 ID；sub2api_user_id 是绑定的 Sub2API 用户 ID。sub2api_identity 按“用户名、邮箱、账号 ID”的顺序选择可读标识。",
             ],
             bullets: [
-              "基础字段：id、name、email、notes、enabled、is_owner、share_percent。",
-              "Sub2API 映射：sub2api_user_id、sub2api_username、sub2api_email、sub2api_identity。",
-              "最近事实：latest_balance_usd、latest_selected_cost、last_checked_at。",
-              "snapshot：当前展示模型的归属比例、剩余权益、余额建议区间、调整状态和原因；尚无测算时为 null。",
+              "全局身份：id、name、email、notes、enabled，以及唯一的 Sub2API 用户映射字段。",
+              "混池合同：share_percent、is_owner；同一份合同覆盖全部启用监控账号。",
+              "account_breakdowns：各监控账号的元数据、账号成本缓存和局部测算 snapshot，不包含独立合同配置。",
+              "最近全局余额：latest_balance_usd、last_checked_at；snapshot 是跨账号净额化后的混池建议、完整性、调整状态和 sources 明细。",
             ],
             codeBlocks: [
               {
@@ -570,18 +570,29 @@ export const tutorialGroups: TutorialGroup[] = [
       "sub2api_user_id": 22001,
       "sub2api_identity": "rider@example.com",
       "share_percent": 40.0,
+      "is_owner": false,
       "enabled": true,
       "latest_balance_usd": 320.0,
-      "latest_selected_cost": 480.0,
-      "last_checked_at": "2026-08-11T09:20:00+00:00",
+      "account_breakdowns": [
+        {
+          "account_id": 3,
+          "external_account_id": 8801,
+          "account_name": "主账号",
+          "account_enabled": true,
+          "latest_selected_cost": 480.0,
+          "snapshot": {
+            "charged_cycle_percent": 24.0,
+            "remaining_share_percent": 16.0
+          }
+        }
+      ],
       "snapshot": {
-        "charged_cycle_percent": 24.0,
-        "remaining_share_percent": 16.0,
+        "allocation_model": "pooled_account_sum",
+        "share_percent": 40.0,
+        "recommendation_complete": true,
+        "account_count": 1,
         "recommended_balance_usd": 315.2,
-        "recommended_balance_min_usd": 286.9,
-        "recommended_balance_max_usd": 348.7,
-        "needs_manual_update": false,
-        "reason": "当前用户余额无需调整"
+        "sources": []
       }
     }
   ]
@@ -592,10 +603,11 @@ export const tutorialGroups: TutorialGroup[] = [
           {
             title: "GET /api/v1/statistics",
             paragraphs: [
-              "返回额度统计页面的容量历史、当前折算摘要和参与者用量序列。日期时间均为带时区的 ISO 8601 字符串，金额单位为美元。",
-              "capacity_series 是按天或按月的周限等效额度历史；capacity_summary 包含本周期累计折算、今日折算及其计算依据；participant_series 是各参与者在请求时间范围内的用量和余额序列。",
+              "按 account_id 返回一个监控账号的容量历史、当前折算摘要和参与者用量序列。account_id 使用监控账号列表中的内部 ID，不是上游账号 ID。",
+              "capacity_series 是所选账号按天或按月的周限等效额度历史；capacity_summary 包含本周期累计折算、今日折算及其计算依据；participant_series 包含所有启用参与者在所选账号中的用量。",
             ],
             bullets: [
+              "account_id：必填的 Sub2Pool 监控账号内部 ID。",
               "capacity_period：day 或 month，默认 day。",
               "capacity_days：容量历史回看天数。按天默认 90，按月默认 365，最大 730。",
               "usage_days：参与者用量回看天数，默认 7，最大 90。",
@@ -609,6 +621,7 @@ export const tutorialGroups: TutorialGroup[] = [
                 code: `curl --get \\
   --url 'https://sub2pool.example.com/api/v1/statistics' \\
   --header 'Authorization: Bearer sub2pool_你的完整APIKey' \\
+  --data-urlencode 'account_id=3' \\
   --data-urlencode 'capacity_period=day' \\
   --data-urlencode 'capacity_days=30' \\
   --data-urlencode 'usage_days=7' \\
@@ -620,6 +633,7 @@ export const tutorialGroups: TutorialGroup[] = [
                 code: `{
   "ok": true,
   "data": {
+    "account": {"id": 3, "external_account_id": 8801, "name": "主账号"},
     "capacity_period": "day",
     "capacity_series": [],
     "fast_correction_enabled": true,
@@ -640,9 +654,9 @@ export const tutorialGroups: TutorialGroup[] = [
             title:
               "GET /api/v1/statistics/participants/{participant_id}/api-usage",
             paragraphs: [
-              "返回一个参与者在当前上游周期内的 API Key 用量构成。路径中的 participant_id 使用参与者接口返回的 id，而不是 sub2api_user_id。",
-              "结论包含统计起止时间、成本口径、FAST 修正状态、参与者周期用量、周限估计、参与者占总周限比例，以及每个 API Key 的美元用量和两种百分比。",
-              "服务优先返回一小时内的数据库结论。缓存过期时会向 Sub2API 执行一次只读日志查询并保存新的汇总结论，不会调用 OpenAI 官方额度接口，也不会修改任何额度。",
+              "按必填 account_id 返回一个参与者在所选上游账号当前周期内的 API Key 用量构成。路径中的 participant_id 使用参与者接口返回的 id，而不是 sub2api_user_id。",
+              "结论包含统计起止时间、成本口径、FAST 修正状态、参与者在该账号中的周期用量、账号周限估计、参与者占该账号总周限比例，以及每个 API Key 的美元用量和两种百分比。",
+              "服务优先返回所选账号一小时内的数据库结论。缓存过期时会向 Sub2API 执行一次带账号过滤的只读日志查询并保存新的汇总结论，不会调用 OpenAI 官方额度接口，也不会修改任何额度。",
             ],
             bullets: [
               "participant_usage_percent：该 API Key 用量占此参与者当前周期总用量的比例。",
@@ -653,9 +667,10 @@ export const tutorialGroups: TutorialGroup[] = [
               {
                 title: "读取参与者 1 的 API 用量构成",
                 language: "bash",
-                code: `curl --request GET \\
+                code: `curl --get \\
   --url https://sub2pool.example.com/api/v1/statistics/participants/1/api-usage \\
-  --header 'Authorization: Bearer sub2pool_你的完整APIKey'`,
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey' \\
+  --data-urlencode 'account_id=3'`,
               },
               {
                 title: "响应示例",

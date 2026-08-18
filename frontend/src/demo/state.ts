@@ -9,6 +9,7 @@ import type {
   ModelDiagnostics,
   NotificationRecord,
   Observation,
+  MonitoredAccount,
   Participant,
   ParticleTrajectoryData,
   ParticleTrajectoryPeriod,
@@ -21,7 +22,7 @@ import type {
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 
-const DEMO_STATE_KEY = "sub2pool:demo:v4:state";
+const DEMO_STATE_KEY = "sub2pool:demo:v6:state";
 const DEMO_AUTH_KEY = "sub2pool:demo:v1:auth";
 const DEMO_ANCHOR = Date.UTC(2026, 7, 12, 4, 0, 0);
 const HOUR = 3_600_000;
@@ -45,7 +46,7 @@ interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 4;
+  version: 6;
   clock: string;
   nextParticipantId: number;
   nextSystemUserId: number;
@@ -53,6 +54,7 @@ export interface DemoState {
   nextBlockedId: number;
   revision: number;
   participants: Participant[];
+  monitoredAccounts: MonitoredAccount[];
   sub2apiUsers: Sub2APIUserOption[];
   systemUsers: SystemUser[];
   observations: Observation[];
@@ -144,15 +146,20 @@ function diagnostics(
 
 function snapshot(
   participant: Participant,
+  sharePercent: number,
   cycleCost: number,
   totalPercent: number,
   index: number,
+  balance?: number,
 ): Snapshot {
   const ratios = [0.39, 0.35, 0.26];
   const charged = rounded(totalPercent * ratios[index], 4);
   const selected = rounded(cycleCost * ratios[index], 6);
-  const recommended = rounded(Math.max(18, 175 - selected * 0.22), 2);
-  const current = rounded(recommended + [38, -8, 27][index], 2);
+  const recommended = rounded(
+    Math.max(18, sharePercent * 4.4 - selected * 0.22),
+    2,
+  );
+  const current = balance ?? rounded(recommended + [38, -8, 27][index], 2);
   const needsUpdate = Math.abs(current - recommended) >= 20;
   return {
     participant_id: participant.id,
@@ -163,10 +170,7 @@ function snapshot(
     charged_cycle_percent: charged,
     charged_percent_lower: rounded(Math.max(0, charged - 0.7), 4),
     charged_percent_upper: rounded(charged + 0.8, 4),
-    remaining_share_percent: rounded(
-      Math.max(0, participant.share_percent - charged),
-      4,
-    ),
+    remaining_share_percent: rounded(Math.max(0, sharePercent - charged), 4),
     current_balance_usd: current,
     recommended_balance_usd: recommended,
     recommended_balance_min_usd: rounded(recommended * 0.9, 2),
@@ -174,19 +178,10 @@ function snapshot(
     deterministic_balance_min_usd: rounded(recommended * 0.84, 2),
     deterministic_balance_max_usd: rounded(recommended * 1.16, 2),
     balance_difference_usd: rounded(recommended - current, 2),
-    is_overused: charged > participant.share_percent,
-    overused_percent: rounded(
-      Math.max(0, charged - participant.share_percent),
-      4,
-    ),
-    overused_percent_min: rounded(
-      Math.max(0, charged - participant.share_percent - 0.5),
-      4,
-    ),
-    overused_percent_max: rounded(
-      Math.max(0, charged - participant.share_percent + 0.5),
-      4,
-    ),
+    is_overused: charged > sharePercent,
+    overused_percent: rounded(Math.max(0, charged - sharePercent), 4),
+    overused_percent_min: rounded(Math.max(0, charged - sharePercent - 0.5), 4),
+    overused_percent_max: rounded(Math.max(0, charged - sharePercent + 0.5), 4),
     needs_manual_update: needsUpdate,
     recommendation_applied: false,
     reason: needsUpdate
@@ -196,21 +191,37 @@ function snapshot(
   };
 }
 
-function baseParticipants(): Participant[] {
-  const rows: Array<
-    Pick<
-      Participant,
-      | "id"
-      | "name"
-      | "email"
-      | "sub2api_user_id"
-      | "sub2api_username"
-      | "sub2api_email"
-      | "share_percent"
-      | "is_owner"
-      | "notes"
-    >
-  > = [
+function baseMonitoredAccounts(): MonitoredAccount[] {
+  return [
+    {
+      id: 1,
+      external_account_id: 8801,
+      name: "主力账号",
+      enabled: true,
+      quota_query_mode: "passive",
+      last_local_check_at: iso(DEMO_ANCHOR - 2 * 60_000),
+      last_upstream_check_at: iso(DEMO_ANCHOR - 3 * 60_000),
+      last_success_at: iso(DEMO_ANCHOR - 2 * 60_000),
+      next_local_check_at: iso(DEMO_ANCHOR + 8 * 60_000),
+      last_error: "",
+    },
+    {
+      id: 2,
+      external_account_id: 8802,
+      name: "备用账号",
+      enabled: true,
+      quota_query_mode: "direct",
+      last_local_check_at: iso(DEMO_ANCHOR - 5 * 60_000),
+      last_upstream_check_at: iso(DEMO_ANCHOR - 7 * 60_000),
+      last_success_at: iso(DEMO_ANCHOR - 5 * 60_000),
+      next_local_check_at: iso(DEMO_ANCHOR + 8 * 60_000),
+      last_error: "",
+    },
+  ];
+}
+
+function baseParticipants(accounts: MonitoredAccount[]): Participant[] {
+  const rows = [
     {
       id: 1,
       name: "青岚",
@@ -246,14 +257,168 @@ function baseParticipants(): Participant[] {
     },
   ];
   return rows.map((row) => ({
-    ...row,
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    sub2api_user_id: row.sub2api_user_id,
+    sub2api_username: row.sub2api_username,
+    sub2api_email: row.sub2api_email,
     sub2api_identity: row.sub2api_username,
+    share_percent: row.share_percent,
+    is_owner: row.is_owner,
     enabled: true,
+    notes: row.notes,
     latest_balance_usd: null,
-    latest_selected_cost: null,
     last_checked_at: null,
+    account_breakdowns: accounts.map((account) => ({
+      id: row.id * 10 + account.id,
+      account_id: account.id,
+      external_account_id: account.external_account_id,
+      account_name: account.name,
+      account_enabled: account.enabled,
+      latest_selected_cost: null,
+      last_checked_at: null,
+      snapshot: null,
+    })),
     snapshot: null,
   }));
+}
+
+export function aggregateParticipant(participant: Participant): void {
+  const breakdowns = participant.account_breakdowns.filter(
+    (item) => item.account_enabled,
+  );
+  const complete =
+    breakdowns.length > 0 && breakdowns.every((item) => item.snapshot !== null);
+  const sources = breakdowns.map((breakdown) => {
+    const sourceSnapshot = breakdown.snapshot;
+    const charged = sourceSnapshot?.charged_cycle_percent ?? 0;
+    const chargedLower = sourceSnapshot?.charged_percent_lower ?? charged;
+    const chargedUpper = sourceSnapshot?.charged_percent_upper ?? charged;
+    const selected = sourceSnapshot?.selected_cost ?? 0;
+    const capacity = charged > 0 ? (selected * 100) / charged : 440;
+    return {
+      account_id: breakdown.account_id,
+      external_account_id: breakdown.external_account_id,
+      account_name: breakdown.account_name,
+      contract_share_percent: participant.share_percent,
+      snapshot: sourceSnapshot,
+      net_position_usd: sourceSnapshot
+        ? ((participant.share_percent - charged) * capacity) / 100
+        : null,
+      net_position_min_usd: sourceSnapshot
+        ? ((participant.share_percent - chargedUpper) * capacity) / 100
+        : null,
+      net_position_max_usd: sourceSnapshot
+        ? ((participant.share_percent - chargedLower) * capacity) / 100
+        : null,
+      contribution_usd: null as number | null,
+      contribution_min_usd: null as number | null,
+      contribution_max_usd: null as number | null,
+      capacity,
+    };
+  });
+  const pooled = (
+    key: "net_position_usd" | "net_position_min_usd" | "net_position_max_usd",
+  ) =>
+    Math.max(
+      0,
+      sources.reduce((total, item) => total + (item[key] ?? 0), 0),
+    ) * 0.9;
+  const recommended = rounded(pooled("net_position_usd"), 2);
+  const minimum = rounded(pooled("net_position_min_usd"), 2);
+  const maximum = rounded(pooled("net_position_max_usd"), 2);
+  const allocate = (
+    netKey:
+      | "net_position_usd"
+      | "net_position_min_usd"
+      | "net_position_max_usd",
+    outputKey:
+      | "contribution_usd"
+      | "contribution_min_usd"
+      | "contribution_max_usd",
+    total: number,
+  ) => {
+    const positiveTotal = sources.reduce(
+      (sum, item) => sum + Math.max(0, item[netKey] ?? 0),
+      0,
+    );
+    for (const source of sources) {
+      source[outputKey] =
+        complete && positiveTotal > 0
+          ? rounded(
+              (total * Math.max(0, source[netKey] ?? 0)) / positiveTotal,
+              2,
+            )
+          : complete
+            ? 0
+            : null;
+    }
+  };
+  allocate("net_position_usd", "contribution_usd", recommended);
+  allocate("net_position_min_usd", "contribution_min_usd", minimum);
+  allocate("net_position_max_usd", "contribution_max_usd", maximum);
+  const selectedCost = rounded(
+    breakdowns.reduce(
+      (total, item) => total + (item.snapshot?.selected_cost ?? 0),
+      0,
+    ),
+    6,
+  );
+  const totalCapacity = sources.reduce(
+    (total, item) => total + (item.snapshot ? item.capacity : 0),
+    0,
+  );
+  const charged =
+    totalCapacity > 0
+      ? rounded(
+          sources.reduce(
+            (total, item) =>
+              total +
+              (item.snapshot?.charged_cycle_percent ?? 0) * item.capacity,
+            0,
+          ) / totalCapacity,
+          4,
+        )
+      : 0;
+  const balance = participant.latest_balance_usd;
+  const difference =
+    complete && balance != null
+      ? balance < minimum
+        ? rounded(minimum - balance, 2)
+        : balance > maximum
+          ? rounded(maximum - balance, 2)
+          : 0
+      : null;
+  const needsUpdate =
+    complete && difference != null && Math.abs(difference) >= 15;
+  participant.snapshot = {
+    participant_id: participant.id,
+    participant_name: participant.name,
+    share_percent: participant.share_percent,
+    selected_cost: selectedCost,
+    charged_cycle_percent: charged,
+    current_balance_usd: balance,
+    recommended_balance_usd: complete ? recommended : null,
+    recommended_balance_min_usd: complete ? minimum : null,
+    recommended_balance_max_usd: complete ? maximum : null,
+    balance_difference_usd: difference,
+    is_overused:
+      complete &&
+      sources.reduce(
+        (total, item) => total + (item.net_position_max_usd ?? 0),
+        0,
+      ) < 0,
+    needs_manual_update: needsUpdate,
+    recommendation_applied: false,
+    recommendation_complete: complete,
+    account_count: breakdowns.length,
+    reason: needsUpdate
+      ? "全局余额与混池剩余权益区间差异较大"
+      : "全局余额处于混池建议区间",
+    allocation_model: "pooled_account_sum",
+    sources: sources.map(({ capacity: _capacity, ...source }) => source),
+  };
 }
 
 function participantSnapshots(
@@ -262,7 +427,13 @@ function participantSnapshots(
   usedPercent: number,
 ): Snapshot[] {
   return participants.map((participant, index) =>
-    snapshot(participant, cycleCost, usedPercent, index),
+    snapshot(
+      participant,
+      participant.share_percent,
+      cycleCost,
+      usedPercent,
+      index,
+    ),
   );
 }
 
@@ -571,8 +742,6 @@ function baseSettings(): AppSettingsData {
   return {
     monitoring_enabled: true,
     sub2api_base_url: "https://demo.example.test",
-    openai_account_id: 8801,
-    quota_query_mode: "passive",
     request_timeout_seconds: 20,
     verify_tls: true,
     timezone: "Asia/Shanghai",
@@ -620,20 +789,41 @@ function baseSettings(): AppSettingsData {
 }
 
 function initializeState(): DemoState {
-  const participants = baseParticipants();
+  const monitoredAccounts = baseMonitoredAccounts();
+  const participants = baseParticipants(monitoredAccounts);
   const { periods, observations } = buildPeriods(participants);
   const latest = observations[observations.length - 1];
   const latestSnapshots = latest.participants;
   for (const [index, participant] of participants.entries()) {
-    participant.snapshot = latestSnapshots[index] ?? null;
+    const primaryBreakdown = participant.account_breakdowns[0];
+    const secondaryBreakdown = participant.account_breakdowns[1];
+    const primarySnapshot = latestSnapshots[index] ?? null;
     participant.latest_balance_usd =
-      participant.snapshot?.current_balance_usd ?? null;
-    participant.latest_selected_cost =
-      participant.snapshot?.selected_cost ?? null;
+      primarySnapshot?.current_balance_usd ?? null;
     participant.last_checked_at = latest.observed_at;
+    if (primaryBreakdown) {
+      primaryBreakdown.snapshot = primarySnapshot;
+      primaryBreakdown.latest_selected_cost =
+        primarySnapshot?.selected_cost ?? null;
+      primaryBreakdown.last_checked_at = latest.observed_at;
+    }
+    if (secondaryBreakdown) {
+      const secondarySnapshot = snapshot(
+        participant,
+        participant.share_percent,
+        latest.selected_total_cost * 0.62,
+        latest.interval_used_percent * 0.72,
+        index,
+        participant.latest_balance_usd ?? undefined,
+      );
+      secondaryBreakdown.snapshot = secondarySnapshot;
+      secondaryBreakdown.latest_selected_cost = secondarySnapshot.selected_cost;
+      secondaryBreakdown.last_checked_at = latest.observed_at;
+    }
+    aggregateParticipant(participant);
   }
   return {
-    version: 4,
+    version: 6,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextSystemUserId: 3,
@@ -641,6 +831,7 @@ function initializeState(): DemoState {
     nextBlockedId: 1,
     revision: 24,
     participants,
+    monitoredAccounts,
     sub2apiUsers: participants.map((participant) => ({
       id: participant.sub2api_user_id,
       email: participant.sub2api_email,
@@ -689,7 +880,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 4) return parsed;
+      if (parsed.version === 6) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }
@@ -747,6 +938,7 @@ export function periodSummary(period: DemoPeriod): ParticleTrajectoryPeriod {
 export function trajectoryData(
   state: DemoState,
   periodId?: number,
+  accountId?: number,
 ): ParticleTrajectoryData {
   const period =
     state.periods.find((item) => item.id === periodId) ?? state.periods.at(-1);
@@ -754,7 +946,18 @@ export function trajectoryData(
     return { available: false, message: "暂无演示粒子轨迹" };
   }
   const latest = period.trajectory.at(-1)!;
+  const account =
+    state.monitoredAccounts.find((item) => item.id === accountId) ??
+    state.monitoredAccounts.find((item) => item.enabled) ??
+    state.monitoredAccounts[0];
   return {
+    account: account
+      ? {
+          id: account.id,
+          external_account_id: account.external_account_id,
+          name: account.name,
+        }
+      : undefined,
     available: true,
     message: "",
     algorithm: "时变周限粒子滤波（公开演示）",
@@ -787,23 +990,32 @@ export function trajectoryData(
   };
 }
 
-export function dashboardData(state: DemoState): DashboardData {
+export function dashboardData(
+  state: DemoState,
+  accountId?: number,
+): DashboardData {
   const latest = state.observations.at(-1)!;
+  const account =
+    state.monitoredAccounts.find((item) => item.id === accountId) ??
+    state.monitoredAccounts.find((item) => item.enabled) ??
+    state.monitoredAccounts[0];
   const participantRows = state.participants.filter(
     (participant) =>
       participant.enabled && participant.snapshot?.needs_manual_update,
   );
   return {
-    configured: true,
+    configured: state.monitoredAccounts.length > 0,
     monitoring_enabled: Boolean(state.settings.monitoring_enabled),
-    last_local_check_at: String(state.settings.last_local_check_at),
-    last_upstream_check_at: String(state.settings.last_upstream_check_at),
+    accounts: clone(state.monitoredAccounts),
+    selected_account_id: account?.id ?? null,
+    last_local_check_at: account?.last_local_check_at ?? null,
+    last_upstream_check_at: account?.last_upstream_check_at ?? null,
     snapshot_stale: false,
-    last_success_at: String(state.settings.last_success_at),
-    last_error: String(state.settings.last_error ?? ""),
+    last_success_at: account?.last_success_at ?? null,
+    last_error: account?.last_error ?? "",
     sub2api_admin_url: "",
     fast_correction_enabled: Boolean(state.settings.fast_correction_enabled),
-    quota_query_mode: String(state.settings.quota_query_mode),
+    quota_query_mode: account?.quota_query_mode ?? null,
     weekly_quota_model: state.settings.weekly_quota_model,
     needs_manual_update_count: participantRows.length,
     cycle: {
@@ -843,11 +1055,16 @@ export function dashboardData(state: DemoState): DashboardData {
 export function apiUsageData(
   state: DemoState,
   participantId: number,
+  accountId?: number,
 ): APIUsageBreakdown {
   const participant = state.participants.find(
     (item) => item.id === participantId,
   )!;
-  const total = participant.latest_selected_cost ?? 0;
+  const breakdown =
+    participant.account_breakdowns.find(
+      (item) => item.account_id === accountId,
+    ) ?? participant.account_breakdowns.find((item) => item.account_enabled);
+  const total = breakdown?.latest_selected_cost ?? 0;
   const latest = state.observations.at(-1)!;
   const period = state.periods.at(-1)!;
   const weights = [0.58, 0.29, 0.13];
@@ -861,8 +1078,7 @@ export function apiUsageData(
     fast_correction_enabled: Boolean(state.settings.fast_correction_enabled),
     participant_total_usd: total,
     weekly_total_estimate_usd: latest.effective_usd_per_percent * 100,
-    participant_weekly_percent:
-      participant.snapshot?.charged_cycle_percent ?? 0,
+    participant_weekly_percent: breakdown?.snapshot?.charged_cycle_percent ?? 0,
     api_keys: weights.map((weight, index) => ({
       api_key_id: participant.id * 10 + index + 1,
       name: ["默认工作区", "自动化任务", "开发测试"][index],
@@ -870,7 +1086,7 @@ export function apiUsageData(
       usage_usd: rounded(total * weight, 4),
       participant_usage_percent: rounded(weight * 100, 2),
       weekly_quota_percent: rounded(
-        (participant.snapshot?.charged_cycle_percent ?? 0) * weight,
+        (breakdown?.snapshot?.charged_cycle_percent ?? 0) * weight,
         3,
       ),
     })),
@@ -882,11 +1098,17 @@ export function participantUsagePoints(
   participantId: number,
   days: number,
   precision: "raw" | "hour" | "day",
+  accountId?: number,
 ): UsagePoint[] {
   const start = Date.parse(state.clock) - days * DAY;
   const filtered = state.observations.filter(
     (item) => Date.parse(item.observed_at) >= start,
   );
+  const accountScale =
+    state.monitoredAccounts.find((item) => item.id === accountId)
+      ?.external_account_id === 8802
+      ? 0.62
+      : 1;
   const stride = precision === "raw" ? 1 : precision === "hour" ? 6 : 144;
   return filtered
     .filter((_, index) => index % stride === 0)
@@ -897,7 +1119,8 @@ export function participantUsagePoints(
       return {
         observed_at: observation.observed_at,
         label: observation.observed_at,
-        account_cycle_usage_usd: participant?.selected_cost ?? 0,
+        account_cycle_usage_usd:
+          (participant?.selected_cost ?? 0) * accountScale,
         balance_usd: participant?.current_balance_usd ?? null,
       };
     });

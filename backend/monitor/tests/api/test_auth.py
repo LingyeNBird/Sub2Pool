@@ -46,7 +46,12 @@ from monitor.integrations.sub2api import (
     WeeklyWindow,
 )
 from monitor import database_transfer
-from monitor.tests.helpers import create_recommendation_snapshot, jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    create_recommendation_snapshot,
+    jwt_login,
+)
 
 @pytest.mark.django_db
 def test_regular_user_only_reads_bound_participant_statistics():
@@ -56,24 +61,18 @@ def test_regular_user_only_reads_bound_participant_statistics():
         password="very-strong-password",
         email="owner@example.com",
     )
-    first = Participant.objects.create(
-        name="甲",
-        sub2api_user_id=101,
-        sub2api_username="rider-a",
-        share_percent=50,
-    )
-    second = Participant.objects.create(
-        name="乙",
-        sub2api_user_id=102,
-        sub2api_username="rider-b",
-        share_percent=50,
-    )
-    third = Participant.objects.create(
-        name="丙",
-        sub2api_user_id=103,
-        sub2api_username="unbound-rider",
-        share_percent=0,
-    )
+    first = create_participant(name="甲",
+    sub2api_user_id=101,
+    sub2api_username="rider-a",
+    share_percent=50,)
+    second = create_participant(name="乙",
+    sub2api_user_id=102,
+    sub2api_username="rider-b",
+    share_percent=50,)
+    third = create_participant(name="丙",
+    sub2api_user_id=103,
+    sub2api_username="unbound-rider",
+    share_percent=0,)
     client = Client()
     admin_headers, _ = jwt_login(client)
 
@@ -100,7 +99,7 @@ def test_regular_user_only_reads_bound_participant_statistics():
     ) == [first.id, second.id]
 
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
     now = timezone.now()
     attribution_started_at = now - timedelta(days=2)
@@ -224,11 +223,9 @@ def test_system_user_validation_returns_field_errors():
         password="very-strong-password",
         email="owner@example.com",
     )
-    participant = Participant.objects.create(
-        name="甲",
-        sub2api_user_id=101,
-        share_percent=100,
-    )
+    participant = create_participant(name="甲",
+    sub2api_user_id=101,
+    share_percent=100,)
     client = Client()
     headers, _ = jwt_login(client)
 

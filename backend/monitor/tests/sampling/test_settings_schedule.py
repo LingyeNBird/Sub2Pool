@@ -20,8 +20,9 @@ from monitor.management.commands.runmonitor import schedule_next_run
 from monitor.models import (
     AppSettings,
     BlockedIPAddress,
-    LoginEvent,
     HistoryMaintenanceState,
+    LoginEvent,
+    MonitoredAccount,
     NotificationEvent,
     Observation,
     ObservationFastCorrection,
@@ -31,6 +32,7 @@ from monitor.models import (
     Sub2APIUserUsageSample,
 )
 from monitor.notifications import send_notification
+from monitor.sampling.notifications import finish_success
 from monitor.replay import (
     RATE_METHOD,
     exclude_observation,
@@ -48,7 +50,11 @@ from monitor.integrations.sub2api import (
     WeeklyWindow,
 )
 from monitor import database_transfer
-from monitor.tests.helpers import create_recommendation_snapshot, jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_recommendation_snapshot,
+    jwt_login,
+)
 
 @pytest.mark.django_db
 def test_partial_settings_patch_does_not_touch_other_cards():
@@ -86,8 +92,8 @@ def test_replay_settings_respect_fence_but_unrelated_email_settings_do_not():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
+    create_monitored_account(7)
+    config.save()
     client = Client()
     headers, _ = jwt_login(client)
     guard = LeaseGuard.acquire(7)
@@ -226,17 +232,31 @@ def test_settings_rejects_invalid_iana_timezone():
     assert AppSettings.load().timezone == "Asia/Shanghai"
 
 @pytest.mark.django_db
-def test_global_monitor_schedule_records_next_wake_time():
+def test_global_monitor_schedule_records_next_wake_time_for_enabled_accounts():
     config = AppSettings.load()
     config.local_poll_minutes = 13
     config.save()
+    enabled_account = MonitoredAccount.objects.create(
+        external_account_id=7,
+        name="主账号",
+    )
+    disabled_account = MonitoredAccount.objects.create(
+        external_account_id=8,
+        name="备用账号",
+        enabled=False,
+    )
     now = timezone.now()
 
     sleep_seconds = schedule_next_run(config, now=now)
 
     config.refresh_from_db()
+    enabled_account.refresh_from_db()
+    disabled_account.refresh_from_db()
+    expected = now + timedelta(minutes=13)
     assert sleep_seconds == 13 * 60
-    assert config.next_local_check_at == now + timedelta(minutes=13)
+    assert config.next_local_check_at == expected
+    assert enabled_account.next_local_check_at == expected
+    assert disabled_account.next_local_check_at is None
 
 @pytest.mark.django_db
 def test_global_monitor_schedule_does_not_add_run_duration_to_interval():
@@ -273,7 +293,36 @@ def test_global_monitor_schedule_skips_elapsed_slots_after_slow_run():
     assert config.next_local_check_at == cycle_started_at + timedelta(minutes=30)
 
 @pytest.mark.django_db
-def test_monitor_status_exposes_global_countdown_and_hides_it_when_disabled():
+def test_finish_success_updates_only_target_account_status():
+    config = AppSettings.load()
+    target = MonitoredAccount.objects.create(
+        external_account_id=7,
+        name="主账号",
+    )
+    untouched = MonitoredAccount.objects.create(
+        external_account_id=8,
+        name="备用账号",
+        last_error="仍在失败",
+    )
+    checked_at = timezone.now()
+
+    finish_success(config, target, checked_at)
+
+    config.refresh_from_db()
+    target.refresh_from_db()
+    untouched.refresh_from_db()
+    assert target.last_local_check_at == checked_at
+    assert target.last_upstream_check_at == checked_at
+    assert target.last_success_at == checked_at
+    assert target.last_error == ""
+    assert untouched.last_local_check_at is None
+    assert untouched.last_success_at is None
+    assert untouched.last_error == "仍在失败"
+    assert config.last_success_at == checked_at
+
+
+@pytest.mark.django_db
+def test_monitor_status_exposes_each_account_countdown_and_lease():
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
@@ -286,10 +335,20 @@ def test_monitor_status_exposes_global_countdown_and_hides_it_when_disabled():
     config.monitoring_enabled = True
     config.local_poll_minutes = 10
     config.next_local_check_at = now + timedelta(minutes=7)
-    config.openai_account_id = 7
     config.save()
+    account = MonitoredAccount.objects.create(
+        external_account_id=7,
+        name="主账号",
+        next_local_check_at=config.next_local_check_at,
+    )
+    disabled_account = MonitoredAccount.objects.create(
+        external_account_id=8,
+        name="备用账号",
+        enabled=False,
+        next_local_check_at=config.next_local_check_at,
+    )
     HistoryMaintenanceState.objects.create(
-        account_id=7,
+        account_id=account.external_account_id,
         lease_owner="61d20cbf-c1b5-4e90-bd40-4837436db565",
         lease_expires_at=now + timedelta(minutes=1),
     )
@@ -303,12 +362,23 @@ def test_monitor_status_exposes_global_countdown_and_hides_it_when_disabled():
     assert data["next_local_check_at"] == config.next_local_check_at.isoformat()
     assert data["server_time"]
     assert data["run_in_progress"] is True
+    accounts = {item["id"]: item for item in data["accounts"]}
+    assert accounts[account.id]["run_in_progress"] is True
+    assert (
+        accounts[account.id]["next_local_check_at"]
+        == config.next_local_check_at.isoformat()
+    )
+    assert accounts[disabled_account.id]["run_in_progress"] is False
+    assert accounts[disabled_account.id]["next_local_check_at"] is None
 
     config.monitoring_enabled = False
     config.save(update_fields=["monitoring_enabled"])
     disabled = client.get("/api/monitor/run", **headers).json()["data"]
     assert disabled["monitoring_enabled"] is False
     assert disabled["next_local_check_at"] is None
+    assert all(
+        item["next_local_check_at"] is None for item in disabled["accounts"]
+    )
 
 @pytest.mark.django_db
 def test_account_discovery_uses_unsaved_address_and_token(monkeypatch):

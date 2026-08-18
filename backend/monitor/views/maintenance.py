@@ -8,7 +8,7 @@ from ..historical_rebuild import (
     create_rebuild_plan,
     rebuild_plan_data,
 )
-from ..models import AppSettings, HistoricalRebuildRun
+from ..models import AppSettings, HistoricalRebuildRun, MonitoredAccount
 from .base import AdminAPIView, error, ok
 
 
@@ -23,10 +23,15 @@ class HistoricalRebuildPlanListView(AdminAPIView):
     """Create a persistent local audit plan for later digest-bound apply."""
 
     def post(self, request):
-        if request.data:
-            return error("本地历史维护计划不接受 mode 或时间范围参数", 400)
+        if set(request.data) != {"account_id"}:
+            return error("本地历史维护计划必须且只能指定监控账号 account_id", 400)
         try:
-            plan = create_rebuild_plan(AppSettings.load())
+            account_id = int(request.data.get("account_id"))
+        except (TypeError, ValueError):
+            return error("监控账号参数无效", 400)
+        account = get_object_or_404(MonitoredAccount, pk=account_id)
+        try:
+            plan = create_rebuild_plan(AppSettings.load(), account)
         except (HistoricalRebuildError, ValueError) as exc:
             return _maintenance_error(exc)
         return ok(rebuild_plan_data(plan), 201)

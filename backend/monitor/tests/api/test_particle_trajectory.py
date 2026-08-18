@@ -9,7 +9,7 @@ from django.utils import timezone
 from monitor.models import AppSettings, Observation
 from monitor.replay import rebuild_account, rebuild_observation_suffix
 from monitor.particle_trajectory import _trajectory_periods
-from monitor.tests.helpers import jwt_login
+from monitor.tests.helpers import create_monitored_account, jwt_login
 
 
 @pytest.mark.django_db
@@ -20,8 +20,8 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
+    create_monitored_account(7)
+    config.save()
 
     started_at = timezone.now() - timedelta(hours=12)
     resets_at = started_at + timedelta(days=7)
@@ -114,8 +114,8 @@ def test_particle_trajectory_selects_historical_period():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
+    create_monitored_account(7)
+    config.save()
 
     now = timezone.now()
     old_start = now - timedelta(days=14)
@@ -264,8 +264,8 @@ def test_particle_trajectory_defers_continuous_zero_plateau_until_usage():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
+    create_monitored_account(7)
+    config.save()
 
     first_start = (timezone.now() - timedelta(days=1)).replace(microsecond=0)
 
@@ -366,7 +366,7 @@ def test_particle_trajectory_allows_authenticated_system_user():
     assert response.status_code == 200
     assert response.json()["data"] == {
         "available": False,
-        "message": "尚未配置 OpenAI 上游账号",
+        "message": "尚未配置启用的监控账号",
     }
 
 
@@ -392,7 +392,7 @@ def test_particle_trajectory_reports_unavailable_without_account():
     assert response.status_code == 200
     assert response.json()["data"] == {
         "available": False,
-        "message": "尚未配置 OpenAI 上游账号",
+        "message": "尚未配置启用的监控账号",
     }
 
 
@@ -404,8 +404,8 @@ def test_particle_trajectory_reports_unavailable_without_observations():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
+    create_monitored_account(7)
+    config.save()
     client = Client()
     headers, _ = jwt_login(client)
 
@@ -414,5 +414,5 @@ def test_particle_trajectory_reports_unavailable_without_observations():
     assert response.status_code == 200
     assert response.json()["data"] == {
         "available": False,
-        "message": "尚无可重放的观测记录",
+        "message": "该监控账号尚无可重放的观测记录",
     }

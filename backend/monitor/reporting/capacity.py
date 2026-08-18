@@ -5,7 +5,7 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from ..models import AppSettings, Observation
+from ..models import AppSettings, MonitoredAccount, Observation
 from .common import iso
 from .costs import FastCorrectionBreakdownPresenter
 
@@ -102,6 +102,7 @@ def daily_closing_basis(
 
 def capacity_summary(
     config: AppSettings,
+    account: MonitoredAccount,
     location: ZoneInfo,
     now: datetime,
     cost_breakdowns: FastCorrectionBreakdownPresenter,
@@ -126,12 +127,9 @@ def capacity_summary(
         "sufficient": False,
         "reason": "尚无当前上游周期，无法形成今日估算",
     }
-    if not config.openai_account_id:
-        return {"cycle": None, "today": empty_today}
-
     latest = (
         Observation.objects.filter(
-            account_id=config.openai_account_id,
+            account_id=account.external_account_id,
             excluded_at__isnull=True,
             attribution_started_at__isnull=False,
         )
@@ -260,6 +258,7 @@ def capacity_summary(
 def capacity_series(
     *,
     config: AppSettings,
+    account: MonitoredAccount,
     location: ZoneInfo,
     now: datetime,
     capacity_days: int,
@@ -275,7 +274,7 @@ def capacity_series(
     )
     observation_rows = list(
         Observation.objects.filter(
-            account_id=config.openai_account_id,
+            account_id=account.external_account_id,
             excluded_at__isnull=True,
             observed_at__gte=capacity_start,
         ).order_by("observed_at", "id")

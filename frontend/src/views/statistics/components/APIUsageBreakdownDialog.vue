@@ -20,7 +20,7 @@ const usedKeys = computed(
   () => data.value?.api_keys.filter((item) => item.usage_usd > 0) ?? [],
 );
 
-async function open(participantId: number, name: string) {
+async function open(participantId: number, name: string, accountId: number) {
   const sequence = ++requestSequence.value;
   participantName.value = name;
   data.value = null;
@@ -29,7 +29,7 @@ async function open(participantId: number, name: string) {
   dialog.value?.showModal();
   try {
     const result = await api<APIUsageBreakdown>(
-      `statistics/participants/${participantId}/api-usage`,
+      `statistics/participants/${participantId}/api-usage?account_id=${accountId}`,
     );
     if (sequence === requestSequence.value) data.value = result;
   } catch (error) {

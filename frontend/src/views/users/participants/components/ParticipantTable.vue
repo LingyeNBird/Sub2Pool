@@ -6,9 +6,7 @@ import {
   formatPercent,
 } from "@/utils/formatters";
 
-const props = defineProps<{
-  participants: Participant[];
-}>();
+const props = defineProps<{ participants: Participant[] }>();
 
 defineEmits<{
   edit: [participant: Participant];
@@ -22,12 +20,10 @@ defineEmits<{
       <thead>
         <tr>
           <th>参与者</th>
-          <th>角色</th>
-          <th>权益</th>
-          <th>已归属 / 剩余</th>
-          <th>账号本周期用量</th>
-          <th>当前用户余额</th>
-          <th>建议用户余额</th>
+          <th>混池权益</th>
+          <th>账号用量合计</th>
+          <th>全局余额</th>
+          <th>聚合建议</th>
           <th>状态</th>
           <th></th>
         </tr>
@@ -43,19 +39,19 @@ defineEmits<{
             </div>
           </td>
           <td>
-            <span
-              class="badge badge-sm"
-              :class="participant.is_owner ? 'badge-neutral' : 'badge-ghost'"
-            >
-              {{ participant.is_owner ? "车主" : "车友" }}
-            </span>
+            <div class="flex flex-wrap items-center gap-1">
+              <span class="font-semibold tabular-nums">
+                {{ formatPercent(participant.share_percent) }}
+              </span>
+              <span
+                class="badge badge-xs"
+                :class="participant.is_owner ? 'badge-neutral' : 'badge-ghost'"
+              >
+                {{ participant.is_owner ? "车主" : "车友" }}
+              </span>
+            </div>
           </td>
-          <td>{{ formatPercent(participant.share_percent) }}</td>
-          <td>
-            {{ formatPercent(participant.snapshot?.charged_cycle_percent) }} /
-            {{ formatPercent(participant.snapshot?.remaining_share_percent) }}
-          </td>
-          <td>{{ formatCurrency(participant.latest_selected_cost) }}</td>
+          <td>{{ formatCurrency(participant.snapshot?.selected_cost) }}</td>
           <td>{{ formatCurrency(participant.latest_balance_usd) }}</td>
           <td class="font-semibold">
             {{
@@ -69,9 +65,25 @@ defineEmits<{
           <td>
             <span
               class="badge badge-sm"
-              :class="participant.enabled ? 'badge-success' : 'badge-ghost'"
+              :class="
+                !participant.enabled
+                  ? 'badge-ghost'
+                  : participant.snapshot?.needs_manual_update
+                    ? 'badge-warning'
+                    : participant.snapshot?.recommendation_complete
+                      ? 'badge-success'
+                      : 'badge-ghost'
+              "
             >
-              {{ participant.enabled ? "启用" : "停用" }}
+              {{
+                !participant.enabled
+                  ? "停用"
+                  : participant.snapshot?.needs_manual_update
+                    ? "建议调整"
+                    : participant.snapshot?.recommendation_complete
+                      ? "正常"
+                      : "等待测算"
+              }}
             </span>
           </td>
           <td class="text-right">

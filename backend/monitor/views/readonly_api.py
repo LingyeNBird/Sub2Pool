@@ -19,12 +19,12 @@ READ_ONLY_API_ENDPOINTS = [
     {
         "method": "GET",
         "path": "/api/v1/statistics",
-        "description": "读取额度统计、容量历史和参与者用量序列。",
+        "description": "按监控账号读取额度统计、容量历史和参与者用量序列。",
     },
     {
         "method": "GET",
         "path": "/api/v1/statistics/participants/{participant_id}/api-usage",
-        "description": "读取一个参与者在当前周期内的 API Key 用量构成。",
+        "description": "按监控账号读取一个参与者在当前周期内的 API Key 用量构成。",
     },
 ]
 
@@ -74,7 +74,7 @@ def _openapi_document() -> dict:
         "openapi": "3.1.0",
         "info": {
             "title": "Sub2Pool Read-only API",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "description": (
                 "使用永久只读 API Key 获取参与者和额度统计数据。"
                 "所有端点只允许 GET、HEAD 和 OPTIONS。"
@@ -159,6 +159,13 @@ def _openapi_document() -> dict:
                     "operationId": "getStatistics",
                     "parameters": [
                         {
+                            "name": "account_id",
+                            "in": "query",
+                            "required": True,
+                            "description": "Sub2Pool 监控账号 ID，不是上游账号 ID。",
+                            "schema": {"type": "integer", "minimum": 1},
+                        },
+                        {
                             "name": "capacity_period",
                             "in": "query",
                             "description": "容量历史按天或按月聚合。",
@@ -238,7 +245,14 @@ def _openapi_document() -> dict:
                             "required": True,
                             "description": "Sub2Pool 参与者 ID，不是 Sub2API 用户 ID。",
                             "schema": {"type": "integer", "minimum": 1},
-                        }
+                        },
+                        {
+                            "name": "account_id",
+                            "in": "query",
+                            "required": True,
+                            "description": "Sub2Pool 监控账号 ID，不是上游账号 ID。",
+                            "schema": {"type": "integer", "minimum": 1},
+                        },
                     ],
                     "responses": {
                         "200": {
@@ -383,6 +397,8 @@ def _openapi_document() -> dict:
                         "is_owner",
                         "enabled",
                         "notes",
+                        "latest_balance_usd",
+                        "account_breakdowns",
                         "snapshot",
                     ],
                     "properties": {
@@ -398,11 +414,18 @@ def _openapi_document() -> dict:
                         "enabled": {"type": "boolean"},
                         "notes": {"type": "string"},
                         "latest_balance_usd": nullable_number,
-                        "latest_selected_cost": nullable_number,
                         "last_checked_at": nullable_string,
+                        "account_breakdowns": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/components/schemas/AccountBreakdown"
+                            },
+                        },
                         "snapshot": {
                             "oneOf": [
-                                {"$ref": "#/components/schemas/ParticipantSnapshot"},
+                                {
+                                    "$ref": "#/components/schemas/AggregateRecommendation"
+                                },
                                 {"type": "null"},
                             ]
                         },
@@ -445,9 +468,139 @@ def _openapi_document() -> dict:
                         "allocation_model": {"type": "string"},
                     },
                 },
+                "MonitoredAccountSummary": {
+                    "type": "object",
+                    "required": ["id", "external_account_id", "name"],
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "external_account_id": {"type": "integer"},
+                        "name": {"type": "string"},
+                    },
+                },
+                "AccountBreakdown": {
+                    "type": "object",
+                    "required": [
+                        "id",
+                        "account_id",
+                        "external_account_id",
+                        "account_name",
+                        "account_enabled",
+                        "snapshot",
+                    ],
+                    "properties": {
+                        "id": {
+                            "oneOf": [
+                                {"type": "integer"},
+                                {"type": "null"},
+                            ]
+                        },
+                        "account_id": {"type": "integer"},
+                        "external_account_id": {"type": "integer"},
+                        "account_name": {"type": "string"},
+                        "account_enabled": {"type": "boolean"},
+                        "latest_selected_cost": nullable_number,
+                        "last_checked_at": nullable_string,
+                        "snapshot": {
+                            "oneOf": [
+                                {
+                                    "$ref": "#/components/schemas/ParticipantSnapshot"
+                                },
+                                {"type": "null"},
+                            ]
+                        },
+                    },
+                },
+                "AggregateRecommendationSource": {
+                    "type": "object",
+                    "required": [
+                        "account_id",
+                        "external_account_id",
+                        "account_name",
+                        "contract_share_percent",
+                        "snapshot",
+                        "net_position_usd",
+                        "net_position_min_usd",
+                        "net_position_max_usd",
+                        "contribution_usd",
+                        "contribution_min_usd",
+                        "contribution_max_usd",
+                    ],
+                    "properties": {
+                        "account_id": {"type": "integer"},
+                        "external_account_id": {"type": "integer"},
+                        "account_name": {"type": "string"},
+                        "contract_share_percent": {"type": "number"},
+                        "net_position_usd": nullable_number,
+                        "net_position_min_usd": nullable_number,
+                        "net_position_max_usd": nullable_number,
+                        "snapshot": {
+                            "oneOf": [
+                                {
+                                    "$ref": "#/components/schemas/ParticipantSnapshot"
+                                },
+                                {"type": "null"},
+                            ]
+                        },
+                        "contribution_usd": nullable_number,
+                        "contribution_min_usd": nullable_number,
+                        "contribution_max_usd": nullable_number,
+                    },
+                },
+                "AggregateRecommendation": {
+                    "type": "object",
+                    "required": [
+                        "participant_id",
+                        "participant_name",
+                        "share_percent",
+                        "selected_cost",
+                        "charged_cycle_percent",
+                        "current_balance_usd",
+                        "recommended_balance_usd",
+                        "recommended_balance_min_usd",
+                        "recommended_balance_max_usd",
+                        "balance_difference_usd",
+                        "is_overused",
+                        "needs_manual_update",
+                        "recommendation_applied",
+                        "recommendation_complete",
+                        "account_count",
+                        "reason",
+                        "allocation_model",
+                        "sources",
+                    ],
+                    "properties": {
+                        "participant_id": {"type": "integer"},
+                        "participant_name": {"type": "string"},
+                        "share_percent": {"type": "number"},
+                        "selected_cost": {"type": "number"},
+                        "charged_cycle_percent": {"type": "number"},
+                        "current_balance_usd": nullable_number,
+                        "recommended_balance_usd": nullable_number,
+                        "recommended_balance_min_usd": nullable_number,
+                        "recommended_balance_max_usd": nullable_number,
+                        "balance_difference_usd": nullable_number,
+                        "is_overused": {"type": "boolean"},
+                        "needs_manual_update": {"type": "boolean"},
+                        "recommendation_applied": {"type": "boolean"},
+                        "recommendation_complete": {"type": "boolean"},
+                        "account_count": {"type": "integer"},
+                        "reason": {"type": "string"},
+                        "allocation_model": {
+                            "type": "string",
+                            "const": "pooled_account_sum",
+                        },
+                        "sources": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/components/schemas/AggregateRecommendationSource"
+                            },
+                        },
+                    },
+                },
                 "Statistics": {
                     "type": "object",
                     "required": [
+                        "account",
                         "capacity_period",
                         "capacity_series",
                         "fast_correction_enabled",
@@ -458,6 +611,9 @@ def _openapi_document() -> dict:
                         "participant_series",
                     ],
                     "properties": {
+                        "account": {
+                            "$ref": "#/components/schemas/MonitoredAccountSummary"
+                        },
                         "capacity_period": {
                             "type": "string",
                             "enum": ["day", "month"],
@@ -510,12 +666,16 @@ def _openapi_document() -> dict:
                     "required": [
                         "participant_id",
                         "participant_name",
+                        "account_id",
+                        "external_account_id",
                         "sub2api_user_id",
                         "points",
                     ],
                     "properties": {
                         "participant_id": {"type": "integer"},
                         "participant_name": {"type": "string"},
+                        "account_id": {"type": "integer"},
+                        "external_account_id": {"type": "integer"},
                         "sub2api_user_id": {"type": "integer"},
                         "points": {
                             "type": "array",

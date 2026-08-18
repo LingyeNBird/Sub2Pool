@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from ..fast_correction.status import missing_current_cycle_intervals
-from ..models import AppSettings, validate_service_url
+from ..models import AppSettings, MonitoredAccount, validate_service_url
 from ..secrets import encrypt_secret
 
 
@@ -42,8 +42,6 @@ class Sub2APIConnectionSerializer(serializers.Serializer):
 SETTINGS_FIELDS = (
     "monitoring_enabled",
     "sub2api_base_url",
-    "openai_account_id",
-    "quota_query_mode",
     "request_timeout_seconds",
     "verify_tls",
     "timezone",
@@ -76,6 +74,38 @@ SETTINGS_FIELDS = (
     "notification_email",
     "resend_from_email",
 )
+
+
+class MonitoredAccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MonitoredAccount
+        fields = (
+            "id",
+            "external_account_id",
+            "name",
+            "enabled",
+            "quota_query_mode",
+            "last_local_check_at",
+            "last_upstream_check_at",
+            "last_success_at",
+            "next_local_check_at",
+            "last_error",
+        )
+        read_only_fields = (
+            "id",
+            "last_local_check_at",
+            "last_upstream_check_at",
+            "last_success_at",
+            "next_local_check_at",
+            "last_error",
+        )
+
+    def validate_external_account_id(self, value: int) -> int:
+        if value <= 0:
+            raise serializers.ValidationError("上游账号 ID 必须为正整数")
+        if self.instance is not None and value != self.instance.external_account_id:
+            raise serializers.ValidationError("已有监控账号不能修改上游账号 ID")
+        return value
 
 
 class AppSettingsSerializer(serializers.ModelSerializer):

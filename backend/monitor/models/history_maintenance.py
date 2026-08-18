@@ -115,7 +115,7 @@ class ParticipantBalanceSample(models.Model):
 
 
 class ParticipantBalanceOperation(models.Model):
-    """Durable, idempotent journal for one administrator balance side effect."""
+    """Durable journal for one global Sub2API user balance side effect."""
 
     STATE_CHOICES = (
         ("prepared", "已持久化，尚未确认远端结果"),
@@ -125,17 +125,10 @@ class ParticipantBalanceOperation(models.Model):
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    account_id = models.BigIntegerField(db_index=True)
-    base_revision = models.PositiveBigIntegerField()
     participant = models.ForeignKey(
         "Participant",
         on_delete=models.PROTECT,
         related_name="balance_operations",
-    )
-    snapshot = models.OneToOneField(
-        "ParticipantSnapshot",
-        on_delete=models.PROTECT,
-        related_name="balance_operation",
     )
     sub2api_user_id = models.BigIntegerField()
     requested_balance_usd = models.DecimalField(
@@ -164,8 +157,8 @@ class ParticipantBalanceOperation(models.Model):
         ordering = ["created_at", "id"]
         indexes = [
             models.Index(
-                fields=["account_id", "state"],
-                name="balance_op_account_state",
+                fields=["participant", "state"],
+                name="balance_op_participant_state",
             )
         ]
         constraints = [
@@ -184,6 +177,41 @@ class ParticipantBalanceOperation(models.Model):
                     )
                 ),
                 name="balance_op_state_payload",
+            )
+        ]
+
+
+class ParticipantBalanceOperationSource(models.Model):
+    """One account revision and snapshot contributing to a global operation."""
+
+    operation = models.ForeignKey(
+        ParticipantBalanceOperation,
+        on_delete=models.CASCADE,
+        related_name="sources",
+    )
+    account = models.ForeignKey(
+        "MonitoredAccount",
+        on_delete=models.PROTECT,
+        related_name="balance_operation_sources",
+    )
+    account_external_id = models.BigIntegerField(db_index=True)
+    base_revision = models.PositiveBigIntegerField()
+    snapshot = models.OneToOneField(
+        "ParticipantSnapshot",
+        on_delete=models.PROTECT,
+        related_name="balance_operation_source",
+    )
+    contribution_usd = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+    )
+
+    class Meta:
+        ordering = ["account_external_id", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["operation", "account_external_id"],
+                name="unique_balance_op_account",
             )
         ]
 

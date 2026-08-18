@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from monitor.engine import run_monitor
 from monitor.api_usage import refresh_due_api_usage_snapshots
-from monitor.models import AppSettings
+from monitor.models import AppSettings, MonitoredAccount
 
 
 def schedule_next_run(
@@ -31,6 +31,9 @@ def schedule_next_run(
         )
     sleep_seconds = math.ceil(max(0, (next_run - current).total_seconds()))
     AppSettings.objects.filter(pk=config.pk).update(next_local_check_at=next_run)
+    MonitoredAccount.objects.filter(enabled=True).update(
+        next_local_check_at=next_run
+    )
     return sleep_seconds
 
 

@@ -28,6 +28,7 @@ from monitor.models import (
     ObservationFastCorrection,
     Participant,
     ParticipantBalanceOperation,
+    ParticipantBalanceOperationSource,
     ParticipantSnapshot,
     ParticipantUsageSample,
     Sub2APIUserUsageSample,
@@ -50,7 +51,11 @@ from monitor.integrations.sub2api import (
     WeeklyWindow,
 )
 from monitor import database_transfer
-from monitor.tests.helpers import create_recommendation_snapshot
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    create_recommendation_snapshot,
+)
 
 def test_sqlite_import_replaces_database_and_keeps_recovery_copy(
     monkeypatch,
@@ -79,9 +84,13 @@ def test_sqlite_import_replaces_database_and_keeps_recovery_copy(
                 );
                 CREATE TABLE monitor_participantbalanceoperation (
                     id CHAR(32) PRIMARY KEY,
-                    account_id BIGINT NOT NULL,
                     state VARCHAR(32) NOT NULL,
                     created_at DATETIME NOT NULL
+                );
+                CREATE TABLE monitor_participantbalanceoperationsource (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    operation_id CHAR(32) NOT NULL,
+                    account_external_id BIGINT NOT NULL
                 );
                 CREATE TABLE marker (value TEXT);
                 """
@@ -244,13 +253,11 @@ def test_database_import_rejects_pending_balance_backup_without_live_writes(
     operation_state,
 ):
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
-    participant = Participant.objects.create(
-        name="待对账车友",
-        sub2api_user_id=51,
-        share_percent=100,
-    )
+    account = create_monitored_account(7)
+    config.save()
+    participant = create_participant(name="待对账车友",
+    sub2api_user_id=51,
+    share_percent=100,)
     snapshot = create_recommendation_snapshot(participant)
     state, _created = HistoryMaintenanceState.objects.get_or_create(
         account_id=7,
@@ -259,10 +266,7 @@ def test_database_import_rejects_pending_balance_backup_without_live_writes(
     state.fact_revision = 5
     state.save(update_fields=["fact_revision"])
     operation = ParticipantBalanceOperation.objects.create(
-        account_id=7,
-        base_revision=5,
         participant=participant,
-        snapshot=snapshot,
         sub2api_user_id=51,
         requested_balance_usd=Decimal("123.45"),
         confirmed_balance_usd=(
@@ -276,6 +280,14 @@ def test_database_import_rejects_pending_balance_backup_without_live_writes(
             if operation_state == "remote_confirmed"
             else None
         ),
+    )
+    ParticipantBalanceOperationSource.objects.create(
+        operation=operation,
+        account=account,
+        account_external_id=7,
+        base_revision=5,
+        snapshot=snapshot,
+        contribution_usd=Decimal("123.45"),
     )
     live_path = tmp_path / "pinche.sqlite3"
     _copy_test_database(live_path)
@@ -331,13 +343,11 @@ def test_database_import_accepts_committed_balance_backup(
     tmp_path,
 ):
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
-    participant = Participant.objects.create(
-        name="已提交车友",
-        sub2api_user_id=51,
-        share_percent=100,
-    )
+    account = create_monitored_account(7)
+    config.save()
+    participant = create_participant(name="已提交车友",
+    sub2api_user_id=51,
+    share_percent=100,)
     snapshot = create_recommendation_snapshot(participant)
     state, _created = HistoryMaintenanceState.objects.get_or_create(
         account_id=7,
@@ -346,16 +356,21 @@ def test_database_import_accepts_committed_balance_backup(
     state.fact_revision = 5
     state.save(update_fields=["fact_revision"])
     operation = ParticipantBalanceOperation.objects.create(
-        account_id=7,
-        base_revision=5,
         participant=participant,
-        snapshot=snapshot,
         sub2api_user_id=51,
         requested_balance_usd=Decimal("123.45"),
         confirmed_balance_usd=Decimal("123.45"),
         state="committed",
         remote_confirmed_at=timezone.now(),
         committed_at=timezone.now(),
+    )
+    ParticipantBalanceOperationSource.objects.create(
+        operation=operation,
+        account=account,
+        account_external_id=7,
+        base_revision=5,
+        snapshot=snapshot,
+        contribution_usd=Decimal("123.45"),
     )
     live_path = tmp_path / "pinche.sqlite3"
     _copy_test_database(live_path)
@@ -397,9 +412,11 @@ def test_database_import_accepts_committed_balance_backup(
     with sqlite3.connect(live_path) as restored:
         restored_operation = restored.execute(
             """
-            SELECT state, base_revision
-            FROM monitor_participantbalanceoperation
-            WHERE id = ?
+            SELECT operation.state, operation_source.base_revision
+            FROM monitor_participantbalanceoperation AS operation
+            JOIN monitor_participantbalanceoperationsource AS operation_source
+                ON operation_source.operation_id = operation.id
+            WHERE operation.id = ?
             """,
             (operation.id.hex,),
         ).fetchone()

@@ -11,7 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import OuterRef, Q, Subquery
 
 from .boundaries import (
     infer_segments as _infer_segments,
@@ -25,10 +25,14 @@ from .dynamic_attribution import replay_dynamic_segment
 from ..history_state import LeaseGuard
 from ..fast_correction.prefix import FastCorrectionPrefix
 from ..models import (
+    AccountParticipant,
     AppSettings,
     HistoryMaintenanceState,
+    MonitoredAccount,
     Observation,
     Participant,
+    ParticipantBalanceSample,
+    ParticipantSnapshot,
     ParticipantUsageSample,
     Sub2APIUserUsageSample,
 )
@@ -141,14 +145,72 @@ def _update_participant_latest(account_id: int) -> None:
     if latest is None:
         return
     snapshots = list(latest.participant_snapshots.all())
+    participant_ids = [snapshot.participant_id for snapshot in snapshots]
+    account = MonitoredAccount.objects.filter(
+        external_account_id=account_id
+    ).first()
+    memberships = (
+        {
+            item.participant_id: item
+            for item in AccountParticipant.objects.filter(
+                account=account,
+                participant_id__in=participant_ids,
+            )
+        }
+        if account is not None
+        else {}
+    )
+    changed_memberships = []
     for snapshot in snapshots:
-        snapshot.participant.latest_selected_cost = snapshot.selected_cost
-        snapshot.participant.latest_balance_usd = snapshot.current_balance_usd
-        snapshot.participant.last_checked_at = latest.observed_at
-    if snapshots:
+        membership = memberships.get(snapshot.participant_id)
+        if membership is None:
+            continue
+        membership.latest_selected_cost = snapshot.selected_cost
+        membership.last_checked_at = latest.observed_at
+        changed_memberships.append(membership)
+    if changed_memberships:
+        AccountParticipant.objects.bulk_update(
+            changed_memberships,
+            ["latest_selected_cost", "last_checked_at"],
+        )
+
+    latest_balance_sample = ParticipantBalanceSample.objects.filter(
+        participant_id=OuterRef("pk"),
+    ).order_by("-captured_at", "-id")
+    latest_snapshot = ParticipantSnapshot.objects.filter(
+        participant_id=OuterRef("pk"),
+        observation__excluded_at__isnull=True,
+    ).order_by("-observation__observed_at", "-id")
+    participants = list(
+        Participant.objects.filter(pk__in=participant_ids).annotate(
+            replay_balance_sample_id=Subquery(
+                latest_balance_sample.values("id")[:1]
+            ),
+            replay_sample_balance=Subquery(
+                latest_balance_sample.values("balance_usd")[:1]
+            ),
+            replay_sample_checked_at=Subquery(
+                latest_balance_sample.values("captured_at")[:1]
+            ),
+            replay_snapshot_balance=Subquery(
+                latest_snapshot.values("current_balance_usd")[:1]
+            ),
+            replay_snapshot_checked_at=Subquery(
+                latest_snapshot.values("observation__observed_at")[:1]
+            ),
+        )
+    )
+    for participant in participants:
+        if participant.replay_balance_sample_id is not None:
+            participant.latest_balance_usd = participant.replay_sample_balance
+            participant.last_checked_at = participant.replay_sample_checked_at
+        else:
+            participant.latest_balance_usd = participant.replay_snapshot_balance
+            participant.last_checked_at = participant.replay_snapshot_checked_at
+    if participants:
         Participant.objects.bulk_update(
-            [snapshot.participant for snapshot in snapshots],
-            ["latest_selected_cost", "latest_balance_usd", "last_checked_at"],
+            participants,
+            ["latest_balance_usd", "last_checked_at"],
         )
 
 

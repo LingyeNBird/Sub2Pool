@@ -107,11 +107,7 @@ defineExpose({ open, close });
                       participant.snapshot.recommended_balance_max_usd != null
                     "
                   >
-                    （{{
-                      participant.snapshot.allocation_model === "time_varying"
-                        ? "90% 参考范围"
-                        : "整数百分比参考范围"
-                    }}
+                    （各账号建议合计范围
                     {{
                       formatCurrencyRange(
                         participant.snapshot.recommended_balance_min_usd,

@@ -12,6 +12,7 @@ from ..models import (
     AppSettings,
     HistoricalRebuildRun,
     HistoryMaintenanceState,
+    MonitoredAccount,
     ParticipantAPIUsageSnapshot,
 )
 from ..replay import rebuild_account
@@ -47,6 +48,7 @@ def _validate_ready_plan(
     run: HistoricalRebuildRun,
     digest: str,
     config: AppSettings,
+    account: MonitoredAccount,
     state: HistoryMaintenanceState,
 ) -> None:
     if run.state == "applied":
@@ -65,9 +67,9 @@ def _validate_ready_plan(
         raise HistoricalRebuildConflict("源事实 revision 已变化")
     if source_fact_digest(run.account_id) != run.source_digest:
         raise HistoricalRebuildConflict("源事实已被原地修改")
-    if config_digest(config) != run.config_digest:
+    if config_digest(config, account) != run.config_digest:
         raise HistoricalRebuildConflict("影响重放的系统设置已变化")
-    if participant_policy_digest() != run.participant_policy_digest:
+    if participant_policy_digest(account) != run.participant_policy_digest:
         raise HistoricalRebuildConflict("参与者策略已变化")
     if run.algorithm_version != ALGORITHM_VERSION or run.build_id != BUILD_ID:
         raise HistoricalRebuildConflict("算法或部署版本与计划不一致")
@@ -95,8 +97,11 @@ def apply_rebuild_plan(run_id, digest: str) -> HistoricalRebuildRun:
             )
             guard.assert_owned(state)
             config = AppSettings.objects.select_for_update().get(pk=1)
+            account = MonitoredAccount.objects.select_for_update().get(
+                external_account_id=run.account_id
+            )
             try:
-                _validate_ready_plan(run, digest, config, state)
+                _validate_ready_plan(run, digest, config, account, state)
             except HistoricalRebuildConflict as exc:
                 if run.state == "ready":
                     stale_reason = str(exc)

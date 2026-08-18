@@ -95,7 +95,7 @@ apply 在一个数据库事务中完成：
 
 Sub2API 累计统计按自然日期查询；查询起点变化时累计值不能直接相减。新采样同时保存累计快照、实际查询窗口和相邻增量。每个区间以已保存的 Sub2API 用户并集构建成本轨迹；尚未绑定的用户和账号总成本与用户合计的正 residual 进入“未解释主体”，参与进度推断但没有合同权益，也不生成余额建议。
 
-用户合计高于账号总成本时不缩放用户原始轨迹，而是记录冲突并阻断不安全维护。系统不会用当前参与者列表倒推出历史 expected-user，也不会为过去制造 participant policy；普通参与者 create/update 只影响当前及未来策略，不补建或改写过去的 membership、share、usage 或 snapshot。
+用户合计高于账号总成本时不缩放用户原始轨迹，而是记录冲突并阻断不安全维护。系统不会用当前参与者列表倒推出历史 expected-user，也不会为过去制造 participant policy；参与者的全局混池合同 create/update 只影响当前及未来策略，不补建或改写过去已冻结的 share、usage 或 snapshot。每个账号的 `AccountParticipant` 仅保存当前成本缓存，不再承载合同份额或参与开关。
 
 ## 确定性重放
 

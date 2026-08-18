@@ -8,7 +8,13 @@ from django.utils import timezone
 
 from monitor.models import AppSettings, Observation, Participant, ParticipantSnapshot
 from monitor.replay import rebuild_account
-from monitor.tests.helpers import jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    create_participant_snapshot,
+    jwt_login,
+    participant_snapshot,
+)
 
 
 def _raw_observation(
@@ -34,13 +40,11 @@ def _raw_observation(
     )
     ParticipantSnapshot.objects.bulk_create(
         [
-            ParticipantSnapshot(
-                observation=observation,
-                participant=participant,
-                raw_selected_cost=cost,
-                selected_cost=cost,
-                current_balance_usd=Decimal("1000"),
-            )
+            participant_snapshot(observation=observation,
+            participant=participant,
+            raw_selected_cost=cost,
+            selected_cost=cost,
+            current_balance_usd=Decimal("1000"),)
             for participant, cost in participant_costs.items()
         ]
     )
@@ -50,19 +54,15 @@ def _raw_observation(
 @pytest.mark.django_db
 def test_replay_is_idempotent_preserves_raw_facts_and_model_intervals():
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
-    owner = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=50,
-        is_owner=True,
-    )
-    rider = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=2,
-        share_percent=50,
-    )
+    create_monitored_account(7)
+    config.save()
+    owner = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=50,
+    is_owner=True,)
+    rider = create_participant(name="车友",
+    sub2api_user_id=2,
+    share_percent=50,)
     now = timezone.now().replace(microsecond=0)
     reset_at = now + timedelta(days=4)
     first = _raw_observation(
@@ -134,14 +134,12 @@ def test_replay_is_idempotent_preserves_raw_facts_and_model_intervals():
 @pytest.mark.django_db
 def test_staged_expansion_is_persisted_in_observation_diagnostics():
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
-    participant = Participant.objects.create(
-        name="高容量参与者",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    create_monitored_account(7)
+    config.save()
+    participant = create_participant(name="高容量参与者",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     now = datetime(2026, 8, 11, 12, tzinfo=dt_timezone.utc)
     reset_at = now + timedelta(days=7)
     _raw_observation(
@@ -174,14 +172,12 @@ def test_staged_expansion_is_persisted_in_observation_diagnostics():
 @pytest.mark.django_db
 def test_new_cycle_uses_previous_cycle_capacity_as_soft_prior():
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
-    owner = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    create_monitored_account(7)
+    config.save()
+    owner = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     now = timezone.now().replace(microsecond=0)
     first_reset = now - timedelta(days=6)
     second_reset = now + timedelta(days=6)
@@ -236,14 +232,12 @@ def test_quota_model_switch_changes_projection_without_rewriting_snapshot():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.weekly_quota_model = "constant_average"
-    config.save(update_fields=["openai_account_id", "weekly_quota_model"])
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=51,
-        share_percent=50,
-    )
+    config.save(update_fields=["weekly_quota_model"])
+    participant = create_participant(name="车友",
+    sub2api_user_id=51,
+    share_percent=50,)
     now = timezone.now()
     observation = Observation.objects.create(
         account_id=7,
@@ -259,17 +253,15 @@ def test_quota_model_switch_changes_projection_without_rewriting_snapshot():
         total_actual_cost=Decimal("400"),
         effective_usd_per_percent=Decimal("15"),
     )
-    snapshot = ParticipantSnapshot.objects.create(
-        observation=observation,
-        participant=participant,
-        raw_selected_cost=Decimal("100"),
-        selected_cost=Decimal("100"),
-        charged_cycle_percent=Decimal("12"),
-        remaining_share_percent=Decimal("38"),
-        current_balance_usd=Decimal("80"),
-        recommended_balance_usd=Decimal("722"),
-        needs_manual_update=True,
-    )
+    snapshot = create_participant_snapshot(observation=observation,
+    participant=participant,
+    raw_selected_cost=Decimal("100"),
+    selected_cost=Decimal("100"),
+    charged_cycle_percent=Decimal("12"),
+    remaining_share_percent=Decimal("38"),
+    current_balance_usd=Decimal("80"),
+    recommended_balance_usd=Decimal("722"),
+    needs_manual_update=True,)
     client = Client()
     headers, _ = jwt_login(client)
 
@@ -278,10 +270,14 @@ def test_quota_model_switch_changes_projection_without_rewriting_snapshot():
     config.save(update_fields=["weekly_quota_model"])
     varying = client.get("/api/participants", **headers).json()["data"][0]
 
-    assert constant["snapshot"]["allocation_model"] == "constant_average"
-    assert constant["snapshot"]["charged_cycle_percent"] == 5.0
-    assert varying["snapshot"]["allocation_model"] == "time_varying"
-    assert varying["snapshot"]["charged_cycle_percent"] == 12.0
+    assert constant["snapshot"]["allocation_model"] == "pooled_account_sum"
+    assert varying["snapshot"]["allocation_model"] == "pooled_account_sum"
+    constant_account = constant["account_breakdowns"][0]["snapshot"]
+    varying_account = varying["account_breakdowns"][0]["snapshot"]
+    assert constant_account["allocation_model"] == "constant_average"
+    assert constant_account["charged_cycle_percent"] == 5.0
+    assert varying_account["allocation_model"] == "time_varying"
+    assert varying_account["charged_cycle_percent"] == 12.0
     snapshot.refresh_from_db()
     assert snapshot.charged_cycle_percent == Decimal("12")
     assert snapshot.remaining_share_percent == Decimal("38")

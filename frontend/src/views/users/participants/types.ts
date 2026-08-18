@@ -15,6 +15,6 @@ export interface ParticipantFormData {
 }
 
 export interface ParticipantEditorHandle {
-  open: (participant: Participant | null, defaultShare: number) => void;
+  open: (participant: Participant | null) => void;
   close: () => void;
 }

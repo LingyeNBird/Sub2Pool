@@ -10,14 +10,18 @@ from ..integrations.sub2api import (
     UserBalance,
     WeeklyWindow,
 )
-from ..models import Observation, Participant
+from ..models import AccountParticipant, Observation, Participant
 
 
 @dataclass
 class LocalParticipantData:
-    participant: Participant
+    membership: AccountParticipant
     stats: UsageStats
     balance: UserBalance
+
+    @property
+    def participant(self) -> Participant:
+        return self.membership.participant
 
     def selected_cost(self, basis: str) -> Decimal:
         return self.stats.selected(basis)

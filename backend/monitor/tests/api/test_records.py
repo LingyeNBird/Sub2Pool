@@ -47,7 +47,12 @@ from monitor.integrations.sub2api import (
     WeeklyWindow,
 )
 from monitor import database_transfer
-from monitor.tests.helpers import create_recommendation_snapshot, jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    create_recommendation_snapshot,
+    jwt_login,
+)
 
 @pytest.mark.django_db
 def test_notification_records_paginate_and_apply_all_filters():
@@ -58,11 +63,9 @@ def test_notification_records_paginate_and_apply_all_filters():
     )
     client = Client()
     headers, _ = jwt_login(client)
-    participant = Participant.objects.create(
-        name="筛选车友",
-        sub2api_user_id=88,
-        share_percent=100,
-    )
+    participant = create_participant(name="筛选车友",
+    sub2api_user_id=88,
+    share_percent=100,)
     now = timezone.now()
     target = NotificationEvent.objects.create(
         event_type="test",
@@ -132,6 +135,7 @@ def test_database_transfer_endpoints_require_admin_and_clear_refresh_on_import(
     )
     client = Client()
     headers, _ = jwt_login(client)
+    account = create_monitored_account(7)
     monkeypatch.setattr(
         "monitor.views.database.export_database_bytes",
         lambda: b"SQLite format 3\x00backup",

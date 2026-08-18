@@ -14,7 +14,7 @@ from .accounting.model_inputs import (
 )
 from .accounting.particle_filter import ParticleFilterConfig
 from .fast_correction.prefix import FastCorrectionPrefix
-from .models import AppSettings, Observation
+from .models import AppSettings, MonitoredAccount, Observation
 from .reporting import iso
 
 ZERO = Decimal("0")
@@ -141,21 +141,16 @@ def _initial_capacity(segment: ReplaySegment) -> float | None:
 
 def particle_trajectory_data(
     config: AppSettings,
+    account: MonitoredAccount,
     period_id: int | None = None,
 ) -> dict:
-    """只读重放指定历史区间；默认选择当前区间。"""
+    """Read-only replay for one selected account and historical period."""
 
-    if not config.openai_account_id:
-        return {
-            "available": False,
-            "message": "尚未配置 OpenAI 上游账号",
-        }
-
-    periods = _trajectory_periods(config.openai_account_id)
+    periods = _trajectory_periods(account.external_account_id)
     if not periods:
         return {
             "available": False,
-            "message": "尚无可重放的观测记录",
+            "message": "该监控账号尚无可重放的观测记录",
         }
     selected_period = next(period for period in periods if period["is_current"])
     if period_id is not None:
@@ -167,7 +162,7 @@ def particle_trajectory_data(
             raise ValueError("所选历史周期不存在")
 
     segment = _segment_for_period(
-        config.openai_account_id,
+        account.external_account_id,
         selected_period,
         config.cost_basis,
     )
@@ -175,15 +170,15 @@ def particle_trajectory_data(
         raise ValueError("所选历史周期没有可重放的观测记录")
 
     replay_input = build_dynamic_replay_input(
-        account_id=config.openai_account_id,
+        account_id=account.external_account_id,
         segment=segment,
         config=config,
         correction_prefix=FastCorrectionPrefix(
-            config.openai_account_id,
+            account.external_account_id,
             config.cost_basis,
         ),
     )
-    seed = stable_segment_seed(config.openai_account_id, segment)
+    seed = stable_segment_seed(account.external_account_id, segment)
     filter_config = ParticleFilterConfig(
         initial_capacity_usd=_initial_capacity(segment),
     )
@@ -281,6 +276,11 @@ def particle_trajectory_data(
     ]
     latest = points[-1]
     return {
+        "account": {
+            "id": account.id,
+            "external_account_id": account.external_account_id,
+            "name": account.name,
+        },
         "available": True,
         "message": "",
         "algorithm": ALGORITHM_VERSION,

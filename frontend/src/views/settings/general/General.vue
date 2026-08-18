@@ -34,6 +34,10 @@ const {
   smtpPassword,
   resendApiKey,
   openAIAccounts,
+  monitoredAccounts,
+  selectedTestAccountId,
+  maintenanceAccountId,
+  savingAccountId,
   loadingAccounts,
   exportingDatabase,
   importingDatabase,
@@ -44,6 +48,8 @@ const {
   applyingHistory,
   passwordForm,
   loadOpenAIAccounts,
+  saveMonitoredAccount,
+  removeMonitoredAccount,
   saveConnection,
   saveAllocation,
   saveSampling,
@@ -127,12 +133,17 @@ async function handleRevokeReadOnlyAPIKey() {
       v-model:settings="settings"
       v-model:admin-token="adminToken"
       :accounts="openAIAccounts"
+      v-model:selected-test-account-id="selectedTestAccountId"
+      :monitored-accounts="monitoredAccounts"
+      :saving-account-id="savingAccountId"
       :loading-accounts="loadingAccounts"
       :testing="testing === 'sub2api'"
       :saving="saving === 'connection'"
       @load-accounts="loadOpenAIAccounts()"
       @test="test('sub2api')"
       @save="saveConnection"
+      @save-account="saveMonitoredAccount"
+      @remove-account="removeMonitoredAccount"
     />
     <AllocationModelCard
       v-model:settings="settings"
@@ -164,6 +175,8 @@ async function handleRevokeReadOnlyAPIKey() {
       @save="saveNotifications"
     />
     <DataMaintenanceCard
+      v-model:account-id="maintenanceAccountId"
+      :accounts="monitoredAccounts"
       :plan="historyRebuildPlan"
       :planning="planningHistory"
       :applying="applyingHistory"

@@ -9,10 +9,20 @@ from rest_framework.serializers import ValidationError
 from .base import AdminAPIView, error, ok
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 from ..history_state import LeaseLostError, fenced_fact_write
-from ..models import AppSettings, Observation
+from ..models import (
+    AccountParticipant,
+    AppSettings,
+    MonitoredAccount,
+    Observation,
+    Participant,
+)
 from ..notifications import send_notification
 from ..replay import rebuild_account
-from ..serializers import AppSettingsSerializer, Sub2APIConnectionSerializer
+from ..serializers import (
+    AppSettingsSerializer,
+    MonitoredAccountSerializer,
+    Sub2APIConnectionSerializer,
+)
 
 DERIVED_RESULT_SETTINGS = frozenset(
     {
@@ -25,9 +35,7 @@ DERIVED_RESULT_SETTINGS = frozenset(
 )
 PLAN_RELEVANT_SETTINGS = frozenset(
     {
-        "openai_account_id",
         "sub2api_base_url",
-        "quota_query_mode",
         "timezone",
         "cost_basis",
         "weekly_quota_model",
@@ -61,7 +69,12 @@ class SettingsView(AdminAPIView):
 
     def patch(self, request):
         config = AppSettings.load()
-        original_account_id = config.openai_account_id
+        account_ids = set(
+            MonitoredAccount.objects.values_list(
+                "external_account_id",
+                flat=True,
+            )
+        )
         serializer = AppSettingsSerializer(
             config,
             data=request.data,
@@ -90,21 +103,7 @@ class SettingsView(AdminAPIView):
             if changed_derived_settings
             else set()
         )
-        plan_account_ids = (
-            {
-                account_id
-                for account_id in (
-                    original_account_id,
-                    serializer.validated_data.get(
-                        "openai_account_id",
-                        original_account_id,
-                    ),
-                )
-                if account_id
-            }
-            if changed_plan_settings
-            else set()
-        )
+        plan_account_ids = account_ids if changed_plan_settings else set()
         affected_account_ids = derived_account_ids | plan_account_ids
         try:
             with fenced_fact_write(
@@ -163,14 +162,77 @@ class TestSub2APIView(AdminAPIView):
         values = serializer.validated_data
         try:
             with _temporary_sub2api_client(config, values) as client:
+                selected_account = MonitoredAccount.objects.filter(
+                    pk=values.get("openai_account_id")
+                ).first()
+                external_account_id = (
+                    selected_account.external_account_id
+                    if selected_account is not None
+                    else values.get("openai_account_id")
+                )
                 result = client.test_connection(
-                    values.get("openai_account_id", config.openai_account_id),
-                    values.get("quota_query_mode", config.quota_query_mode),
+                    external_account_id,
+                    values.get(
+                        "quota_query_mode",
+                        selected_account.quota_query_mode
+                        if selected_account is not None
+                        else "passive",
+                    ),
                 )
         except (Sub2APIError, ValueError) as exc:
             return error(str(exc), 502)
         return ok(result)
 
+class MonitoredAccountListView(AdminAPIView):
+    def get(self, _request):
+        accounts = MonitoredAccount.objects.order_by("name", "external_account_id")
+        return ok(MonitoredAccountSerializer(accounts, many=True).data)
+
+    def post(self, request):
+        serializer = MonitoredAccountSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error("监控账号校验失败", details=serializer.errors)
+        external_account_id = serializer.validated_data["external_account_id"]
+        with fenced_fact_write([external_account_id]):
+            account = serializer.save()
+            AccountParticipant.objects.bulk_create(
+                [
+                    AccountParticipant(account=account, participant=participant)
+                    for participant in Participant.objects.order_by("id")
+                ]
+            )
+        return ok(MonitoredAccountSerializer(account).data, 201)
+
+
+class MonitoredAccountDetailView(AdminAPIView):
+    def put(self, request, account_id: int):
+        try:
+            account = MonitoredAccount.objects.get(pk=account_id)
+        except MonitoredAccount.DoesNotExist:
+            return error("监控账号不存在", 404)
+        serializer = MonitoredAccountSerializer(
+            account,
+            data=request.data,
+            partial=True,
+        )
+        if not serializer.is_valid():
+            return error("监控账号校验失败", details=serializer.errors)
+        with fenced_fact_write([account.external_account_id]):
+            account = serializer.save()
+        return ok(MonitoredAccountSerializer(account).data)
+
+    def delete(self, _request, account_id: int):
+        try:
+            account = MonitoredAccount.objects.get(pk=account_id)
+        except MonitoredAccount.DoesNotExist:
+            return error("监控账号不存在", 404)
+        if Observation.objects.filter(
+            account_id=account.external_account_id
+        ).exists():
+            return error("该账号已有历史事实，不能删除；请改为停用", 409)
+        with fenced_fact_write([account.external_account_id]):
+            account.delete()
+        return ok({"deleted": True})
 
 class TestEmailView(AdminAPIView):
     def post(self, _request):

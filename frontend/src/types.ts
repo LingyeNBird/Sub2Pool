@@ -25,6 +25,65 @@ export interface Snapshot {
   allocation_model: "time_varying" | "constant_average";
 }
 
+export interface MonitoredAccount {
+  id: number;
+  external_account_id: number;
+  name: string;
+  enabled: boolean;
+  quota_query_mode: "passive" | "direct";
+  last_local_check_at: string | null;
+  last_upstream_check_at: string | null;
+  last_success_at: string | null;
+  next_local_check_at: string | null;
+  last_error: string;
+}
+
+export interface AccountBreakdown {
+  id: number | null;
+  account_id: number;
+  external_account_id: number;
+  account_name: string;
+  account_enabled: boolean;
+  latest_selected_cost: number | null;
+  last_checked_at: string | null;
+  snapshot: Snapshot | null;
+}
+
+export interface AggregateRecommendationSource {
+  account_id: number;
+  external_account_id: number;
+  account_name: string;
+  contract_share_percent: number;
+  snapshot: Snapshot | null;
+  net_position_usd: number | null;
+  net_position_min_usd: number | null;
+  net_position_max_usd: number | null;
+  contribution_usd: number | null;
+  contribution_min_usd: number | null;
+  contribution_max_usd: number | null;
+}
+
+export interface AggregateRecommendation {
+  participant_id: number;
+  share_percent: number;
+  participant_name: string;
+  selected_cost: number;
+  charged_cycle_percent: number;
+  current_balance_usd: number | null;
+  recommended_balance_usd: number | null;
+  recommended_balance_min_usd: number | null;
+  recommended_balance_max_usd: number | null;
+  balance_difference_usd: number | null;
+  is_overused: boolean;
+  needs_manual_update: boolean;
+  recommendation_applied: boolean;
+  recommendation_complete: boolean;
+  account_count: number;
+  reason: string;
+  allocation_model: "pooled_account_sum";
+  sources: AggregateRecommendationSource[];
+}
+
 export interface Participant {
   id: number;
   name: string;
@@ -38,9 +97,9 @@ export interface Participant {
   enabled: boolean;
   notes: string;
   latest_balance_usd: number | null;
-  latest_selected_cost: number | null;
   last_checked_at: string | null;
-  snapshot: Snapshot | null;
+  account_breakdowns: AccountBreakdown[];
+  snapshot: AggregateRecommendation | null;
 }
 
 export interface Sub2APIUserOption {
@@ -114,6 +173,8 @@ export interface ModelDiagnostics {
 export interface DashboardData {
   configured: boolean;
   monitoring_enabled: boolean;
+  accounts: MonitoredAccount[];
+  selected_account_id: number | null;
   last_local_check_at: string | null;
   last_upstream_check_at: string | null;
   snapshot_stale: boolean;
@@ -121,7 +182,7 @@ export interface DashboardData {
   last_error: string;
   sub2api_admin_url: string;
   fast_correction_enabled: boolean;
-  quota_query_mode: string;
+  quota_query_mode: "passive" | "direct" | null;
   weekly_quota_model: "time_varying" | "constant_average";
   needs_manual_update_count: number;
   cycle: null | {
@@ -237,6 +298,14 @@ export interface MonitorSchedule {
   interval_seconds: number;
   next_local_check_at: string | null;
   run_in_progress: boolean;
+  accounts: Array<{
+    id: number;
+    external_account_id: number;
+    name: string;
+    enabled: boolean;
+    next_local_check_at: string | null;
+    run_in_progress: boolean;
+  }>;
   server_time: string;
 }
 
@@ -276,6 +345,7 @@ export interface LoginEventData extends PaginatedData<LoginEventRecord> {
 }
 
 export interface ObservationListData extends PaginatedData<Observation> {
+  account: Pick<MonitoredAccount, "id" | "external_account_id" | "name"> | null;
   fast_correction_enabled: boolean;
   summary: {
     total: number;
@@ -416,6 +486,8 @@ export interface UsagePoint {
 export interface ParticipantUsageSeries {
   participant_id: number;
   participant_name: string;
+  account_id: number;
+  external_account_id: number;
   sub2api_user_id: number;
   points: UsagePoint[];
 }
@@ -444,6 +516,7 @@ export interface APIUsageBreakdown {
 }
 
 export interface StatisticsData {
+  account: Pick<MonitoredAccount, "id" | "external_account_id" | "name">;
   capacity_period: "day" | "month";
   capacity_series: CapacityPoint[];
   fast_correction_enabled: boolean;
@@ -466,8 +539,6 @@ export interface AppSettingsData {
   [key: string]: string | number | boolean | null;
   monitoring_enabled: boolean;
   sub2api_base_url: string;
-  openai_account_id: number | null;
-  quota_query_mode: string;
   request_timeout_seconds: number;
   verify_tls: boolean;
   timezone: string;
@@ -618,6 +689,7 @@ export interface ParticleTrajectoryPeriod {
 }
 
 export interface ParticleTrajectoryData {
+  account?: Pick<MonitoredAccount, "id" | "external_account_id" | "name">;
   available: boolean;
   message: string;
   algorithm?: string;

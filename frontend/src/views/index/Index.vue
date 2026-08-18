@@ -23,6 +23,7 @@ interface RecommendationDialogHandle {
 }
 
 const data = ref<DashboardData | null>(null);
+const selectedAccountId = ref<number | null>(null);
 const loading = ref(true);
 const running = ref(false);
 const message = ref("");
@@ -37,7 +38,12 @@ async function load() {
   loading.value = true;
   message.value = "";
   try {
-    data.value = await api<DashboardData>("dashboard");
+    const query =
+      selectedAccountId.value == null
+        ? ""
+        : `?account_id=${selectedAccountId.value}`;
+    data.value = await api<DashboardData>(`dashboard${query}`);
+    selectedAccountId.value = data.value.selected_account_id;
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "加载总览失败";
   } finally {
@@ -49,7 +55,10 @@ async function runCalibration() {
   running.value = true;
   message.value = "";
   try {
-    await api("monitor/run", { method: "POST" });
+    await api("monitor/run", {
+      method: "POST",
+      body: JSON.stringify({ account_id: selectedAccountId.value }),
+    });
     await load();
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "测算失败";
@@ -115,6 +124,22 @@ onMounted(load);
       </div>
     </div>
     <div class="flex flex-wrap gap-2">
+      <select
+        v-if="data?.accounts.length"
+        v-model.number="selectedAccountId"
+        class="select select-sm"
+        :disabled="loading || running"
+        aria-label="选择监控账号"
+        @change="load"
+      >
+        <option
+          v-for="account in data.accounts"
+          :key="account.id"
+          :value="account.id"
+        >
+          {{ account.name }}
+        </option>
+      </select>
       <button
         class="btn btn-primary btn-sm"
         :disabled="running"
@@ -154,8 +179,8 @@ onMounted(load);
   <div v-if="data && !data.configured" class="col-span-12 alert alert-warning">
     <AppIcon name="exclamation-triangle" class="size-5" />
     <span>
-      尚未完成 Sub2API 连接配置。请先在系统设置中填写地址、Admin Token 和 OpenAI
-      账号 ID。
+      尚未完成 Sub2API 连接配置。请先在系统设置中填写地址、Admin Token
+      并添加至少一个 OpenAI 监控账号。
     </span>
   </div>
 

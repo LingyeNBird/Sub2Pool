@@ -24,7 +24,11 @@ from monitor.models import (
     UsageSamplePoint,
 )
 from monitor.replay import rebuild_account
-from monitor.tests.helpers import jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    jwt_login,
+)
 
 ACCOUNT_ID = 7
 USER_IDS = (11, 12)
@@ -44,7 +48,7 @@ def admin_client():
 
 def _configure() -> AppSettings:
     config = AppSettings.load()
-    config.openai_account_id = ACCOUNT_ID
+    create_monitored_account(ACCOUNT_ID)
     config.timezone = "Asia/Shanghai"
     config.cost_basis = "actual"
     config.fast_correction_enabled = True
@@ -57,17 +61,13 @@ def _create_complete_history(*, total: Decimal = Decimal("100")):
     observed_at = timezone.now().replace(microsecond=0)
     window_started_at = observed_at - timedelta(hours=4)
     reset_at = observed_at + timedelta(days=6)
-    owner = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=USER_IDS[0],
-        share_percent=Decimal("50"),
-        is_owner=True,
-    )
-    rider = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=USER_IDS[1],
-        share_percent=Decimal("50"),
-    )
+    owner = create_participant(name="车主",
+    sub2api_user_id=USER_IDS[0],
+    share_percent=Decimal("50"),
+    is_owner=True,)
+    rider = create_participant(name="车友",
+    sub2api_user_id=USER_IDS[1],
+    share_percent=Decimal("50"),)
     point = UsageSamplePoint.objects.create(
         account_id=ACCOUNT_ID,
         observed_at=observed_at,
@@ -169,7 +169,7 @@ def test_local_plan_is_persistent_zero_network_and_replays(admin_client):
 
     created = client.post(
         "/api/settings/data-maintenance/history-rebuild-plans",
-        data={},
+        data={"account_id": create_monitored_account(ACCOUNT_ID).id},
         content_type="application/json",
         **headers,
     )
@@ -239,7 +239,7 @@ def test_api_clean_cutover_rejects_removed_modes_and_requires_digest(admin_clien
 
     plan = client.post(
         "/api/settings/data-maintenance/history-rebuild-plans",
-        data={},
+        data={"account_id": create_monitored_account(ACCOUNT_ID).id},
         content_type="application/json",
         **headers,
     ).json()["data"]
@@ -268,7 +268,7 @@ def test_plan_rejects_source_changes_after_creation(admin_client):
     _config, point, _observation, _users = _create_complete_history()
     plan = client.post(
         "/api/settings/data-maintenance/history-rebuild-plans",
-        data={},
+        data={"account_id": create_monitored_account(ACCOUNT_ID).id},
         content_type="application/json",
         **headers,
     ).json()["data"]
@@ -293,7 +293,7 @@ def test_mutating_persisted_plan_invalidates_digest(admin_client):
     _create_complete_history()
     plan = client.post(
         "/api/settings/data-maintenance/history-rebuild-plans",
-        data={},
+        data={"account_id": create_monitored_account(ACCOUNT_ID).id},
         content_type="application/json",
         **headers,
     ).json()["data"]
@@ -322,7 +322,10 @@ def test_mutating_persisted_plan_invalidates_digest(admin_client):
 @pytest.mark.django_db
 def test_replay_failure_rolls_back_plan_and_revision(monkeypatch):
     _create_complete_history()
-    run = create_rebuild_plan(AppSettings.load())
+    run = create_rebuild_plan(
+        AppSettings.load(),
+        create_monitored_account(ACCOUNT_ID),
+    )
 
     def fail_replay(*_args, **_kwargs):
         raise RuntimeError("fault injection during replay")
@@ -387,7 +390,7 @@ def test_negative_residual_is_a_hard_local_audit_blocker(admin_client):
 
     response = client.post(
         "/api/settings/data-maintenance/history-rebuild-plans",
-        data={},
+        data={"account_id": create_monitored_account(ACCOUNT_ID).id},
         content_type="application/json",
         **headers,
     )
@@ -469,7 +472,10 @@ def test_local_audit_rejects_interval_and_observation_coordinate_drift():
             interval_source="invalid_fixture",
         )
 
-    run = create_rebuild_plan(AppSettings.load())
+    run = create_rebuild_plan(
+        AppSettings.load(),
+        create_monitored_account(ACCOUNT_ID),
+    )
 
     assert run.state == "blocked"
     codes = {item["code"] for item in run.blockers if item["severity"] == "hard"}

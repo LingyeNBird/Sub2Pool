@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import type { HistoricalRebuildPlan } from "@/types";
+import type { HistoricalRebuildPlan, MonitoredAccount } from "@/types";
+const accountId = defineModel<number | null>("accountId", { required: true });
 
-const { plan, planning, applying } = defineProps<{
+const { plan, planning, applying, accounts } = defineProps<{
   plan: HistoricalRebuildPlan | null;
   planning: boolean;
   applying: boolean;
+  accounts: MonitoredAccount[];
 }>();
 
 const emit = defineEmits<{
@@ -62,9 +64,22 @@ function stateLabel(state: HistoricalRebuildPlan["state"]) {
           </div>
           <span class="badge shrink-0 badge-outline badge-success">推荐</span>
         </div>
+        <fieldset class="mt-3 fieldset">
+          <label class="label">维护账号</label>
+          <select v-model.number="accountId" class="select w-full">
+            <option :value="null">请选择监控账号</option>
+            <option
+              v-for="account in accounts"
+              :key="account.id"
+              :value="account.id"
+            >
+              {{ account.name }}（ID {{ account.external_account_id }}）
+            </option>
+          </select>
+        </fieldset>
         <button
           class="btn mt-3 btn-sm"
-          :disabled="busy"
+          :disabled="busy || accountId == null"
           @click="emit('createPlan')"
         >
           <span

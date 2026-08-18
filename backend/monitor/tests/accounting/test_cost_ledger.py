@@ -27,6 +27,12 @@ from monitor.models import (
     ParticipantUsageSample,
     Sub2APIUserUsageSample,
 )
+from monitor.tests.helpers import (
+    account_membership,
+    create_monitored_account,
+    create_participant,
+    create_participant_snapshot,
+)
 
 
 @pytest.mark.django_db
@@ -34,16 +40,14 @@ def test_runtime_bridges_a_changed_cost_query_window_with_request_logs(
     monkeypatch,
 ):
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.fast_correction_enabled = False
     config.cost_basis = "actual"
     config.save()
-    participant = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    participant = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     now = timezone.now().replace(microsecond=0)
     previous_at = now - timedelta(minutes=10)
     reset_at = now + timedelta(days=3)
@@ -60,13 +64,11 @@ def test_runtime_bridges_a_changed_cost_query_window_with_request_logs(
         total_actual_cost=Decimal("1217"),
         effective_usd_per_percent=Decimal("20"),
     )
-    ParticipantSnapshot.objects.create(
-        observation=previous,
-        participant=participant,
-        raw_selected_cost=Decimal("1217"),
-        selected_cost=Decimal("1217"),
-        current_balance_usd=Decimal("500"),
-    )
+    create_participant_snapshot(observation=previous,
+    participant=participant,
+    raw_selected_cost=Decimal("1217"),
+    selected_cost=Decimal("1217"),
+    current_balance_usd=Decimal("500"),)
     Sub2APIUserUsageSample.objects.create(
         account_id=7,
         sub2api_user_id=1,
@@ -127,7 +129,7 @@ def test_runtime_bridges_a_changed_cost_query_window_with_request_logs(
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
 
-    result = run_monitor(force_upstream=True, source="manual")
+    result = run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     assert result["status"] == "calibrated"
     current = Observation.objects.order_by("observed_at", "id").last()
@@ -160,15 +162,13 @@ def test_runtime_bridges_a_changed_cost_query_window_with_request_logs(
 @pytest.mark.django_db
 def test_local_trend_keeps_normalized_cost_across_query_window_change():
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.cost_basis = "actual"
     config.save()
-    participant = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    participant = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     now = timezone.now().replace(microsecond=0)
     previous_at = now - timedelta(minutes=10)
     reset_at = now + timedelta(days=3)
@@ -193,13 +193,11 @@ def test_local_trend_keeps_normalized_cost_across_query_window_change():
     latest.is_manual_start = True
     latest.manual_start_end = latest
     latest.save(update_fields=["is_manual_start", "manual_start_end"])
-    ParticipantSnapshot.objects.create(
-        observation=latest,
-        participant=participant,
-        raw_selected_cost=Decimal("361"),
-        selected_cost=Decimal("0"),
-        current_balance_usd=Decimal("500"),
-    )
+    create_participant_snapshot(observation=latest,
+    participant=participant,
+    raw_selected_cost=Decimal("361"),
+    selected_cost=Decimal("0"),
+    current_balance_usd=Decimal("500"),)
     Sub2APIUserUsageSample.objects.create(
         account_id=7,
         sub2api_user_id=1,
@@ -216,7 +214,7 @@ def test_local_trend_keeps_normalized_cost_across_query_window_change():
         total=UsageStats(Decimal("20"), Decimal("20")),
         participants=[
             LocalParticipantData(
-                participant=participant,
+                membership=account_membership(participant),
                 stats=UsageStats(Decimal("20"), Decimal("20")),
                 balance=UserBalance(Decimal("500"), Decimal("0")),
             )
@@ -259,7 +257,7 @@ def test_local_trend_keeps_normalized_cost_across_query_window_change():
     assert trend.raw_selected_cost == Decimal("20")
     assert trend.selected_cost == Decimal("18")
     participant.refresh_from_db()
-    assert participant.latest_selected_cost == Decimal("18")
+    assert account_membership(participant).latest_selected_cost == Decimal("18")
 
 
 @pytest.mark.django_db

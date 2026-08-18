@@ -10,6 +10,7 @@ from .fast_correction.constants import COST_PRECISION, FAST_EXTRA_FACTOR
 from .integrations.sub2api import Sub2APIClient
 from .models import (
     AppSettings,
+    MonitoredAccount,
     Observation,
     Participant,
     ParticipantAPIUsageSnapshot,
@@ -37,12 +38,12 @@ def _selected_log_cost(item, config: AppSettings) -> Decimal:
     return cost.quantize(COST_PRECISION, rounding=ROUND_HALF_UP)
 
 
-def latest_cycle_observation(config: AppSettings) -> Observation | None:
-    if not config.openai_account_id:
-        return None
+def latest_cycle_observation(
+    account: MonitoredAccount,
+) -> Observation | None:
     return (
         Observation.objects.filter(
-            account_id=config.openai_account_id,
+            account_id=account.external_account_id,
             excluded_at__isnull=True,
             attribution_started_at__isnull=False,
         )
@@ -197,32 +198,34 @@ def get_participant_api_usage(
 
 
 def refresh_due_api_usage_snapshots(config: AppSettings) -> dict[str, int]:
-    """后台每轮只检查缓存年龄；每名参与者至多每小时刷新一次。"""
+    """Refresh due user/account API-key summaries across enabled accounts."""
 
     if not config.monitoring_enabled:
         return {"refreshed": 0, "skipped": 0}
-    observation = latest_cycle_observation(config)
-    if observation is None:
-        return {"refreshed": 0, "skipped": 0}
     now = timezone.now()
-    due: list[Participant] = []
+    due: list[tuple[Participant, Observation]] = []
     skipped = 0
-    for participant in Participant.objects.filter(enabled=True):
-        if fresh_snapshot(
-            participant=participant,
-            observation=observation,
-            config=config,
-            now=now,
-        ) is None:
-            due.append(participant)
-        else:
-            skipped += 1
+    for account in MonitoredAccount.objects.filter(enabled=True):
+        observation = latest_cycle_observation(account)
+        if observation is None:
+            continue
+        participants = Participant.objects.filter(enabled=True)
+        for participant in participants:
+            if fresh_snapshot(
+                participant=participant,
+                observation=observation,
+                config=config,
+                now=now,
+            ) is None:
+                due.append((participant, observation))
+            else:
+                skipped += 1
     if not due:
         return {"refreshed": 0, "skipped": skipped}
 
     refreshed = 0
     with Sub2APIClient(config) as client:
-        for participant in due:
+        for participant, observation in due:
             refresh_participant_api_usage(
                 client=client,
                 participant=participant,

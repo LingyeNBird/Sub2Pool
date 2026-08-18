@@ -5,7 +5,14 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 
 from .common import iso
-from ..models import AppSettings, Observation, Participant, ParticipantSnapshot
+from ..models import (
+    AccountParticipant,
+    AppSettings,
+    MonitoredAccount,
+    Observation,
+    Participant,
+    ParticipantSnapshot,
+)
 
 
 ZERO = Decimal("0")
@@ -70,7 +77,7 @@ def display_cycle_rates(
 def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
     """序列化持久化的时变归属结论。"""
     overuse = _overuse_values(
-        share_percent=snapshot.participant.share_percent,
+        share_percent=snapshot.share_percent,
         charged_percent=snapshot.charged_cycle_percent,
         charged_lower=snapshot.charged_percent_lower,
         charged_upper=snapshot.charged_percent_upper,
@@ -143,14 +150,20 @@ def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
     }
 
 
-def latest_snapshot(participant: Participant) -> ParticipantSnapshot | None:
-    """读取未排除观测对应的最新参与者账本。"""
-    return (
-        participant.snapshots.select_related("observation")
-        .filter(observation__excluded_at__isnull=True)
-        .order_by("-observation__observed_at")
-        .first()
-    )
+def latest_snapshot(
+    participant: Participant,
+    account: MonitoredAccount | None = None,
+) -> ParticipantSnapshot | None:
+    """Read the latest non-excluded ledger, optionally within one account."""
+    snapshots = participant.snapshots.select_related(
+        "observation",
+        "participant",
+    ).filter(observation__excluded_at__isnull=True)
+    if account is not None:
+        snapshots = snapshots.filter(
+            observation__account_id=account.external_account_id
+        )
+    return snapshots.order_by("-observation__observed_at", "-id").first()
 
 
 def _constant_average_charged(
@@ -183,7 +196,7 @@ def _is_only_remaining_constant_participant(
     remaining_ids = [
         item.participant_id
         for item in siblings
-        if item.participant.share_percent - _constant_average_charged(item)
+        if item.share_percent - _constant_average_charged(item)
         > ZERO
     ]
     return remaining_ids == [snapshot.participant_id]
@@ -216,7 +229,7 @@ def _constant_average_recommendation_bounds(
     total_cost = max(ZERO, observation.selected_total_cost)
     capacity_min = total_cost * HUNDRED / used_percent_max
     capacity_max = total_cost * HUNDRED / used_percent_min
-    share_ratio = snapshot.participant.share_percent / HUNDRED
+    share_ratio = snapshot.share_percent / HUNDRED
     recommended_min = (
         max(ZERO, capacity_min * share_ratio - selected_cost)
         * safety_factor
@@ -237,7 +250,7 @@ def _constant_average_values(
     charged = _constant_average_charged(snapshot)
     remaining = max(
         ZERO,
-        snapshot.participant.share_percent - charged,
+        snapshot.share_percent - charged,
     ).quantize(PCT_PRECISION, rounding=ROUND_HALF_UP)
     only_remaining = _is_only_remaining_constant_participant(snapshot)
     safety_factor = Decimal("1") if only_remaining else config.safety_factor
@@ -277,7 +290,7 @@ def _constant_average_values(
     else:
         difference = ZERO
     overuse = _overuse_values(
-        share_percent=snapshot.participant.share_percent,
+        share_percent=snapshot.share_percent,
         charged_percent=charged,
         charged_lower=None,
         charged_upper=None,
@@ -331,21 +344,17 @@ def _constant_average_values(
     }
 
 
-def display_snapshot_data(
-    participant: Participant,
+def _display_snapshot_data(
+    snapshot: ParticipantSnapshot,
     config: AppSettings,
-) -> dict | None:
-    """按当前展示模型读取参与者归属与余额建议。"""
-    snapshot = latest_snapshot(participant)
-    if snapshot is None:
-        return None
+) -> dict:
     if config.weekly_quota_model != "constant_average":
         return snapshot_data(snapshot)
 
     values = _constant_average_values(snapshot, config)
     return {
         "participant_id": snapshot.participant_id,
-        "participant_name": participant.name,
+        "participant_name": snapshot.participant.name,
         "selected_cost": float(values["selected_cost"]),
         "delta_cost": None,
         "charged_delta_percent": 0.0,
@@ -387,27 +396,417 @@ def display_snapshot_data(
     }
 
 
+def display_snapshot_data(
+    participant: Participant,
+    config: AppSettings,
+    account: MonitoredAccount | None = None,
+) -> dict | None:
+    """Read one account-specific participant ledger for display."""
+    snapshot = latest_snapshot(participant, account)
+    return _display_snapshot_data(snapshot, config) if snapshot is not None else None
+
+
+def _account_breakdown_data(
+    participant: Participant,
+    account: MonitoredAccount,
+    usage: AccountParticipant | None,
+    config: AppSettings,
+) -> tuple[dict, ParticipantSnapshot | None]:
+    snapshot = latest_snapshot(participant, account)
+    displayed = (
+        _display_snapshot_data(snapshot, config)
+        if snapshot is not None
+        else None
+    )
+    return (
+        {
+            "id": usage.id if usage is not None else None,
+            "account_id": account.id,
+            "external_account_id": account.external_account_id,
+            "account_name": account.name,
+            "account_enabled": account.enabled,
+            "latest_selected_cost": (
+                float(usage.latest_selected_cost)
+                if usage is not None and usage.latest_selected_cost is not None
+                else None
+            ),
+            "last_checked_at": (
+                iso(usage.last_checked_at) if usage is not None else None
+            ),
+            "snapshot": displayed,
+        },
+        snapshot,
+    )
+
+
+def _capacity_values(
+    snapshot: ParticipantSnapshot,
+    config: AppSettings,
+) -> tuple[Decimal, Decimal, Decimal, Decimal, Decimal, Decimal]:
+    observation = snapshot.observation
+    if config.weekly_quota_model == "constant_average":
+        charged = _constant_average_charged(snapshot)
+        used_percent_min = max(ZERO, observation.interval_used_percent)
+        if used_percent_min <= ZERO:
+            display_rate, _raw_rate = display_cycle_rates(observation, config)
+            capacity_point = display_rate * HUNDRED
+            capacity_min = capacity_point
+            capacity_max = capacity_point
+        else:
+            used_percent_max = min(
+                HUNDRED,
+                used_percent_min + TRUNCATED_PERCENT_TAIL,
+            )
+            total_cost = max(ZERO, observation.selected_total_cost)
+            capacity_min = total_cost * HUNDRED / used_percent_max
+            capacity_max = total_cost * HUNDRED / used_percent_min
+            capacity_point = (capacity_min + capacity_max) / Decimal("2")
+        return (
+            capacity_point,
+            capacity_min,
+            capacity_max,
+            charged,
+            charged,
+            charged,
+        )
+
+    capacity_point = observation.effective_usd_per_percent * HUNDRED
+    capacity_min = observation.capacity_lower_usd or capacity_point
+    capacity_max = observation.capacity_upper_usd or capacity_point
+    capacity_min, capacity_max = sorted((capacity_min, capacity_max))
+    charged = snapshot.charged_cycle_percent
+    charged_lower = (
+        snapshot.charged_percent_lower
+        if snapshot.charged_percent_lower is not None
+        else charged
+    )
+    charged_upper = (
+        snapshot.charged_percent_upper
+        if snapshot.charged_percent_upper is not None
+        else charged
+    )
+    charged_lower, charged_upper = sorted((charged_lower, charged_upper))
+    return (
+        capacity_point,
+        capacity_min,
+        capacity_max,
+        charged,
+        charged_lower,
+        charged_upper,
+    )
+
+
+def _pool_source_values(
+    snapshot: ParticipantSnapshot,
+    config: AppSettings,
+) -> dict[str, Decimal]:
+    (
+        capacity_point,
+        capacity_min,
+        capacity_max,
+        charged,
+        charged_lower,
+        charged_upper,
+    ) = _capacity_values(snapshot, config)
+    remaining_point = snapshot.share_percent - charged
+    remaining_lower = snapshot.share_percent - charged_upper
+    remaining_upper = snapshot.share_percent - charged_lower
+    interval_products = (
+        remaining_lower * capacity_min / HUNDRED,
+        remaining_lower * capacity_max / HUNDRED,
+        remaining_upper * capacity_min / HUNDRED,
+        remaining_upper * capacity_max / HUNDRED,
+    )
+    return {
+        "capacity_point": capacity_point,
+        "charged": charged,
+        "point": remaining_point * capacity_point / HUNDRED,
+        "lower": min(interval_products),
+        "upper": max(interval_products),
+    }
+
+
+def _pooled_safety_factor(
+    participant: Participant,
+    accounts: list[MonitoredAccount],
+    config: AppSettings,
+) -> Decimal:
+    candidates = list(Participant.objects.filter(enabled=True).order_by("id"))
+    if len(candidates) <= 1:
+        return config.safety_factor
+    remaining_ids = []
+    for candidate in candidates:
+        net = ZERO
+        for account in accounts:
+            snapshot = latest_snapshot(candidate, account)
+            if snapshot is None:
+                return config.safety_factor
+            net += _pool_source_values(snapshot, config)["point"]
+        if net > ZERO:
+            remaining_ids.append(candidate.id)
+    return (
+        Decimal("1")
+        if remaining_ids == [participant.id]
+        else config.safety_factor
+    )
+
+
+def _allocate_contributions(
+    sources: list[dict],
+    *,
+    net_key: str,
+    output_key: str,
+    total: Decimal,
+) -> None:
+    positive = [
+        (source, max(ZERO, source[net_key]))
+        for source in sources
+        if source[net_key] is not None
+    ]
+    positive_total = sum((value for _source, value in positive), ZERO)
+    if positive_total <= ZERO or total <= ZERO:
+        for source, _value in positive:
+            source[output_key] = ZERO
+        return
+    allocated = ZERO
+    for index, (source, value) in enumerate(positive):
+        contribution = (
+            total - allocated
+            if index == len(positive) - 1
+            else (total * value / positive_total).quantize(
+                Decimal("0.000001"),
+                rounding=ROUND_HALF_UP,
+            )
+        )
+        source[output_key] = contribution
+        allocated += contribution
+
+
+def aggregate_recommendation(
+    participant: Participant,
+    config: AppSettings,
+) -> tuple[dict | None, list[ParticipantSnapshot]]:
+    """Pool every enabled account before recommending one global user balance."""
+    accounts = list(
+        MonitoredAccount.objects.filter(enabled=True).order_by(
+            "name",
+            "external_account_id",
+        )
+    )
+    if not participant.enabled or not accounts:
+        return None, []
+
+    sources: list[dict] = []
+    source_snapshots: list[ParticipantSnapshot] = []
+    complete = True
+    net_point = ZERO
+    net_lower = ZERO
+    net_upper = ZERO
+    selected_cost = ZERO
+    weighted_charged = ZERO
+    total_capacity = ZERO
+    for account in accounts:
+        snapshot = latest_snapshot(participant, account)
+        displayed = (
+            _display_snapshot_data(snapshot, config)
+            if snapshot is not None
+            else None
+        )
+        source = {
+            "account_id": account.id,
+            "external_account_id": account.external_account_id,
+            "account_name": account.name,
+            "contract_share_percent": (
+                float(snapshot.share_percent)
+                if snapshot is not None
+                else float(participant.share_percent)
+            ),
+            "snapshot": displayed,
+            "net_position_usd": None,
+            "net_position_min_usd": None,
+            "net_position_max_usd": None,
+            "contribution_usd": None,
+            "contribution_min_usd": None,
+            "contribution_max_usd": None,
+        }
+        if snapshot is None or displayed is None:
+            complete = False
+            sources.append(source)
+            continue
+        source_snapshots.append(snapshot)
+        values = _pool_source_values(snapshot, config)
+        source["net_position_usd"] = values["point"]
+        source["net_position_min_usd"] = values["lower"]
+        source["net_position_max_usd"] = values["upper"]
+        net_point += values["point"]
+        net_lower += values["lower"]
+        net_upper += values["upper"]
+        selected_cost += Decimal(str(displayed["selected_cost"]))
+        weighted_charged += values["charged"] * values["capacity_point"]
+        total_capacity += values["capacity_point"]
+        sources.append(source)
+
+    safety_factor = _pooled_safety_factor(participant, accounts, config)
+    recommended = (
+        max(ZERO, net_point) * safety_factor
+    ).quantize(CENT, rounding=ROUND_HALF_UP)
+    recommended_min = (
+        max(ZERO, net_lower) * safety_factor
+    ).quantize(CENT, rounding=ROUND_HALF_UP)
+    recommended_max = (
+        max(ZERO, net_upper) * safety_factor
+    ).quantize(CENT, rounding=ROUND_HALF_UP)
+    recommended = min(recommended_max, max(recommended_min, recommended))
+    if complete:
+        _allocate_contributions(
+            sources,
+            net_key="net_position_usd",
+            output_key="contribution_usd",
+            total=recommended,
+        )
+        _allocate_contributions(
+            sources,
+            net_key="net_position_min_usd",
+            output_key="contribution_min_usd",
+            total=recommended_min,
+        )
+        _allocate_contributions(
+            sources,
+            net_key="net_position_max_usd",
+            output_key="contribution_max_usd",
+            total=recommended_max,
+        )
+
+    balance = participant.latest_balance_usd
+    difference = None
+    if complete and balance is not None:
+        if balance < recommended_min:
+            difference = (recommended_min - balance).quantize(
+                CENT,
+                rounding=ROUND_HALF_UP,
+            )
+        elif balance > recommended_max:
+            difference = (recommended_max - balance).quantize(
+                CENT,
+                rounding=ROUND_HALF_UP,
+            )
+        else:
+            difference = ZERO
+    applied = bool(
+        complete
+        and source_snapshots
+        and all(snapshot.recommendation_applied for snapshot in source_snapshots)
+    )
+    exhausted = bool(
+        balance is not None and balance <= config.limit_warning_usd
+    )
+    needs_update = bool(
+        complete
+        and not applied
+        and difference is not None
+        and (
+            abs(difference) >= config.recommendation_change_usd
+            or (exhausted and recommended_max > ZERO)
+        )
+    )
+    pooled_overused = bool(complete and net_upper < ZERO)
+    charged_percent = (
+        weighted_charged / total_capacity
+        if complete and total_capacity > ZERO
+        else ZERO
+    )
+    if not complete:
+        reason = "至少一个启用账号尚无可用测算，已阻止混池余额调整"
+    elif applied:
+        reason = "该混池建议已经应用"
+    elif pooled_overused:
+        reason = "所有账号合并后已确认超出合同权益，建议清零全局余额"
+    elif needs_update:
+        reason = "全局余额与混池剩余权益区间差异较大"
+    else:
+        reason = "全局余额处于混池建议区间内，无需调整"
+
+    for source in sources:
+        for key in (
+            "net_position_usd",
+            "net_position_min_usd",
+            "net_position_max_usd",
+            "contribution_usd",
+            "contribution_min_usd",
+            "contribution_max_usd",
+        ):
+            if source[key] is not None:
+                source[key] = float(source[key])
+    return (
+        {
+            "participant_id": participant.id,
+            "participant_name": participant.name,
+            "share_percent": float(participant.share_percent),
+            "selected_cost": float(selected_cost),
+            "charged_cycle_percent": float(charged_percent),
+            "current_balance_usd": float(balance) if balance is not None else None,
+            "recommended_balance_usd": (
+                float(recommended) if complete else None
+            ),
+            "recommended_balance_min_usd": (
+                float(recommended_min) if complete else None
+            ),
+            "recommended_balance_max_usd": (
+                float(recommended_max) if complete else None
+            ),
+            "balance_difference_usd": (
+                float(difference) if difference is not None else None
+            ),
+            "is_overused": pooled_overused,
+            "needs_manual_update": needs_update,
+            "recommendation_applied": applied,
+            "recommendation_complete": complete,
+            "account_count": len(accounts),
+            "reason": reason,
+            "allocation_model": "pooled_account_sum",
+            "sources": sources,
+        },
+        source_snapshots,
+    )
+
+
 def display_recommendation(
     participant: Participant,
     config: AppSettings,
-) -> tuple[ParticipantSnapshot | None, Decimal | None]:
-    """返回当前展示模型对应的建议值，供显式一键设置使用。"""
-    snapshot = latest_snapshot(participant)
-    if snapshot is None:
-        return None, None
-    if config.weekly_quota_model == "constant_average":
-        values = _constant_average_values(snapshot, config)
-        return snapshot, values["recommended_balance_usd"]
-    return snapshot, snapshot.recommended_balance_usd
+) -> tuple[list[ParticipantSnapshot], Decimal | None]:
+    """Return all source snapshots and the global pooled balance recommendation."""
+    aggregate, snapshots = aggregate_recommendation(participant, config)
+    if aggregate is None or aggregate["recommended_balance_usd"] is None:
+        return snapshots, None
+    return snapshots, Decimal(str(aggregate["recommended_balance_usd"]))
 
 
 def participant_data(
     participant: Participant,
     config: AppSettings | None = None,
 ) -> dict:
-    """生成参与者列表和首页共用的稳定读取结构。"""
+    """Generate one pooled contract plus per-account usage breakdowns."""
     config = config or AppSettings.load()
-    snapshot = display_snapshot_data(participant, config)
+    aggregate, _snapshots = aggregate_recommendation(participant, config)
+    usage_by_account = {
+        usage.account_id: usage
+        for usage in participant.account_memberships.select_related(
+            "account",
+            "participant",
+        )
+    }
+    account_breakdowns = []
+    for account in MonitoredAccount.objects.order_by(
+        "name",
+        "external_account_id",
+    ):
+        row, _snapshot = _account_breakdown_data(
+            participant,
+            account,
+            usage_by_account.get(account.id),
+            config,
+        )
+        account_breakdowns.append(row)
     return {
         "id": participant.id,
         "name": participant.name,
@@ -429,15 +828,7 @@ def participant_data(
             if participant.latest_balance_usd is not None
             else None
         ),
-        "latest_selected_cost": (
-            snapshot["selected_cost"]
-            if snapshot is not None
-            else (
-                float(participant.latest_selected_cost)
-                if participant.latest_selected_cost is not None
-                else None
-            )
-        ),
         "last_checked_at": iso(participant.last_checked_at),
-        "snapshot": snapshot,
+        "account_breakdowns": account_breakdowns,
+        "snapshot": aggregate,
     }

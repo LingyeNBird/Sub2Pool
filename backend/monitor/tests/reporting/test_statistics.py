@@ -48,7 +48,12 @@ from monitor.integrations.sub2api import (
     WeeklyWindow,
 )
 from monitor import database_transfer
-from monitor.tests.helpers import create_recommendation_snapshot, jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    create_recommendation_snapshot,
+    jwt_login,
+)
 
 @pytest.mark.django_db
 def test_statistics_groups_capacity_and_participant_usage():
@@ -60,13 +65,11 @@ def test_statistics_groups_capacity_and_participant_usage():
     client = Client()
     headers, _ = jwt_login(client)
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=22,
-        share_percent=50,
-    )
+    participant = create_participant(name="车友",
+    sub2api_user_id=22,
+    share_percent=50,)
     now = timezone.now()
     base = (now - timedelta(days=60)).replace(
         day=10,
@@ -160,7 +163,7 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
     client = Client()
     headers, _ = jwt_login(client)
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.daily_estimate_min_percent_span = Decimal("5")
     config.save()
 
@@ -289,7 +292,7 @@ def test_statistics_endpoint_formula_is_independent_of_quota_model():
     client = Client()
     headers, _ = jwt_login(client)
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.weekly_quota_model = "constant_average"
     config.save()
 
@@ -359,21 +362,17 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
         email="viewer@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.cost_basis = "actual"
     config.fast_correction_enabled = True
     config.save()
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=22,
-        share_percent=50,
-    )
+    participant = create_participant(name="车友",
+    sub2api_user_id=22,
+    share_percent=50,)
     participant.authorized_users.add(viewer)
-    hidden = Participant.objects.create(
-        name="未授权车友",
-        sub2api_user_id=23,
-        share_percent=50,
-    )
+    hidden = create_participant(name="未授权车友",
+    sub2api_user_id=23,
+    share_percent=50,)
     now = timezone.now()
     starts_at = now - timedelta(days=2)
     Observation.objects.create(
@@ -506,14 +505,12 @@ def test_background_api_usage_refreshes_each_participant_at_most_hourly(
     monkeypatch,
 ):
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.monitoring_enabled = True
     config.save()
-    participant = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=22,
-        share_percent=50,
-    )
+    participant = create_participant(name="车友",
+    sub2api_user_id=22,
+    share_percent=50,)
     now = timezone.now()
     Observation.objects.create(
         account_id=7,
