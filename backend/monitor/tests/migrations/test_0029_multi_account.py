@@ -123,3 +123,37 @@ def test_multi_account_migrations_preserve_singleton_policy_and_pending_operatio
     assert source.base_revision == 9
     assert source.snapshot_id == snapshot.id
     assert source.contribution_usd == Decimal("100.000000")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_multi_account_migration_refuses_participants_without_legacy_account():
+    executor = MigrationExecutor(connection)
+    executor.migrate(FROM)
+    old_apps = executor.loader.project_state(FROM).apps
+    AppSettings = old_apps.get_model("monitor", "AppSettings")
+    Participant = old_apps.get_model("monitor", "Participant")
+
+    AppSettings.objects.create(pk=1, openai_account_id=None)
+    participant = Participant.objects.create(
+        name="unconfigured legacy rider",
+        sub2api_user_id=702,
+        share_percent=Decimal("37.5"),
+        is_owner=True,
+    )
+
+    with pytest.raises(RuntimeError, match="旧设置未配置 OpenAI 上游账号"):
+        MigrationExecutor(connection).migrate(TO)
+
+    executor = MigrationExecutor(connection)
+    assert ("monitor", "0029_sub2api_multi_account") not in (
+        executor.loader.applied_migrations
+    )
+    rolled_back_apps = executor.loader.project_state(FROM).apps
+    RolledBackParticipant = rolled_back_apps.get_model("monitor", "Participant")
+    preserved = RolledBackParticipant.objects.get(pk=participant.id)
+    assert preserved.share_percent == Decimal("37.500")
+    assert preserved.is_owner is True
+
+    preserved.delete()
+    rolled_back_apps.get_model("monitor", "AppSettings").objects.all().delete()
+    MigrationExecutor(connection).migrate(TO)

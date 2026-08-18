@@ -28,6 +28,11 @@ def migrate_single_account(apps, _schema_editor):
         )
 
     participants = list(Participant.objects.order_by("id"))
+    if participants and account is None:
+        raise RuntimeError(
+            "无法自动迁移现有参与者的混池合同：旧设置未配置 OpenAI 上游账号；"
+            "请先在旧版本中完成账号配置后重试"
+        )
     if account is not None:
         AccountParticipant.objects.bulk_create(
             [
