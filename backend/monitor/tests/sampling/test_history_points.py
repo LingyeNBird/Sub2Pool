@@ -29,6 +29,11 @@ from monitor.sampling.types import (
     LocalParticipantData,
     WindowReference,
 )
+from monitor.tests.helpers import (
+    account_membership,
+    create_monitored_account,
+    create_participant,
+)
 
 
 ACCOUNT_ID = 7
@@ -36,15 +41,13 @@ ACCOUNT_ID = 7
 
 def _bundle_fixture():
     config = AppSettings.load()
-    config.openai_account_id = ACCOUNT_ID
+    create_monitored_account(ACCOUNT_ID)
     config.cost_basis = "actual"
     config.save()
-    participant = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=11,
-        share_percent=Decimal("100"),
-        is_owner=True,
-    )
+    participant = create_participant(name="车主",
+    sub2api_user_id=11,
+    share_percent=Decimal("100"),
+    is_owner=True,)
     checked_at = timezone.now().replace(microsecond=0)
     reference = WindowReference(
         account_id=ACCOUNT_ID,
@@ -61,7 +64,7 @@ def _bundle_fixture():
         total=UsageStats(Decimal("25"), Decimal("20")),
         participants=[
             LocalParticipantData(
-                participant=participant,
+                membership=account_membership(participant),
                 stats=usage.stats,
                 balance=UserBalance(Decimal("180"), Decimal("0")),
             )
@@ -97,7 +100,7 @@ def test_save_local_bundle_commits_one_complete_fact_group():
     assert user.interval_source == "window_total"
     participant.refresh_from_db()
     assert participant.latest_balance_usd == Decimal("180")
-    assert participant.latest_selected_cost == Decimal("20")
+    assert account_membership(participant).latest_selected_cost == Decimal("20")
 
 
 @pytest.mark.django_db
@@ -107,6 +110,7 @@ def test_monitor_capture_commits_observation_and_revision_with_complete_point():
     guard = LeaseGuard.acquire(ACCOUNT_ID)
     observation = _persist_capture(
         config,
+        create_monitored_account(ACCOUNT_ID),
         reference,
         local,
         None,
@@ -169,7 +173,7 @@ def test_save_local_bundle_rolls_back_earlier_rows_when_late_write_fails(
     assert not ParticipantBalanceSample.objects.exists()
     participant.refresh_from_db()
     assert participant.latest_balance_usd is None
-    assert participant.latest_selected_cost is None
+    assert account_membership(participant).latest_selected_cost is None
     assert participant.last_checked_at is None
 
 
@@ -191,6 +195,7 @@ def test_monitor_capture_rolls_back_complete_local_group_if_observation_fails(
     with pytest.raises(RuntimeError, match="observation write failed"):
         _persist_capture(
             config,
+            create_monitored_account(ACCOUNT_ID),
             reference,
             local,
             None,
@@ -219,6 +224,7 @@ def test_monitor_replay_fails_closed_if_lease_expires_before_terminal_commit(
     guard = LeaseGuard.acquire(ACCOUNT_ID)
     observation = _persist_capture(
         config,
+        create_monitored_account(ACCOUNT_ID),
         reference,
         local,
         None,

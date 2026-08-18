@@ -15,6 +15,7 @@ from ..integrations.sub2api import (
     Sub2APIUserUsage,
 )
 from ..models import (
+    AccountParticipant,
     AppSettings,
     Observation,
     Participant,
@@ -31,7 +32,7 @@ def fetch_local(
     client: Sub2APIReader,
     config: AppSettings,
     reference: WindowReference,
-    participants: list[Participant],
+    memberships: list[AccountParticipant],
     now: datetime,
 ) -> LocalBundle:
     """只读取 Sub2API；数据库写入在最终确认查询窗口后统一执行一次。"""
@@ -61,7 +62,8 @@ def fetch_local(
     usage_by_user = {item.user_id: item for item in all_users}
 
     rows: list[LocalParticipantData] = []
-    for participant in participants:
+    for membership in memberships:
+        participant = membership.participant
         user_usage = usage_by_user.get(participant.sub2api_user_id)
         if user_usage is None:
             stats = client.usage_stats(
@@ -78,7 +80,7 @@ def fetch_local(
             all_users.append(user_usage)
         rows.append(
             LocalParticipantData(
-                participant=participant,
+                membership=membership,
                 stats=user_usage.stats,
                 balance=client.user_balance(participant.sub2api_user_id),
             )
@@ -397,6 +399,7 @@ def save_local_bundle(
     }
     baselines = _participant_baselines(latest, config.cost_basis)
     changed_participants: list[Participant] = []
+    changed_memberships: list[AccountParticipant] = []
     usage_samples: list[ParticipantUsageSample] = []
     balance_samples: list[ParticipantBalanceSample] = []
     for row in local.participants:
@@ -410,9 +413,11 @@ def save_local_bundle(
             normalized_cost - baselines.get(row.participant.pk, ZERO),
         )
         row.participant.latest_balance_usd = row.balance.balance
-        row.participant.latest_selected_cost = selected_cost
         row.participant.last_checked_at = local.checked_at
+        row.membership.latest_selected_cost = selected_cost
+        row.membership.last_checked_at = local.checked_at
         changed_participants.append(row.participant)
+        changed_memberships.append(row.membership)
         usage_samples.append(
             ParticipantUsageSample(
                 sample_point=point,
@@ -439,7 +444,11 @@ def save_local_bundle(
     if changed_participants:
         Participant.objects.bulk_update(
             changed_participants,
-            ["latest_balance_usd", "latest_selected_cost", "last_checked_at"],
+            ["latest_balance_usd", "last_checked_at"],
+        )
+        AccountParticipant.objects.bulk_update(
+            changed_memberships,
+            ["latest_selected_cost", "last_checked_at"],
         )
         ParticipantUsageSample.objects.bulk_create(usage_samples)
         ParticipantBalanceSample.objects.bulk_create(balance_samples)

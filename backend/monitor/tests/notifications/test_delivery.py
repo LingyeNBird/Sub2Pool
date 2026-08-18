@@ -17,9 +17,11 @@ from django.utils import timezone
 from monitor.engine import run_monitor
 from monitor.management.commands.runmonitor import schedule_next_run
 from monitor.models import (
+    AccountParticipant,
     AppSettings,
     BlockedIPAddress,
     LoginEvent,
+    MonitoredAccount,
     NotificationEvent,
     Observation,
     ObservationFastCorrection,
@@ -176,45 +178,68 @@ def test_resend_retries_one_transient_transport_failure(monkeypatch):
 
 
 @pytest.mark.django_db
-def test_exhausted_balance_with_remaining_rights_emails_top_up_notice(
+def test_exhausted_balance_emails_multi_account_aggregate_notice(
     monkeypatch,
 ):
     config = AppSettings.load()
     config.notify_on_limit_exhausted = True
     config.limit_warning_usd = Decimal("1")
     config.save()
+    primary_account = MonitoredAccount.objects.create(
+        external_account_id=7,
+        name="主账号",
+    )
+    secondary_account = MonitoredAccount.objects.create(
+        external_account_id=8,
+        name="备用账号",
+    )
     participant = Participant.objects.create(
         name="待补额车友",
         email="rider@example.com",
         sub2api_user_id=51,
-        share_percent=50,
+        share_percent=Decimal("50"),
+        latest_balance_usd=Decimal("0"),
     )
+    for account in (primary_account, secondary_account):
+        AccountParticipant.objects.create(
+            account=account,
+            participant=participant,
+        )
     now = timezone.now()
-    observation = Observation.objects.create(
-        account_id=7,
-        observed_at=now,
-        window_seconds=604800,
-        upstream_resets_at=now + timedelta(days=3),
-        attribution_started_at=now - timedelta(days=4),
-        upstream_used_percent=Decimal("20"),
-        interval_used_percent=Decimal("20"),
-        raw_selected_total_cost=Decimal("400"),
-        selected_total_cost=Decimal("400"),
-        total_standard_cost=Decimal("400"),
-        total_actual_cost=Decimal("400"),
-        effective_usd_per_percent=Decimal("20"),
-    )
-    ParticipantSnapshot.objects.create(
-        observation=observation,
-        participant=participant,
-        raw_selected_cost=Decimal("200"),
-        selected_cost=Decimal("200"),
-        current_balance_usd=Decimal("0"),
-        charged_cycle_percent=Decimal("40"),
-        remaining_share_percent=Decimal("10"),
-        recommended_balance_usd=Decimal("190"),
-        needs_manual_update=True,
-    )
+
+    def create_snapshot(account, recommended):
+        observation = Observation.objects.create(
+            account_id=account.external_account_id,
+            observed_at=now,
+            window_seconds=604800,
+            upstream_resets_at=now + timedelta(days=3),
+            attribution_started_at=now - timedelta(days=4),
+            upstream_used_percent=Decimal("20"),
+            interval_used_percent=Decimal("20"),
+            raw_selected_total_cost=Decimal("400"),
+            selected_total_cost=Decimal("400"),
+            total_standard_cost=Decimal("400"),
+            total_actual_cost=Decimal("400"),
+            effective_usd_per_percent=Decimal("20"),
+        )
+        ParticipantSnapshot.objects.create(
+            observation=observation,
+            participant=participant,
+            share_percent=Decimal("50"),
+            raw_selected_cost=Decimal("200"),
+            selected_cost=Decimal("200"),
+            current_balance_usd=Decimal("0"),
+            charged_cycle_percent=Decimal("40"),
+            remaining_share_percent=Decimal("10"),
+            recommended_balance_usd=recommended,
+            recommended_balance_min_usd=recommended,
+            recommended_balance_max_usd=recommended,
+            needs_manual_update=True,
+        )
+        return observation
+
+    observation = create_snapshot(primary_account, Decimal("190"))
+    create_snapshot(secondary_account, Decimal("30"))
     captured = []
 
     def fake_send_notification(**kwargs):
@@ -230,9 +255,10 @@ def test_exhausted_balance_with_remaining_rights_emails_top_up_notice(
     assert len(captured) == 1
     assert captured[0]["event_type"] == "limit_exhausted"
     assert captured[0]["participant"] == participant
-    assert "需要手动补充余额" in captured[0]["subject"]
-    assert "剩余百分比权益：10.00000%" in captured[0]["body"]
-    assert "建议手动把用户余额设置为：$190.0000" in captured[0]["body"]
+    assert "需要补充全局余额" in captured[0]["subject"]
+    assert "账号 主账号 的新观测" in captured[0]["body"]
+    assert "跨账号净额化后的混池建议余额：$380.0" in captured[0]["body"]
+    assert "参与混池账号数：2" in captured[0]["body"]
 
 
 @pytest.mark.django_db

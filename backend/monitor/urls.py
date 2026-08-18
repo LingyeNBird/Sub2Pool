@@ -43,6 +43,8 @@ from .views.security import (
     LoginEventListView,
 )
 from .views.settings import (
+    MonitoredAccountDetailView,
+    MonitoredAccountListView,
     OpenAIAccountListView,
     SettingsView,
     ReadOnlyAPIKeyView,
@@ -116,6 +118,11 @@ urlpatterns = [
     path("notifications", NotificationListView.as_view()),
     path("settings", SettingsView.as_view()),
     path("settings/openai-accounts", OpenAIAccountListView.as_view()),
+    path("settings/monitored-accounts", MonitoredAccountListView.as_view()),
+    path(
+        "settings/monitored-accounts/<int:account_id>",
+        MonitoredAccountDetailView.as_view(),
+    ),
     path("settings/test-sub2api", TestSub2APIView.as_view()),
     path("settings/test-email", TestEmailView.as_view()),
     path("settings/readonly-api-key", ReadOnlyAPIKeyView.as_view()),

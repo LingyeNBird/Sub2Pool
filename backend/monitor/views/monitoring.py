@@ -5,15 +5,40 @@ from django.utils import timezone
 from .base import AdminAPIView, error, ok
 from ..reporting import iso
 from ..engine import run_monitor
-from ..models import AppSettings, HistoryMaintenanceState
+from ..models import AppSettings, HistoryMaintenanceState, MonitoredAccount
 from ..integrations.sub2api import Sub2APIError
 
 
 class RunMonitorView(AdminAPIView):
     def get(self, _request):
-        """返回全局后台轮询器状态；一次轮询会探测所有启用参与者。"""
+        """Return global scheduler state and each account's independent lease."""
         config = AppSettings.load()
         now = timezone.now()
+        active_leases = set(
+            HistoryMaintenanceState.objects.filter(
+                lease_expires_at__gt=now,
+            ).values_list("account_id", flat=True)
+        )
+        accounts = [
+            {
+                "id": account.id,
+                "external_account_id": account.external_account_id,
+                "name": account.name,
+                "enabled": account.enabled,
+                "next_local_check_at": (
+                    iso(account.next_local_check_at)
+                    if config.monitoring_enabled and account.enabled
+                    else None
+                ),
+                "run_in_progress": (
+                    account.external_account_id in active_leases
+                ),
+            }
+            for account in MonitoredAccount.objects.order_by(
+                "name",
+                "external_account_id",
+            )
+        ]
         return ok(
             {
                 "monitoring_enabled": config.monitoring_enabled,
@@ -23,21 +48,23 @@ class RunMonitorView(AdminAPIView):
                     if config.monitoring_enabled
                     else None
                 ),
-                "run_in_progress": (
-                    HistoryMaintenanceState.objects.filter(
-                        account_id=config.openai_account_id,
-                        lease_expires_at__gt=now,
-                    ).exists()
-                    if config.openai_account_id
-                    else False
+                "run_in_progress": any(
+                    item["run_in_progress"] for item in accounts
                 ),
+                "accounts": accounts,
                 "server_time": iso(now),
             }
         )
 
-    def post(self, _request):
+    def post(self, request):
+        raw_account_id = request.data.get("account_id")
         try:
-            result = run_monitor(force_upstream=True, source="manual")
+            account_id = int(raw_account_id) if raw_account_id else None
+            result = run_monitor(
+                account_id=account_id,
+                force_upstream=True,
+                source="manual",
+            )
         except (Sub2APIError, ValueError) as exc:
             return error(str(exc), 502)
         except Exception as exc:

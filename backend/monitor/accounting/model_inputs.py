@@ -74,12 +74,14 @@ def build_dynamic_replay_input(
         user_ids.add(row.sub2api_user_id)
 
     participant_by_id = {}
+    share_by_participant_id = {}
     snapshots_by_observation: list[dict[int, object]] = []
     for observation in observations:
         by_user = {}
         for snapshot in observation.participant_snapshots.all():
             participant = snapshot.participant
             participant_by_id[participant.id] = participant
+            share_by_participant_id[participant.id] = snapshot.share_percent
             user_ids.add(participant.sub2api_user_id)
             by_user[participant.sub2api_user_id] = snapshot
         snapshots_by_observation.append(by_user)
@@ -93,7 +95,7 @@ def build_dynamic_replay_input(
     }
     rights = np.zeros(len(subject_user_ids), dtype=float)
     for participant_id, index in participant_subject_indices.items():
-        rights[index] = float(participant_by_id[participant_id].share_percent)
+        rights[index] = float(share_by_participant_id[participant_id])
 
     baseline_by_user: dict[int, Decimal] = {}
     first_is_observed_baseline = bool(

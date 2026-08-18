@@ -6,15 +6,14 @@ from ..api_auth import ReadOnlyAPIKeyAuthentication
 
 from .base import AdminAPIView, AuthenticatedAPIView, error, ok
 from ..reporting import participant_data
-from ..history_state import LeaseLostError, fenced_fact_write
-from ..models import AppSettings, Participant
+from ..history_state import fenced_fact_write
+from ..models import AppSettings, MonitoredAccount, Participant
 from ..serializers import ParticipantWriteSerializer
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 
-
-
 class _ParticipantHasSnapshots(RuntimeError):
     pass
+
 
 class Sub2APIUserListView(AdminAPIView):
     def get(self, _request):
@@ -56,6 +55,7 @@ class Sub2APIUserListView(AdminAPIView):
         return ok(users)
 
 
+
 class ParticipantListView(AuthenticatedAPIView):
     def get_permissions(self):
         permission_classes = (
@@ -65,12 +65,13 @@ class ParticipantListView(AuthenticatedAPIView):
 
     def get(self, request):
         config = AppSettings.load()
-        participants = Participant.objects.all()
+        participants = Participant.objects.prefetch_related(
+            "account_memberships__account"
+        )
         if not request.user.is_staff:
             participants = participants.filter(authorized_users=request.user)
-        return ok(
-            [participant_data(item, config) for item in participants]
-        )
+        return ok([participant_data(item, config) for item in participants])
+
     def post(self, request):
         serializer = ParticipantWriteSerializer(data=request.data)
         if not serializer.is_valid():
@@ -87,8 +88,6 @@ class ReadOnlyParticipantListView(ParticipantListView):
 
     authentication_classes = [ReadOnlyAPIKeyAuthentication]
     http_method_names = ["get", "head", "options"]
-
-
 
 class ParticipantDetailView(AdminAPIView):
     def _get_participant(self, participant_id: int) -> Participant | None:
@@ -117,20 +116,11 @@ class ParticipantDetailView(AdminAPIView):
         participant = self._get_participant(participant_id)
         if participant is None:
             return error("参与者不存在", status.HTTP_404_NOT_FOUND)
-        account_id = AppSettings.load().openai_account_id
+        external_account_ids = list(
+            MonitoredAccount.objects.values_list("external_account_id", flat=True)
+        )
         try:
-            with fenced_fact_write(
-                [account_id if account_id is not None else 0]
-            ):
-                current_account_id = (
-                    AppSettings.objects.select_for_update()
-                    .get(pk=1)
-                    .openai_account_id
-                )
-                if current_account_id != account_id:
-                    raise LeaseLostError(
-                        "上游账号设置已变化，请刷新后重试参与者删除"
-                    )
+            with fenced_fact_write(external_account_ids):
                 participant = Participant.objects.select_for_update().get(
                     pk=participant_id
                 )
@@ -142,4 +132,5 @@ class ParticipantDetailView(AdminAPIView):
                 "该参与者已有测算账本，不能删除；请改为停用",
                 status.HTTP_409_CONFLICT,
             )
+
         return ok({"deleted": True})

@@ -6,11 +6,12 @@ from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import AbstractBaseUser
 
-from ..models import Participant, ParticipantUsageSample
+from ..models import MonitoredAccount, Participant, ParticipantUsageSample
 
 
 def participant_usage_series(
     *,
+    account: MonitoredAccount,
     user: AbstractBaseUser,
     location: ZoneInfo,
     now: datetime,
@@ -25,6 +26,7 @@ def participant_usage_series(
     samples = (
         ParticipantUsageSample.objects.filter(
             observed_at__gte=now - timedelta(days=usage_days),
+            account_id=account.external_account_id,
             participant__in=participants,
         )
         .select_related("participant")
@@ -62,6 +64,8 @@ def participant_usage_series(
         {
             "participant_id": participant.id,
             "participant_name": participant.name,
+            "account_id": account.id,
+            "external_account_id": account.external_account_id,
             "sub2api_user_id": participant.sub2api_user_id,
             "points": list(usage_buckets[participant.id].values()),
         }

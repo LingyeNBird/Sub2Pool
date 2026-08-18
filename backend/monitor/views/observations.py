@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404
 
 from .base import AdminAPIView, error, ok
 from ..reporting import iso, snapshot_data
+from .query_params import monitored_account_query
 from .record_helpers import paginated_rows, query_datetime
 from ..fast_correction.constants import (
     FAST_EXTRA_FACTOR,
@@ -31,9 +32,17 @@ from ..replay import (
 class ObservationListView(AdminAPIView):
     def get(self, request):
         config = AppSettings.load()
+        try:
+            account = monitored_account_query(request)
+        except ValueError as exc:
+            return error(str(exc), 400)
         queryset = Observation.objects.select_related(
             "manual_start_end"
         ).prefetch_related("participant_snapshots__participant")
+        if account is not None:
+            queryset = queryset.filter(
+                account_id=account.external_account_id
+            )
         try:
             observed_from = query_datetime(request, "from")
             observed_to = query_datetime(request, "to")
@@ -180,6 +189,15 @@ class ObservationListView(AdminAPIView):
             )
         return ok(
             {
+                "account": (
+                    {
+                        "id": account.id,
+                        "external_account_id": account.external_account_id,
+                        "name": account.name,
+                    }
+                    if account is not None
+                    else None
+                ),
                 "items": result,
                 "fast_correction_enabled": config.fast_correction_enabled,
                 "pagination": pagination,
@@ -318,12 +336,16 @@ class ObservationFastCorrectionDetailView(AdminAPIView):
 class ObservationRebuildView(AdminAPIView):
     """保留原始采样与人工标记，仅重建当前区间的全部派生结论。"""
 
-    def post(self, _request):
+    def post(self, request):
         config = AppSettings.load()
-        if not config.openai_account_id:
-            return error("尚未配置 OpenAI 上游账号", 400)
+        try:
+            account = monitored_account_query(request, enabled_only=True)
+        except ValueError as exc:
+            return error(str(exc), 400)
+        if account is None:
+            return error("尚未配置启用的监控账号", 400)
         replay, replay_from = rebuild_current_interval(
-            config.openai_account_id,
+            account.external_account_id,
             config,
         )
         return ok(

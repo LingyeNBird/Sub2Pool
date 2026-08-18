@@ -3,7 +3,7 @@ import { onMounted, ref, watch } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api } from "@/services/api";
-import type { CapacityPoint, StatisticsData } from "@/types";
+import type { CapacityPoint, MonitoredAccount, StatisticsData } from "@/types";
 
 import CapacityBasisDialog from "./components/CapacityBasisDialog.vue";
 import APIUsageBreakdownDialog from "./components/APIUsageBreakdownDialog.vue";
@@ -20,10 +20,16 @@ interface ClosingBasisDialogHandle {
 }
 
 interface APIUsageDialogHandle {
-  open: (participantId: number, participantName: string) => void;
+  open: (
+    participantId: number,
+    participantName: string,
+    accountId: number,
+  ) => void;
 }
 
 const data = ref<StatisticsData | null>(null);
+const accounts = ref<MonitoredAccount[]>([]);
+const selectedAccountId = ref<number | null>(null);
 const loading = ref(true);
 const message = ref("");
 const capacityPeriod = ref<"day" | "month">("day");
@@ -43,6 +49,9 @@ async function load() {
     usage_days: String(usageDays.value),
     usage_precision: usagePrecision.value,
   });
+  if (selectedAccountId.value != null) {
+    query.set("account_id", String(selectedAccountId.value));
+  }
   try {
     data.value = await api<StatisticsData>(`statistics?${query}`);
   } catch (error) {
@@ -57,11 +66,34 @@ function showClosingBasis(point: CapacityPoint, kind: "cycle" | "daily") {
 }
 
 function showApiUsage(participantId: number, participantName: string) {
-  apiUsageDialog.value?.open(participantId, participantName);
+  if (selectedAccountId.value == null) return;
+  apiUsageDialog.value?.open(
+    participantId,
+    participantName,
+    selectedAccountId.value,
+  );
 }
 
-watch([capacityPeriod, capacityDays, usageDays, usagePrecision], load);
-onMounted(load);
+async function initialize() {
+  try {
+    accounts.value = await api<MonitoredAccount[]>(
+      "settings/monitored-accounts",
+    );
+    selectedAccountId.value =
+      accounts.value.find((item) => item.enabled)?.id ??
+      accounts.value[0]?.id ??
+      null;
+  } catch (error) {
+    message.value = error instanceof ApiError ? error.message : "加载账号失败";
+  }
+  await load();
+}
+
+watch(
+  [selectedAccountId, capacityPeriod, capacityDays, usageDays, usagePrecision],
+  load,
+);
+onMounted(initialize);
 </script>
 
 <template>
@@ -74,6 +106,17 @@ onMounted(load);
         </ul>
       </div>
     </div>
+    <select
+      v-if="accounts.length"
+      v-model.number="selectedAccountId"
+      class="select select-sm"
+      :disabled="loading"
+      aria-label="选择监控账号"
+    >
+      <option v-for="account in accounts" :key="account.id" :value="account.id">
+        {{ account.name }}
+      </option>
+    </select>
     <button class="btn btn-sm" :disabled="loading" @click="load">
       <AppIcon name="arrow-path" class="size-4" />刷新
     </button>

@@ -9,6 +9,7 @@ import type {
   Observation,
   ObservationListData,
   ObservationRebuildResult,
+  MonitoredAccount,
   Participant,
   ParticleTrajectoryData,
   StatisticsData,
@@ -16,6 +17,7 @@ import type {
 } from "@/types";
 
 import {
+  aggregateParticipant,
   apiUsageData,
   clearDemoIdentity,
   dashboardData,
@@ -93,23 +95,35 @@ function participantNames(state: DemoState, ids: number[]): string[] {
     return participant ? [participant.name] : [];
   });
 }
-
-function updateLatestParticipantState(state: DemoState): void {
-  const latest = state.observations.at(-1);
-  if (!latest) return;
-  for (const participant of state.participants) {
-    const item = latest.participants.find(
-      (snapshot) => snapshot.participant_id === participant.id,
-    );
-    participant.snapshot = item ?? null;
-    participant.latest_balance_usd = item?.current_balance_usd ?? null;
-    participant.latest_selected_cost = item?.selected_cost ?? null;
-    participant.last_checked_at = latest.observed_at;
-  }
+function participantBreakdowns(
+  state: DemoState,
+  existing: Participant["account_breakdowns"] = [],
+): Participant["account_breakdowns"] {
+  return state.monitoredAccounts.map((account) => {
+    const previous = existing.find((item) => item.account_id === account.id);
+    return {
+      id: previous?.id ?? null,
+      account_id: account.id,
+      external_account_id: account.external_account_id,
+      account_name: account.name,
+      account_enabled: account.enabled,
+      latest_selected_cost: previous?.latest_selected_cost ?? null,
+      last_checked_at: previous?.last_checked_at ?? null,
+      snapshot: previous?.snapshot ?? null,
+    };
+  });
 }
 
 function observationsData(state: DemoState, url: URL): ObservationListData {
-  let items = [...state.observations].reverse();
+  const accountId = Number(url.searchParams.get("account_id"));
+  const account =
+    state.monitoredAccounts.find((item) => item.id === accountId) ??
+    state.monitoredAccounts.find((item) => item.enabled) ??
+    state.monitoredAccounts[0];
+  let items = [...state.observations].reverse().map((item) => ({
+    ...item,
+    account_id: account?.external_account_id ?? item.account_id,
+  }));
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
   const source = url.searchParams.get("source");
@@ -121,6 +135,13 @@ function observationsData(state: DemoState, url: URL): ObservationListData {
   const page = paginate(items, url);
   return {
     ...page,
+    account: account
+      ? {
+          id: account.id,
+          external_account_id: account.external_account_id,
+          name: account.name,
+        }
+      : null,
     fast_correction_enabled: Boolean(state.settings.fast_correction_enabled),
     summary: {
       total: items.length,
@@ -211,6 +232,11 @@ function statisticsData(state: DemoState, url: URL): StatisticsData {
   const precisionRaw = url.searchParams.get("usage_precision");
   const usagePrecision =
     precisionRaw === "raw" || precisionRaw === "day" ? precisionRaw : "hour";
+  const accountId = Number(url.searchParams.get("account_id"));
+  const account =
+    state.monitoredAccounts.find((item) => item.id === accountId) ??
+    state.monitoredAccounts.find((item) => item.enabled) ??
+    state.monitoredAccounts[0]!;
   const now = Date.parse(state.clock);
   const recentObservations = state.observations.filter(
     (item) => Date.parse(item.observed_at) >= now - capacityDays * 86_400_000,
@@ -313,6 +339,11 @@ function statisticsData(state: DemoState, url: URL): StatisticsData {
   const todayPercent =
     latest.estimated_used_percent - todayFirst.estimated_used_percent;
   return {
+    account: {
+      id: account.id,
+      external_account_id: account.external_account_id,
+      name: account.name,
+    },
     capacity_period: capacityPeriod,
     capacity_series: capacitySeries,
     fast_correction_enabled: Boolean(state.settings.fast_correction_enabled),
@@ -384,12 +415,15 @@ function statisticsData(state: DemoState, url: URL): StatisticsData {
       .map((participant) => ({
         participant_id: participant.id,
         participant_name: participant.name,
+        account_id: account.id,
+        external_account_id: account.external_account_id,
         sub2api_user_id: participant.sub2api_user_id,
         points: participantUsagePoints(
           state,
           participant.id,
           usageDays,
           usagePrecision,
+          account.id,
         ),
       })),
   };
@@ -444,12 +478,18 @@ function fastCorrectionData(
   };
 }
 
-function createPlan(state: DemoState): HistoricalRebuildPlan {
+function createPlan(
+  state: DemoState,
+  accountId: number,
+): HistoricalRebuildPlan {
   const now = Date.now();
   const id = `demo-plan-${state.plans.length + 1}`;
+  const account =
+    state.monitoredAccounts.find((item) => item.id === accountId) ??
+    state.monitoredAccounts[0]!;
   const plan: HistoricalRebuildPlan = {
     id,
-    account_id: 8801,
+    account_id: account.external_account_id,
     state: "ready",
     digest: `demo_digest_${String(state.revision).padStart(4, "0")}_${state.observations.length}`,
     created_at: new Date(now).toISOString(),
@@ -521,25 +561,50 @@ export async function demoRequest(
   if (method === "POST" && pathname === "auth/password") {
     return envelope({ changed: true, access: "demo_access_public_pages" });
   }
-  if (method === "GET" && pathname === "dashboard")
-    return envelope(dashboardData(state));
+  if (method === "GET" && pathname === "dashboard") {
+    const accountId = Number(url.searchParams.get("account_id"));
+    return envelope(dashboardData(state, accountId));
+  }
   if (pathname === "monitor/run" && method === "GET") {
+    const enabledAccounts = state.monitoredAccounts.filter(
+      (account) => account.enabled,
+    );
+    const nextChecks = enabledAccounts.flatMap((account) =>
+      account.next_local_check_at ? [account.next_local_check_at] : [],
+    );
     return envelope({
       monitoring_enabled: Boolean(state.settings.monitoring_enabled),
       interval_seconds: Number(state.settings.local_poll_minutes) * 60,
-      next_local_check_at: new Date(
-        Date.parse(state.clock) + 10 * 60_000,
-      ).toISOString(),
+      next_local_check_at: nextChecks.sort()[0] ?? null,
       run_in_progress: false,
+      accounts: state.monitoredAccounts.map((account) => ({
+        id: account.id,
+        external_account_id: account.external_account_id,
+        name: account.name,
+        enabled: account.enabled,
+        next_local_check_at: account.next_local_check_at,
+        run_in_progress: false,
+      })),
       server_time: state.clock,
     });
   }
   if (pathname === "monitor/run" && method === "POST") {
     const latest = state.observations.at(-1)!;
+    const accountId = Number(payload.account_id);
+    const accounts =
+      Number.isFinite(accountId) && accountId > 0
+        ? state.monitoredAccounts.filter((account) => account.id === accountId)
+        : state.monitoredAccounts.filter((account) => account.enabled);
     state.clock = new Date(Date.parse(state.clock) + 10 * 60_000).toISOString();
-    state.settings.last_local_check_at = state.clock;
-    state.settings.last_upstream_check_at = state.clock;
-    state.settings.last_success_at = state.clock;
+    for (const account of accounts) {
+      account.last_local_check_at = state.clock;
+      account.last_upstream_check_at = state.clock;
+      account.last_success_at = state.clock;
+      account.next_local_check_at = new Date(
+        Date.parse(state.clock) + 10 * 60_000,
+      ).toISOString();
+      account.last_error = "";
+    }
     latest.sample_note = "演示：已执行一次本地测算，状态已在当前标签页更新";
     saveDemoState(state);
     return envelope({ scheduled: true });
@@ -558,6 +623,11 @@ export async function demoRequest(
     participant.snapshot.needs_manual_update = false;
     participant.snapshot.recommendation_applied = true;
     participant.latest_balance_usd = participant.snapshot.current_balance_usd;
+    for (const breakdown of participant.account_breakdowns) {
+      if (!breakdown.snapshot) continue;
+      breakdown.snapshot.current_balance_usd =
+        participant.snapshot.current_balance_usd;
+    }
     saveDemoState(state);
     return envelope({ applied: true });
   }
@@ -582,10 +652,11 @@ export async function demoRequest(
       enabled: payload.enabled !== false,
       notes: String(payload.notes ?? ""),
       latest_balance_usd: null,
-      latest_selected_cost: null,
       last_checked_at: null,
+      account_breakdowns: participantBreakdowns(state),
       snapshot: null,
     } satisfies Participant;
+    aggregateParticipant(participant);
     state.participants.push(participant);
     saveDemoState(state);
     return envelope(participant, 201);
@@ -600,7 +671,14 @@ export async function demoRequest(
       sub2api_identity: String(
         payload.sub2api_username ?? participant.sub2api_username,
       ),
+      share_percent: Number(payload.share_percent ?? participant.share_percent),
+      is_owner: Boolean(payload.is_owner ?? participant.is_owner),
+      account_breakdowns: participantBreakdowns(
+        state,
+        participant.account_breakdowns,
+      ),
     });
+    aggregateParticipant(participant);
     saveDemoState(state);
     return envelope(participant);
   }
@@ -701,8 +779,7 @@ export async function demoRequest(
       (item) => item.id === Number(manualStartMatch[1]),
     );
     if (!observation) return failure("观测不存在", 404);
-    const enabled = method === "POST";
-    if (enabled) {
+    if (method === "POST") {
       const endObservationId =
         typeof payload.end_observation_id === "number"
           ? payload.end_observation_id
@@ -717,8 +794,9 @@ export async function demoRequest(
       if (
         observation.account_id !== endObservation.account_id ||
         compare(endObservation, observation) < 0
-      )
+      ) {
         return failure("起点区间终点记录无效", 400);
+      }
       for (const item of state.observations) {
         if (item.id === observation.id || !item.is_manual_start) continue;
         const existingEnd =
@@ -768,28 +846,40 @@ export async function demoRequest(
   }
   if (method === "GET" && pathname === "particle-trajectory") {
     const period = url.searchParams.get("period");
+    const accountId = url.searchParams.get("account_id");
     return envelope(
       trajectoryData(
         state,
         period ? Number(period) : undefined,
+        accountId ? Number(accountId) : undefined,
       ) satisfies ParticleTrajectoryData,
     );
   }
-  if (method === "GET" && pathname === "statistics")
+  if (method === "GET" && pathname === "statistics") {
     return envelope(statisticsData(state, url));
+  }
   const apiUsageMatch = /^statistics\/participants\/(\d+)\/api-usage$/.exec(
     pathname,
   );
-  if (method === "GET" && apiUsageMatch)
+  if (method === "GET" && apiUsageMatch) {
+    const accountId = url.searchParams.get("account_id");
     return envelope(
-      apiUsageData(state, Number(apiUsageMatch[1])) satisfies APIUsageBreakdown,
+      apiUsageData(
+        state,
+        Number(apiUsageMatch[1]),
+        accountId ? Number(accountId) : undefined,
+      ) satisfies APIUsageBreakdown,
     );
-  if (method === "GET" && pathname === "notifications")
+  }
+  if (method === "GET" && pathname === "notifications") {
     return envelope(notificationsData(state, url));
-  if (method === "GET" && pathname === "login-events")
+  }
+  if (method === "GET" && pathname === "login-events") {
     return envelope(loginEventsData(state, url));
-  if (method === "GET" && pathname === "ip-blocks")
+  }
+  if (method === "GET" && pathname === "ip-blocks") {
     return envelope(state.blockedAddresses);
+  }
   if (method === "POST" && pathname === "ip-blocks") {
     if (
       state.blockedAddresses.some((item) => item.address === payload.address)
@@ -826,21 +916,115 @@ export async function demoRequest(
     saveDemoState(state);
     return envelope();
   }
-  if (method === "GET" && pathname === "settings")
+  if (method === "GET" && pathname === "settings/monitored-accounts") {
+    return envelope(state.monitoredAccounts);
+  }
+  if (method === "POST" && pathname === "settings/monitored-accounts") {
+    const externalAccountId = Number(payload.external_account_id);
+    if (
+      state.monitoredAccounts.some(
+        (account) => account.external_account_id === externalAccountId,
+      )
+    ) {
+      return failure("该上游账号已经在监控列表中", 400);
+    }
+    const account: MonitoredAccount = {
+      id: Math.max(0, ...state.monitoredAccounts.map((item) => item.id)) + 1,
+      external_account_id: externalAccountId,
+      name: String(payload.name ?? `OpenAI 账号 ${externalAccountId}`),
+      enabled: payload.enabled !== false,
+      quota_query_mode:
+        payload.quota_query_mode === "direct" ? "direct" : "passive",
+      last_local_check_at: null,
+      last_upstream_check_at: null,
+      last_success_at: null,
+      next_local_check_at: null,
+      last_error: "",
+    };
+    state.monitoredAccounts.push(account);
+    for (const participant of state.participants) {
+      participant.account_breakdowns.push({
+        id: null,
+        account_id: account.id,
+        external_account_id: account.external_account_id,
+        account_name: account.name,
+        account_enabled: account.enabled,
+        latest_selected_cost: null,
+        last_checked_at: null,
+        snapshot: null,
+      });
+    }
+    for (const participant of state.participants) {
+      aggregateParticipant(participant);
+    }
+    saveDemoState(state);
+    return envelope(account, 201);
+  }
+  const monitoredAccountMatch = /^settings\/monitored-accounts\/(\d+)$/.exec(
+    pathname,
+  );
+  if (monitoredAccountMatch && method === "PUT") {
+    const account = state.monitoredAccounts.find(
+      (item) => item.id === Number(monitoredAccountMatch[1]),
+    );
+    if (!account) return failure("监控账号不存在", 404);
+    account.external_account_id = Number(
+      payload.external_account_id ?? account.external_account_id,
+    );
+    account.name = String(payload.name ?? account.name);
+    account.enabled = payload.enabled !== false;
+    account.quota_query_mode =
+      payload.quota_query_mode === "direct" ? "direct" : "passive";
+    for (const participant of state.participants) {
+      const breakdown = participant.account_breakdowns.find(
+        (item) => item.account_id === account.id,
+      );
+      if (!breakdown) continue;
+      breakdown.external_account_id = account.external_account_id;
+      breakdown.account_name = account.name;
+      breakdown.account_enabled = account.enabled;
+    }
+    for (const participant of state.participants) {
+      aggregateParticipant(participant);
+    }
+    saveDemoState(state);
+    return envelope(account);
+  }
+  if (monitoredAccountMatch && method === "DELETE") {
+    const accountId = Number(monitoredAccountMatch[1]);
+    state.monitoredAccounts = state.monitoredAccounts.filter(
+      (item) => item.id !== accountId,
+    );
+    for (const participant of state.participants) {
+      participant.account_breakdowns = participant.account_breakdowns.filter(
+        (item) => item.account_id !== accountId,
+      );
+    }
+    for (const participant of state.participants) {
+      aggregateParticipant(participant);
+    }
+    saveDemoState(state);
+    return envelope();
+  }
+  if (method === "GET" && pathname === "settings") {
     return envelope(state.settings satisfies AppSettingsData);
+  }
   if (method === "PATCH" && pathname === "settings") {
-    const secretKeys = new Set([
-      "sub2api_admin_token",
-      "smtp_password",
-      "resend_api_key",
-    ]);
+    const secretKeys: Record<string, true> = {
+      sub2api_admin_token: true,
+      smtp_password: true,
+      resend_api_key: true,
+    };
     for (const [key, value] of Object.entries(payload)) {
-      if (secretKeys.has(key)) {
-        if (value)
+      if (secretKeys[key]) {
+        if (value) {
           state.settings[
             `${key.replace(/_admin_token$|_password$|_api_key$/, "")}_configured`
           ] = true;
-      } else state.settings[key] = value as string | number | boolean | null;
+        }
+      } else {
+        state.settings[key] = value as string | number | boolean | null;
+      }
     }
     saveDemoState(state);
     return envelope(state.settings);
@@ -849,7 +1033,21 @@ export async function demoRequest(
     return envelope([
       {
         id: 8801,
-        name: "演示 OpenAI 周限账号",
+        name: "演示 OpenAI 主力账号",
+        type: "openai",
+        status: "active",
+        schedulable: true,
+      },
+      {
+        id: 8802,
+        name: "演示 OpenAI 备用账号",
+        type: "openai",
+        status: "active",
+        schedulable: true,
+      },
+      {
+        id: 8803,
+        name: "演示 OpenAI 待添加账号",
         type: "openai",
         status: "active",
         schedulable: true,
@@ -889,10 +1087,17 @@ export async function demoRequest(
     method === "POST" &&
     pathname === "settings/data-maintenance/history-rebuild-plans"
   ) {
-    if (Object.keys(payload).length > 0) {
-      return failure("本地历史维护计划不接受 mode 或时间范围参数", 400);
+    const keys = Object.keys(payload);
+    if (
+      keys.length !== 1 ||
+      keys[0] !== "account_id" ||
+      !state.monitoredAccounts.some(
+        (account) => account.id === Number(payload.account_id),
+      )
+    ) {
+      return failure("必须指定有效的监控账号", 400);
     }
-    const plan = createPlan(state);
+    const plan = createPlan(state, Number(payload.account_id));
     saveDemoState(state);
     return envelope(plan, 201);
   }
@@ -953,8 +1158,7 @@ export async function demoRequest(
     });
   }
   if (method === "POST" && pathname === "database/import") {
-    state = resetDemoState();
-    updateLatestParticipantState(state);
+    resetDemoState();
     return envelope({ demo_reset: true });
   }
 

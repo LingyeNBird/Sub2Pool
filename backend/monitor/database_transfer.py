@@ -102,11 +102,20 @@ def _reject_unfinished_balance_operations(
         rows = list(
             source.execute(
                 """
-                SELECT id, state, account_id
-                FROM monitor_participantbalanceoperation
-                WHERE state <> 'committed' OR state IS NULL
-                ORDER BY created_at, id
-                LIMIT 21
+                SELECT pending.id, pending.state, operation_source.account_external_id
+                FROM (
+                    SELECT id, state, created_at
+                    FROM monitor_participantbalanceoperation
+                    WHERE state <> 'committed' OR state IS NULL
+                    ORDER BY created_at, id
+                    LIMIT 21
+                ) AS pending
+                LEFT JOIN monitor_participantbalanceoperationsource AS operation_source
+                    ON operation_source.operation_id = pending.id
+                ORDER BY
+                    pending.created_at,
+                    pending.id,
+                    operation_source.account_external_id
                 """
             )
         )
@@ -117,8 +126,14 @@ def _reject_unfinished_balance_operations(
     if not rows:
         return
 
+    operations: dict[tuple[object, object], list[object]] = {}
+    for raw_id, raw_state, raw_account_id in rows:
+        operations.setdefault((raw_id, raw_state), [])
+        if raw_account_id is not None:
+            operations[(raw_id, raw_state)].append(raw_account_id)
+
     diagnostics = []
-    for raw_id, raw_state, raw_account_id in rows[:20]:
+    for (raw_id, raw_state), raw_account_ids in list(operations.items())[:20]:
         try:
             operation_id = str(uuid.UUID(str(raw_id)))
         except (AttributeError, TypeError, ValueError):
@@ -128,14 +143,17 @@ def _reject_unfinished_balance_operations(
             if raw_state in PENDING_BALANCE_STATES
             else "<无效状态>"
         )
-        try:
-            account_id = str(int(raw_account_id))
-        except (TypeError, ValueError):
-            account_id = "<无效账号>"
+        account_ids = []
+        for raw_account_id in raw_account_ids:
+            try:
+                account_ids.append(str(int(raw_account_id)))
+            except (TypeError, ValueError):
+                account_ids.append("<无效账号>")
+        accounts = "、".join(account_ids) if account_ids else "<缺少账号来源>"
         diagnostics.append(
-            f"{operation_id}（状态 {state}，账号 {account_id}）"
+            f"{operation_id}（状态 {state}，账号 {accounts}）"
         )
-    suffix = "；另有未列出的操作" if len(rows) > 20 else ""
+    suffix = "；另有未列出的操作" if len(operations) > 20 else ""
     raise DatabaseTransferError(
         "备份包含未完成的上游余额操作，已拒绝导入；"
         "请先在来源系统完成对账后重新导出："

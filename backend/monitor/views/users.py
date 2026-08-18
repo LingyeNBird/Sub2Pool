@@ -12,7 +12,7 @@ User = get_user_model()
 
 
 def system_user_data(user) -> dict:
-    participants = list(user.quota_participants.order_by("-is_owner", "id"))
+    participants = list(user.quota_participants.order_by("id"))
     return {
         "id": user.id,
         "username": user.get_username(),

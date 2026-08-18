@@ -41,9 +41,11 @@ const enabledCount = computed(
   () => participants.value.filter((item) => item.enabled).length,
 );
 const shareTotal = computed(() =>
-  participants.value
-    .filter((item) => item.enabled)
-    .reduce((sum, item) => sum + item.share_percent, 0),
+  participants.value.reduce(
+    (sum, participant) =>
+      participant.enabled ? sum + participant.share_percent : sum,
+    0,
+  ),
 );
 const updateCount = computed(
   () =>
@@ -101,13 +103,13 @@ function prepareEditor() {
 function openNew() {
   if (!auth.isStaff) return;
   prepareEditor();
-  editor.value?.open(null, participants.value.length ? 50 : 100);
+  editor.value?.open(null);
 }
 
 function openEdit(participant: Participant) {
   if (!auth.isStaff) return;
   prepareEditor();
-  editor.value?.open(participant, participant.share_percent);
+  editor.value?.open(participant);
 }
 
 async function save(form: ParticipantFormData, participantId: number | null) {
@@ -205,7 +207,7 @@ onMounted(() => {
     <div class="stat">
       <div class="flex h-full items-center justify-between gap-4">
         <div class="min-w-0">
-          <div class="stat-title">权益比例合计</div>
+          <div class="stat-title">混池权益合计</div>
           <div class="stat-value text-xl font-semibold tabular-nums">
             {{ formatPercent(shareTotal) }}
           </div>

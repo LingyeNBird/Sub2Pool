@@ -14,7 +14,13 @@ from django.utils import timezone
 from .accounting.boundaries import same_official_reset as _same_official_reset
 from .integrations.sub2api import Sub2APIClient, Sub2APIError
 from .history_state import LeaseBusyError, LeaseGuard
-from .models import AppSettings, HistoryMaintenanceState, Participant
+from .models import (
+    AccountParticipant,
+    AppSettings,
+    HistoryMaintenanceState,
+    MonitoredAccount,
+    Participant,
+)
 from .notifications import notify_collection_error
 from .replay import RESET_ROLLBACK_TOLERANCE, rebuild_observation_suffix
 from .sampling.local_usage import (
@@ -47,6 +53,7 @@ ZERO = Decimal("0")
 @transaction.atomic
 def _persist_capture(
     config,
+    account,
     reference,
     local,
     previous,
@@ -80,6 +87,7 @@ def _persist_capture(
         observation = _create_raw_observation(
             config=config,
             reference=reference,
+            quota_query_mode=account.quota_query_mode,
             window=window,
             local=local,
             source=source,
@@ -100,22 +108,48 @@ def _persist_capture(
 
 def _run_monitor_locked(
     config: AppSettings,
-    *,
+    account: MonitoredAccount,
     force_upstream: bool,
     requested_source: str,
     guard: LeaseGuard,
 ) -> dict:
     if not config.monitoring_enabled and not force_upstream:
         return {"status": "disabled", "message": "监控已停用"}
-    if not config.openai_account_id:
-        raise Sub2APIError("尚未配置 OpenAI 账号 ID")
-    participants = list(Participant.objects.filter(enabled=True))
+    participants = list(
+        Participant.objects.filter(enabled=True).order_by("-is_owner", "id")
+    )
     if not participants:
-        raise Sub2APIError("尚未添加启用的拼车参与者")
+        raise Sub2APIError("混池尚未添加启用的拼车参与者")
     if sum((item.share_percent for item in participants), ZERO) > Decimal(100):
-        raise Sub2APIError("启用参与者的权益比例合计不能超过 100%")
+        raise Sub2APIError("启用参与者的混池权益比例合计不能超过 100%")
+    existing_participant_ids = set(
+        AccountParticipant.objects.filter(account=account).values_list(
+            "participant_id",
+            flat=True,
+        )
+    )
+    AccountParticipant.objects.bulk_create(
+        [
+            AccountParticipant(account=account, participant=participant)
+            for participant in participants
+            if participant.id not in existing_participant_ids
+        ],
+        ignore_conflicts=True,
+    )
+    memberships_by_participant = {
+        item.participant_id: item
+        for item in AccountParticipant.objects.select_related(
+            "participant"
+        ).filter(
+            account=account,
+            participant_id__in=[item.id for item in participants],
+        )
+    }
+    memberships = [
+        memberships_by_participant[participant.id] for participant in participants
+    ]
 
-    account_id = config.openai_account_id
+    account_id = account.external_account_id
     now = timezone.now()
     latest_raw = _latest_raw(account_id)
     previous = _latest_included(account_id)
@@ -125,10 +159,10 @@ def _run_monitor_locked(
         if latest_raw is None:
             window = client.query_weekly_window(
                 account_id,
-                config.quota_query_mode,
+                account.quota_query_mode,
             )
             reference = _window_reference(account_id, window)
-            local = _fetch_local(client, config, reference, participants, now)
+            local = _fetch_local(client, config, reference, memberships, now)
             interval_logs = _fetch_interval_bridge_logs(
                 client,
                 config,
@@ -145,6 +179,7 @@ def _run_monitor_locked(
             )
             observation = _persist_capture(
                 config,
+                account,
                 reference,
                 local,
                 None,
@@ -159,7 +194,7 @@ def _run_monitor_locked(
             )
             rebuild_observation_suffix(observation, config, guard=guard)
             observation.refresh_from_db()
-            _finish_success(config, local.checked_at)
+            _finish_success(config, account, local.checked_at)
             if observation.excluded_at is None:
                 _send_observation_notifications(
                     config,
@@ -185,7 +220,7 @@ def _run_monitor_locked(
             client,
             config,
             current_reference,
-            participants,
+            memberships,
             now,
         )
         trigger = evaluate_sampling_trigger(
@@ -213,6 +248,7 @@ def _run_monitor_locked(
             )
             _persist_capture(
                 config,
+                account,
                 current_reference,
                 local,
                 previous,
@@ -221,7 +257,7 @@ def _run_monitor_locked(
                 capture_started_at=now,
                 interval_logs=interval_logs,
             )
-            AppSettings.objects.filter(pk=config.pk).update(
+            MonitoredAccount.objects.filter(pk=account.pk).update(
                 last_local_check_at=now,
                 last_success_at=now,
                 last_error="",
@@ -235,7 +271,7 @@ def _run_monitor_locked(
 
         window = client.query_weekly_window(
             account_id,
-            config.quota_query_mode,
+            account.quota_query_mode,
         )
         reference = _window_reference(account_id, window)
         official_window_changed = not _same_official_reset(
@@ -248,7 +284,7 @@ def _run_monitor_locked(
                 client,
                 config,
                 reference,
-                participants,
+                memberships,
                 now,
             )
 
@@ -282,6 +318,7 @@ def _run_monitor_locked(
         )
         observation = _persist_capture(
             config,
+            account,
             reference,
             local,
             previous,
@@ -296,7 +333,7 @@ def _run_monitor_locked(
         )
         rebuild_observation_suffix(observation, config, guard=guard)
         observation.refresh_from_db()
-        _finish_success(config, local.checked_at)
+        _finish_success(config, account, local.checked_at)
 
         if observation.excluded_at is not None:
             return {
@@ -317,34 +354,89 @@ def _run_monitor_locked(
         }
 
 
-def run_monitor(
+def _run_account_monitor(
+    config: AppSettings,
+    account: MonitoredAccount,
     *,
-    force_upstream: bool = False,
-    source: str = "scheduled",
+    force_upstream: bool,
+    source: str,
 ) -> dict:
-    """Run one capture under the same fenced lease used by maintenance."""
-
-    config = AppSettings.load()
-    if not config.openai_account_id:
-        raise Sub2APIError("尚未配置 OpenAI 账号 ID")
     try:
-        guard = LeaseGuard.acquire(config.openai_account_id)
+        guard = LeaseGuard.acquire(account.external_account_id)
     except LeaseBusyError:
-        return {"status": "busy", "message": "已有采集或历史维护任务正在执行"}
+        return {
+            "status": "busy",
+            "account_id": account.id,
+            "message": "该账号已有采集或历史维护任务正在执行",
+        }
     try:
-        return _run_monitor_locked(
+        result = _run_monitor_locked(
             config,
+            account,
             force_upstream=force_upstream,
             requested_source=source,
             guard=guard,
         )
+        return {"account_id": account.id, **result}
     except Exception as exc:
         message = str(exc)[:1000]
-        AppSettings.objects.filter(pk=1).update(
+        MonitoredAccount.objects.filter(pk=account.pk).update(
             last_local_check_at=timezone.now(),
             last_error=message,
         )
-        notify_collection_error(config, message)
+        notify_collection_error(
+            config,
+            f"{account.name}（{account.external_account_id}）：{message}",
+        )
         raise
     finally:
         guard.release()
+
+
+def run_monitor(
+    *,
+    account_id: int | None = None,
+    force_upstream: bool = False,
+    source: str = "scheduled",
+) -> dict:
+    """Run one or all enabled monitored accounts under account-scoped fences."""
+
+    config = AppSettings.load()
+    accounts = MonitoredAccount.objects.filter(enabled=True)
+    if account_id is not None:
+        accounts = accounts.filter(pk=account_id)
+    account_rows = list(accounts.order_by("id"))
+    if not account_rows:
+        raise Sub2APIError("尚未配置启用的 OpenAI 上游账号")
+    if account_id is not None:
+        return _run_account_monitor(
+            config,
+            account_rows[0],
+            force_upstream=force_upstream,
+            source=source,
+        )
+
+    results = []
+    for account in account_rows:
+        try:
+            results.append(
+                _run_account_monitor(
+                    config,
+                    account,
+                    force_upstream=force_upstream,
+                    source=source,
+                )
+            )
+        except Exception as exc:
+            results.append(
+                {
+                    "account_id": account.id,
+                    "status": "error",
+                    "message": str(exc)[:1000],
+                }
+            )
+    return {
+        "status": "completed",
+        "accounts": results,
+        "error_count": sum(item["status"] == "error" for item in results),
+    }

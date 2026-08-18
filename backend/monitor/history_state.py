@@ -119,7 +119,9 @@ class LeaseGuard:
                     state="committed"
                 )
                 if account_id:
-                    pending = pending.filter(account_id=account_id)
+                    pending = pending.filter(
+                        sources__account_external_id=account_id
+                    ).distinct()
                 if pending.exists():
                     raise LeaseBusyError(
                         "存在待对账的上游余额操作，请先重试对应额度建议"

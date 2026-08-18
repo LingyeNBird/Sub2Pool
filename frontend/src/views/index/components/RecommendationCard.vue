@@ -57,11 +57,7 @@ defineEmits<{
             "
             class="mt-1 text-sm font-medium opacity-65"
           >
-            {{
-              participant.snapshot.allocation_model === "time_varying"
-                ? "90% 参考范围"
-                : "整数百分比参考范围"
-            }}：
+            各账号建议合计范围：
             <span class="tabular-nums">
               {{
                 formatCurrencyRange(
@@ -91,8 +87,9 @@ defineEmits<{
         </span>
       </div>
       <p v-if="participant.snapshot" class="mt-3 text-sm opacity-60">
-        该参与者本周期用量为
-        {{ formatCurrency(participant.latest_selected_cost) }}，当前余额为
+        该参与者在
+        {{ participant.snapshot.account_count }} 个启用账号中的用量合计为
+        {{ formatCurrency(participant.snapshot.selected_cost) }}，当前全局余额为
         {{ formatCurrency(participant.latest_balance_usd) }}，{{
           participant.snapshot.needs_manual_update
             ? "和建议余额差异较大。"

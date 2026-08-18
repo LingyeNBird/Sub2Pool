@@ -6,7 +6,7 @@ from .validators import PERCENT_VALIDATORS
 
 
 class Participant(models.Model):
-    """一个 Sub2API 用户及其在上游周限中的百分比权益。"""
+    """一个 Sub2API 用户；余额与身份属于整个 Sub2API 渠道。"""
 
     name = models.CharField(max_length=80)
     email = models.EmailField(blank=True)
@@ -15,7 +15,12 @@ class Participant(models.Model):
     sub2api_username = models.CharField(max_length=150, blank=True)
     # 邮箱与用户名来自同一次 Admin 用户列表读取；用户名为空时用邮箱展示账号身份。
     sub2api_email = models.EmailField(blank=True)
-    share_percent = models.DecimalField(max_digits=7, decimal_places=3, validators=PERCENT_VALIDATORS)
+    # 合同权益属于整个 Sub2API 混池；所有启用上游账号共用同一份比例。
+    share_percent = models.DecimalField(
+        max_digits=7,
+        decimal_places=3,
+        validators=PERCENT_VALIDATORS,
+    )
     is_owner = models.BooleanField(default=False)
     enabled = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
@@ -25,11 +30,8 @@ class Participant(models.Model):
         blank=True,
     )
 
-    # 最近一次本地探测值用于展示；它们不是账本，真正的分配账本在 ParticipantSnapshot。
+    # 最近一次全局余额探测值属于 Sub2API 用户；逐账号用量保存在 AccountParticipant。
     latest_balance_usd = models.DecimalField(
-        max_digits=16, decimal_places=6, null=True, blank=True
-    )
-    latest_selected_cost = models.DecimalField(
         max_digits=16, decimal_places=6, null=True, blank=True
     )
     last_checked_at = models.DateTimeField(null=True, blank=True)
@@ -43,3 +45,39 @@ class Participant(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class AccountParticipant(models.Model):
+    """A participant's latest usage cache within one monitored account."""
+
+    account = models.ForeignKey(
+        "MonitoredAccount",
+        on_delete=models.CASCADE,
+        related_name="memberships",
+    )
+    participant = models.ForeignKey(
+        Participant,
+        on_delete=models.CASCADE,
+        related_name="account_memberships",
+    )
+    latest_selected_cost = models.DecimalField(
+        max_digits=16,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    last_checked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["account_id", "participant_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "participant"],
+                name="unique_account_participant",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.account}: {self.participant}"

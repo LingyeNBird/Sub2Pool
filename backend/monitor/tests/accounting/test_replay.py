@@ -48,23 +48,27 @@ from monitor.integrations.sub2api import (
     WeeklyWindow,
 )
 from monitor import database_transfer
-from monitor.tests.helpers import create_recommendation_snapshot, jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    create_participant_snapshot,
+    create_recommendation_snapshot,
+    jwt_login,
+)
 
 @pytest.mark.django_db
 def test_integer_percent_plateau_uses_cumulative_cost_for_capacity(monkeypatch):
     """16% 平台期内的消费不能在跳到 17% 时被漏掉并产生 $687 的错误总额。"""
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.cost_basis = "actual"
     config.initial_usd_per_percent = Decimal("16")
     config.safety_factor = Decimal("0.95")
     config.save()
-    owner = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=50,
-        is_owner=True,
-    )
+    owner = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=50,
+    is_owner=True,)
     reset_at = timezone.now() + timedelta(days=4)
     used_values = [Decimal("16"), Decimal("16"), Decimal("17")]
     cost_values = [
@@ -104,7 +108,7 @@ def test_integer_percent_plateau_uses_cumulative_cost_for_capacity(monkeypatch):
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
     for _ in range(3):
-        run_monitor(force_upstream=True, source="manual")
+        run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
     observations = list(Observation.objects.order_by("observed_at"))
 
     assert observations[0].sample_usd_per_percent == Decimal("26.213123")
@@ -144,7 +148,7 @@ def test_statistics_use_endpoint_ratio_independent_of_particle_filter():
     client = Client()
     headers, _ = jwt_login(client)
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
 
     now = timezone.now()
@@ -188,14 +192,12 @@ def test_statistics_use_endpoint_ratio_independent_of_particle_filter():
 def test_passive_reset_timestamp_drift_keeps_the_same_cycle(monkeypatch):
     """被动快照重置时间漂移数分钟时不能误建一个新的官方周期。"""
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     reset_at = timezone.now() + timedelta(days=4)
 
     class FakeClient:
@@ -233,8 +235,8 @@ def test_passive_reset_timestamp_drift_keeps_the_same_cycle(monkeypatch):
             return UserBalance(Decimal("1000"), Decimal("0"))
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
-    run_monitor(force_upstream=True, source="manual")
-    run_monitor(force_upstream=True, source="manual")
+    run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
+    run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     observations = list(Observation.objects.order_by("observed_at", "id"))
     assert len(observations) == 2
@@ -255,15 +257,13 @@ def test_official_zero_observation_rebases_natural_day_usage_costs():
     client = Client()
     headers, _ = jwt_login(client)
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.weekly_quota_model = "constant_average"
     config.save()
-    participant = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    participant = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     window_seconds = 604800
     zero_observed_at = timezone.now().replace(microsecond=0)
     new_reset_at = zero_observed_at + timedelta(
@@ -292,14 +292,12 @@ def test_official_zero_observation_rebases_natural_day_usage_costs():
             total_actual_cost=total_cost,
             effective_usd_per_percent=Decimal("20"),
         )
-        ParticipantSnapshot.objects.create(
-            observation=observation,
-            participant=participant,
-            raw_selected_cost=participant_cost,
-            selected_cost=participant_cost,
-            current_balance_usd=Decimal("1000"),
-            remaining_share_percent=Decimal("100"),
-        )
+        create_participant_snapshot(observation=observation,
+        participant=participant,
+        raw_selected_cost=participant_cost,
+        selected_cost=participant_cost,
+        current_balance_usd=Decimal("1000"),
+        remaining_share_percent=Decimal("100"),)
         return observation
 
     raw_observation(
@@ -371,20 +369,16 @@ def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
     monkeypatch,
 ):
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.initial_usd_per_percent = Decimal("16")
     config.save()
-    owner = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=50,
-        is_owner=True,
-    )
-    rider = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=2,
-        share_percent=50,
-    )
+    owner = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=50,
+    is_owner=True,)
+    rider = create_participant(name="车友",
+    sub2api_user_id=2,
+    share_percent=50,)
     reset_at = timezone.now() + timedelta(days=4)
 
     class FakeClient:
@@ -415,7 +409,7 @@ def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
             return UserBalance(balance, Decimal("0"))
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
-    run_monitor(force_upstream=True, source="manual")
+    run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     snapshots = {
         item.participant_id: item for item in ParticipantSnapshot.objects.all()
@@ -446,15 +440,13 @@ def test_unmapped_user_usage_is_saved_without_retroactive_participant_history(
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.initial_usd_per_percent = Decimal("20")
     config.save()
-    owner = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=60,
-        is_owner=True,
-    )
+    owner = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=60,
+    is_owner=True,)
     reset_at = timezone.now() + timedelta(days=4)
 
     class FakeClient:
@@ -503,7 +495,7 @@ def test_unmapped_user_usage_is_saved_without_retroactive_participant_history(
             return UserBalance(Decimal("600"), Decimal("0"))
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
-    run_monitor(force_upstream=True, source="manual")
+    run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     assert FakeClient.balance_reads == [1]
     assert set(
@@ -551,14 +543,12 @@ def test_unmapped_user_usage_is_saved_without_retroactive_participant_history(
 @pytest.mark.django_db
 def test_adding_participant_midcycle_replays_the_complete_segment(monkeypatch):
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    owner = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    owner = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     reset_at = timezone.now() + timedelta(days=4)
 
     class FakeClient:
@@ -599,19 +589,17 @@ def test_adding_participant_midcycle_replays_the_complete_segment(monkeypatch):
             return UserBalance(Decimal("500"), Decimal("0"))
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
-    run_monitor(force_upstream=True, source="manual")
+    run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
     first_observation = Observation.objects.get()
     first_observation.sample_note = "必须由完整区间重放覆盖"
     first_observation.save(update_fields=["sample_note"])
 
     owner.share_percent = Decimal("60")
     owner.save(update_fields=["share_percent"])
-    rider = Participant.objects.create(
-        name="车友",
-        sub2api_user_id=2,
-        share_percent=40,
-    )
-    run_monitor(force_upstream=True, source="manual")
+    rider = create_participant(name="车友",
+    sub2api_user_id=2,
+    share_percent=40,)
+    run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     first_observation.refresh_from_db()
     assert first_observation.sample_note != "必须由完整区间重放覆盖"
@@ -636,15 +624,13 @@ def test_same_official_reset_rollbacks_wait_for_explicit_manual_start(
     """同一 reset_at 下连续低点也不能覆盖官方七天边界。"""
 
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.initial_usd_per_percent = Decimal("16")
     config.save()
-    owner = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=50,
-        is_owner=True,
-    )
+    owner = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=50,
+    is_owner=True,)
     now = timezone.now()
     reset_at = now + timedelta(days=4)
     previous = Observation.objects.create(
@@ -665,17 +651,15 @@ def test_same_official_reset_rollbacks_wait_for_explicit_manual_start(
         valid_sample=True,
         raw_window={"rate_method": RATE_METHOD},
     )
-    ParticipantSnapshot.objects.create(
-        observation=previous,
-        participant=owner,
-        raw_selected_cost=Decimal("200"),
-        selected_cost=Decimal("200"),
-        charged_delta_percent=Decimal("10"),
-        charged_cycle_percent=Decimal("10"),
-        remaining_share_percent=Decimal("40"),
-        current_balance_usd=Decimal("500"),
-        recommended_balance_usd=Decimal("500"),
-    )
+    create_participant_snapshot(observation=previous,
+    participant=owner,
+    raw_selected_cost=Decimal("200"),
+    selected_cost=Decimal("200"),
+    charged_delta_percent=Decimal("10"),
+    charged_cycle_percent=Decimal("10"),
+    remaining_share_percent=Decimal("40"),
+    current_balance_usd=Decimal("500"),
+    recommended_balance_usd=Decimal("500"),)
 
     class FakeClient:
         run_count = 0
@@ -707,8 +691,8 @@ def test_same_official_reset_rollbacks_wait_for_explicit_manual_start(
             return UserBalance(Decimal("500"), Decimal("0"))
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
-    first_low = run_monitor(force_upstream=True, source="manual")
-    second_low = run_monitor(force_upstream=True, source="manual")
+    first_low = run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
+    second_low = run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     assert first_low["status"] == "reset_pending"
     assert second_low["status"] == "reset_pending"
@@ -735,14 +719,12 @@ def test_single_false_rollback_is_excluded_without_rewriting_prior_points(
 ):
     """47→18→49 中的 18 留作审计；49 直接衔接上一个有效点。"""
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    owner = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    owner = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     reset_at = timezone.now() + timedelta(days=3)
     percents = [Decimal("47"), Decimal("18"), Decimal("49")]
     costs = [Decimal("940"), Decimal("960"), Decimal("980")]
@@ -781,9 +763,9 @@ def test_single_false_rollback_is_excluded_without_rewriting_prior_points(
             return UserBalance(Decimal("1000"), Decimal("0"))
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
-    first = run_monitor(force_upstream=True, source="manual")
-    rollback = run_monitor(force_upstream=True, source="manual")
-    recovered = run_monitor(force_upstream=True, source="manual")
+    first = run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
+    rollback = run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
+    recovered = run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     assert first["status"] == "calibrated"
     assert rollback["status"] == "reset_pending"
@@ -826,14 +808,12 @@ def test_append_and_exclusion_replay_the_affected_official_interval():
     """粒子状态依赖完整区间，但更早官方区间不得被改写。"""
 
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    participant = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    participant = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     now = timezone.now()
     old_reset = now - timedelta(days=8)
     current_reset = now + timedelta(days=3)
@@ -853,14 +833,12 @@ def test_append_and_exclusion_replay_the_affected_official_interval():
             effective_usd_per_percent=Decimal("20"),
             raw_window={"rate_method": RATE_METHOD},
         )
-        ParticipantSnapshot.objects.create(
-            observation=observation,
-            participant=participant,
-            raw_selected_cost=cost_value,
-            selected_cost=cost_value,
-            current_balance_usd=Decimal("1000"),
-            remaining_share_percent=Decimal("100"),
-        )
+        create_participant_snapshot(observation=observation,
+        participant=participant,
+        raw_selected_cost=cost_value,
+        selected_cost=cost_value,
+        current_balance_usd=Decimal("1000"),
+        remaining_share_percent=Decimal("100"),)
         return observation
 
     old_first = raw_observation(
@@ -951,8 +929,8 @@ def test_manual_replay_writers_and_management_replay_respect_active_fence():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
+    create_monitored_account(7)
+    config.save()
     now = timezone.now()
     observation = Observation.objects.create(
         account_id=7,
@@ -1009,8 +987,8 @@ def test_manual_replay_writers_and_management_replay_respect_active_fence():
 @pytest.mark.django_db
 def test_manual_start_interval_keeps_protected_observations_in_one_cycle():
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
+    create_monitored_account(7)
+    config.save()
     now = timezone.now().replace(microsecond=0)
     resets = [
         now + timedelta(days=7, minutes=index)
@@ -1066,8 +1044,8 @@ def test_manual_start_interval_api_validates_and_merges_existing_starts():
     client = Client()
     headers, _ = jwt_login(client, username="interval-owner")
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
+    create_monitored_account(7)
+    config.save()
     now = timezone.now().replace(microsecond=0)
 
     def raw_observation(index: int, *, account_id: int = 7) -> Observation:
@@ -1179,14 +1157,12 @@ def test_exclusion_restore_and_manual_start_cancellation_replay_affected_suffix(
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    participant = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    participant = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     now = timezone.now()
     reset_at = now + timedelta(days=3)
 
@@ -1214,17 +1190,15 @@ def test_exclusion_restore_and_manual_start_cancellation_replay_affected_suffix(
                 "sampled_at": observed_at.isoformat(),
             },
         )
-        ParticipantSnapshot.objects.create(
-            observation=observation,
-            participant=participant,
-            raw_selected_cost=cost_value,
-            selected_cost=cost_value,
-            charged_delta_percent=percent_value,
-            charged_cycle_percent=percent_value,
-            remaining_share_percent=Decimal("100") - percent_value,
-            current_balance_usd=Decimal("1000"),
-            recommended_balance_usd=Decimal("1000"),
-        )
+        create_participant_snapshot(observation=observation,
+        participant=participant,
+        raw_selected_cost=cost_value,
+        selected_cost=cost_value,
+        charged_delta_percent=percent_value,
+        charged_cycle_percent=percent_value,
+        remaining_share_percent=Decimal("100") - percent_value,
+        current_balance_usd=Decimal("1000"),
+        recommended_balance_usd=Decimal("1000"),)
         return observation
 
     raw_observation(120, Decimal("47"), Decimal("940"), "manual")
@@ -1330,14 +1304,12 @@ def test_rebuild_api_recomputes_current_interval_without_changing_raw_samples():
         email="rebuild-owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    participant = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    participant = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     now = timezone.now()
     reset_at = now + timedelta(days=3)
 
@@ -1356,14 +1328,12 @@ def test_rebuild_api_recomputes_current_interval_without_changing_raw_samples():
             effective_usd_per_percent=Decimal("20"),
             raw_window={"rate_method": RATE_METHOD},
         )
-        ParticipantSnapshot.objects.create(
-            observation=observation,
-            participant=participant,
-            raw_selected_cost=cost_value,
-            selected_cost=cost_value,
-            current_balance_usd=Decimal("1000"),
-            remaining_share_percent=Decimal("100"),
-        )
+        create_participant_snapshot(observation=observation,
+        participant=participant,
+        raw_selected_cost=cost_value,
+        selected_cost=cost_value,
+        current_balance_usd=Decimal("1000"),
+        remaining_share_percent=Decimal("100"),)
         return observation
 
     first = raw_observation(60, Decimal("47"), Decimal("940"))
@@ -1450,11 +1420,11 @@ def test_api_requires_admin_jwt_and_accepts_admin_login():
         "Asia/Shanghai"
     )
     config = AppSettings.load()
-    config.last_upstream_check_at = timezone.now() - timedelta(hours=13)
+    account = create_monitored_account(7)
+    account.last_upstream_check_at = timezone.now() - timedelta(hours=13)
+    account.save(update_fields=["last_upstream_check_at", "updated_at"])
     config.stale_warning_hours = 12
-    config.save(
-        update_fields=["last_upstream_check_at", "stale_warning_hours", "updated_at"]
-    )
+    config.save(update_fields=["stale_warning_hours", "updated_at"])
 
     dashboard = client.get("/api/dashboard", **headers)
     assert dashboard.status_code == 200
@@ -1469,15 +1439,13 @@ def test_failed_initial_replay_leaves_observation_pending_without_version(
     monkeypatch,
 ):
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.fast_correction_enabled = False
     config.save()
-    Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     reset_at = timezone.now() + timedelta(days=3)
 
     class FakeClient:
@@ -1517,7 +1485,7 @@ def test_failed_initial_replay_leaves_observation_pending_without_version(
     )
 
     with pytest.raises(ValueError, match="模拟派生计算失败"):
-        run_monitor(force_upstream=True, source="manual")
+        run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     observation = Observation.objects.get()
     assert observation.sample_note == "等待派生计算"
@@ -1558,8 +1526,8 @@ def test_startup_replay_recovers_pending_row_with_current_version_marker():
 @pytest.mark.django_db
 def test_replay_handles_more_than_sqlite_expression_depth_sample_points():
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
+    create_monitored_account(7)
+    config.save()
     now = timezone.now().replace(microsecond=0)
     reset_at = now + timedelta(days=7)
     points = UsageSamplePoint.objects.bulk_create(
@@ -1601,15 +1569,13 @@ def test_replay_handles_more_than_sqlite_expression_depth_sample_points():
 @pytest.mark.django_db
 def test_replay_uses_both_persisted_cost_bases():
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.cost_basis = "actual"
     config.save()
-    participant = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    participant = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     now = timezone.now()
     reset_at = now + timedelta(days=3)
     observations = []
@@ -1633,13 +1599,11 @@ def test_replay_uses_both_persisted_cost_bases():
             total_actual_cost=actual,
             effective_usd_per_percent=Decimal("16"),
         )
-        ParticipantSnapshot.objects.create(
-            observation=observation,
-            participant=participant,
-            raw_selected_cost=actual,
-            selected_cost=actual,
-            current_balance_usd=Decimal("1000"),
-        )
+        create_participant_snapshot(observation=observation,
+        participant=participant,
+        raw_selected_cost=actual,
+        selected_cost=actual,
+        current_balance_usd=Decimal("1000"),)
         Sub2APIUserUsageSample.objects.create(
             account_id=7,
             sub2api_user_id=1,
@@ -1675,14 +1639,12 @@ def test_replay_uses_both_persisted_cost_bases():
 @pytest.mark.django_db
 def test_replay_repairs_cumulative_cost_rollback_without_double_counting():
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.save()
-    participant = Participant.objects.create(
-        name="车主",
-        sub2api_user_id=1,
-        share_percent=100,
-        is_owner=True,
-    )
+    participant = create_participant(name="车主",
+    sub2api_user_id=1,
+    share_percent=100,
+    is_owner=True,)
     now = timezone.now()
     reset_at = now + timedelta(days=3)
     observations = []
@@ -1703,13 +1665,11 @@ def test_replay_repairs_cumulative_cost_rollback_without_double_counting():
             total_actual_cost=cost,
             effective_usd_per_percent=Decimal("16"),
         )
-        ParticipantSnapshot.objects.create(
-            observation=observation,
-            participant=participant,
-            raw_selected_cost=cost,
-            selected_cost=cost,
-            current_balance_usd=Decimal("1000"),
-        )
+        create_participant_snapshot(observation=observation,
+        participant=participant,
+        raw_selected_cost=cost,
+        selected_cost=cost,
+        current_balance_usd=Decimal("1000"),)
         Sub2APIUserUsageSample.objects.create(
             account_id=7,
             sub2api_user_id=1,
@@ -1767,19 +1727,15 @@ def test_dynamic_model_removes_safety_factor_for_only_remaining_participant(
     monkeypatch,
 ):
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.safety_factor = Decimal("0.5")
     config.save()
-    exhausted = Participant.objects.create(
-        name="已跑完",
-        sub2api_user_id=1,
-        share_percent=10,
-    )
-    remaining = Participant.objects.create(
-        name="唯一剩余",
-        sub2api_user_id=2,
-        share_percent=90,
-    )
+    exhausted = create_participant(name="已跑完",
+    sub2api_user_id=1,
+    share_percent=10,)
+    remaining = create_participant(name="唯一剩余",
+    sub2api_user_id=2,
+    share_percent=90,)
     reset_at = timezone.now() + timedelta(days=4)
 
     class FakeClient:
@@ -1815,7 +1771,7 @@ def test_dynamic_model_removes_safety_factor_for_only_remaining_participant(
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
 
-    run_monitor(force_upstream=True, source="manual")
+    run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     observation = Observation.objects.get()
     snapshots = {

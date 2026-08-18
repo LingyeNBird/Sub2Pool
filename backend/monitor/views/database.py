@@ -16,7 +16,7 @@ from ..database_transfer import (
     import_database,
     stage_database_import,
 )
-from ..models import AppSettings, HistoryMaintenanceState, Observation
+from ..models import HistoryMaintenanceState, MonitoredAccount, Observation
 
 
 class DatabaseExportView(AdminAPIView):
@@ -78,9 +78,12 @@ class DatabaseImportView(AdminAPIView):
                         .values_list("account_id", flat=True)
                         .distinct()
                     )
-                    imported_account_id = AppSettings.load().openai_account_id
-                    if imported_account_id:
-                        account_ids.add(imported_account_id)
+                    account_ids.update(
+                        MonitoredAccount.objects.values_list(
+                            "external_account_id",
+                            flat=True,
+                        )
+                    )
                     for account_id in sorted(account_ids):
                         state, _created = (
                             HistoryMaintenanceState.objects.get_or_create(

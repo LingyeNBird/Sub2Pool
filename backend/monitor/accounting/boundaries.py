@@ -175,7 +175,7 @@ def mark_deferred_zero_observations(
             snapshot.delta_cost = None
             snapshot.charged_delta_percent = ZERO
             snapshot.charged_cycle_percent = ZERO
-            snapshot.remaining_share_percent = snapshot.participant.share_percent
+            snapshot.remaining_share_percent = snapshot.share_percent
             snapshot.recommended_balance_usd = None
             snapshot.charged_percent_lower = None
             snapshot.charged_percent_upper = None
@@ -296,7 +296,7 @@ def mark_automatic_exclusion(
             snapshot.delta_cost = None
             snapshot.charged_delta_percent = ZERO
             snapshot.charged_cycle_percent = ZERO
-            snapshot.remaining_share_percent = snapshot.participant.share_percent
+            snapshot.remaining_share_percent = snapshot.share_percent
             snapshot.recommended_balance_usd = None
             snapshot.charged_percent_lower = None
             snapshot.charged_percent_upper = None

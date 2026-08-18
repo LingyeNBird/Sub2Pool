@@ -195,6 +195,12 @@ class ParticipantSnapshot(models.Model):
 
     observation = models.ForeignKey(Observation, on_delete=models.CASCADE, related_name="participant_snapshots")
     participant = models.ForeignKey(Participant, on_delete=models.CASCADE, related_name="snapshots")
+    share_percent = models.DecimalField(
+        max_digits=7,
+        decimal_places=3,
+        validators=PERCENT_VALIDATORS,
+    )
+    is_owner = models.BooleanField(default=False)
     selected_cost = models.DecimalField(max_digits=18, decimal_places=6)
     # 来源累计成本可由请求日志重建；selected_cost 是归属区间内的派生累计值。
     raw_selected_cost = models.DecimalField(max_digits=18, decimal_places=6)

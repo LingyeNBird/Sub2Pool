@@ -10,7 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 
 
 from .base import AuthenticatedAPIView, error, ok
-from .query_params import bounded_query_int
+from .query_params import bounded_query_int, monitored_account_query
 from ..api_auth import ReadOnlyAPIKeyAuthentication
 from ..api_usage import (
     api_usage_snapshot_data,
@@ -30,9 +30,15 @@ from ..reporting import (
 class StatisticsView(AuthenticatedAPIView):
     def get(self, request):
         config = AppSettings.load()
+        try:
+            account = monitored_account_query(request)
+        except ValueError as exc:
+            return error(str(exc), status.HTTP_400_BAD_REQUEST)
+        if account is None:
+            return error("尚未配置启用的监控账号", status.HTTP_409_CONFLICT)
         cost_breakdowns = FastCorrectionBreakdownPresenter(
             config,
-            config.openai_account_id,
+            account.external_account_id,
         )
         capacity_period = request.query_params.get("capacity_period", "day")
         if capacity_period not in {"day", "month"}:
@@ -55,9 +61,15 @@ class StatisticsView(AuthenticatedAPIView):
         now = timezone.now()
         return ok(
             {
+                "account": {
+                    "id": account.id,
+                    "external_account_id": account.external_account_id,
+                    "name": account.name,
+                },
                 "capacity_period": capacity_period,
                 "capacity_series": capacity_series(
                     config=config,
+                    account=account,
                     location=location,
                     now=now,
                     capacity_days=capacity_days,
@@ -67,6 +79,7 @@ class StatisticsView(AuthenticatedAPIView):
                 "fast_correction_enabled": config.fast_correction_enabled,
                 "capacity_summary": capacity_summary(
                     config,
+                    account,
                     location,
                     now,
                     cost_breakdowns,
@@ -76,6 +89,7 @@ class StatisticsView(AuthenticatedAPIView):
                 "sample_interval_minutes": config.local_poll_minutes,
                 "participant_series": participant_usage_series(
                     user=request.user,
+                    account=account,
                     location=location,
                     now=now,
                     usage_days=usage_days,
@@ -92,6 +106,14 @@ class ReadOnlyStatisticsView(StatisticsView):
     permission_classes = [IsAuthenticated]
     http_method_names = ["get", "head", "options"]
 
+    def get(self, request):
+        if not request.query_params.get("account_id"):
+            return error(
+                "只读统计 API 必须指定 account_id",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        return super().get(request)
+
 
 class ParticipantAPIUsageView(AuthenticatedAPIView):
     """按当前归属周期只读聚合一个参与者的 Sub2API API 密钥用量。"""
@@ -102,10 +124,14 @@ class ParticipantAPIUsageView(AuthenticatedAPIView):
             participants = participants.filter(authorized_users=request.user)
         participant = get_object_or_404(participants, pk=participant_id)
         config = AppSettings.load()
-        if not config.openai_account_id:
-            return error("尚未配置 OpenAI 上游账号", status.HTTP_409_CONFLICT)
+        try:
+            account = monitored_account_query(request, enabled_only=True)
+        except ValueError as exc:
+            return error(str(exc), status.HTTP_400_BAD_REQUEST)
+        if account is None:
+            return error("尚未配置启用的监控账号", status.HTTP_409_CONFLICT)
 
-        observation = latest_cycle_observation(config)
+        observation = latest_cycle_observation(account)
         if observation is None or observation.attribution_started_at is None:
             return error("尚无当前上游周期", status.HTTP_409_CONFLICT)
 
@@ -126,3 +152,11 @@ class ReadOnlyParticipantAPIUsageView(ParticipantAPIUsageView):
     authentication_classes = [ReadOnlyAPIKeyAuthentication]
     permission_classes = [IsAuthenticated]
     http_method_names = ["get", "head", "options"]
+
+    def get(self, request, participant_id: int):
+        if not request.query_params.get("account_id"):
+            return error(
+                "只读 API 用量接口必须指定 account_id",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        return super().get(request, participant_id)

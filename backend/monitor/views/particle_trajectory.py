@@ -2,6 +2,7 @@
 
 from .base import AuthenticatedAPIView, error, ok
 from ..models import AppSettings
+from .query_params import monitored_account_query
 from ..particle_trajectory import particle_trajectory_data
 
 
@@ -10,12 +11,21 @@ class ParticleTrajectoryView(AuthenticatedAPIView):
         raw_period_id = request.query_params.get("period")
         try:
             period_id = int(raw_period_id) if raw_period_id else None
-        except (TypeError, ValueError):
-            return error("历史周期参数无效", 400)
+            account = monitored_account_query(request)
+        except (TypeError, ValueError) as exc:
+            return error(str(exc), 400)
+        if account is None:
+            return ok(
+                {
+                    "available": False,
+                    "message": "尚未配置启用的监控账号",
+                }
+            )
         try:
             return ok(
                 particle_trajectory_data(
                     AppSettings.load(),
+                    account,
                     period_id=period_id,
                 )
             )

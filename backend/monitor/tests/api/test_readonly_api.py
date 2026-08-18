@@ -8,7 +8,9 @@ from django.utils import timezone
 
 from monitor.api_auth import API_KEY_PREFIX, hash_readonly_api_key
 from monitor.models import (
+    AccountParticipant,
     AppSettings,
+    MonitoredAccount,
     Observation,
     Participant,
     ParticipantAPIUsageSnapshot,
@@ -26,14 +28,20 @@ def test_readonly_api_key_lifecycle_and_scope():
     client = Client()
     admin_headers, _ = jwt_login(client)
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id", "updated_at"])
 
+    account = MonitoredAccount.objects.create(
+        external_account_id=7,
+        name="主账号",
+    )
     participant = Participant.objects.create(
         name="车友",
         sub2api_user_id=22,
         sub2api_email="rider@example.com",
         share_percent=Decimal("40"),
+    )
+    AccountParticipant.objects.create(
+        account=account,
+        participant=participant,
     )
     now = timezone.now()
     observation = Observation.objects.create(
@@ -146,28 +154,47 @@ def test_readonly_api_key_lifecycle_and_scope():
         "integer",
         "null",
     ]
+    assert schemas["Participant"]["properties"]["account_breakdowns"]["items"][
+        "$ref"
+    ].endswith("/AccountBreakdown")
+    assert schemas["AggregateRecommendation"]["properties"]["allocation_model"][
+        "const"
+    ] == "pooled_account_sum"
 
     participants = client.get("/api/v1/participants", **api_headers)
     assert participants.status_code == 200
     assert participants.json()["data"][0]["id"] == participant.id
+    participant_data = participants.json()["data"][0]
+    assert participant_data["account_breakdowns"][0]["account_id"] == account.id
 
+    assert client.get("/api/v1/statistics", **api_headers).status_code == 400
     statistics = client.get(
-        "/api/v1/statistics?capacity_period=day&capacity_days=30"
+        f"/api/v1/statistics?account_id={account.id}"
+        "&capacity_period=day&capacity_days=30"
         "&usage_days=7&usage_precision=hour",
         **api_headers,
     )
     assert statistics.status_code == 200
     assert statistics.json()["data"]["capacity_period"] == "day"
     monthly_statistics = client.get(
-        "/api/v1/statistics?capacity_period=month&capacity_days=365",
+        f"/api/v1/statistics?account_id={account.id}"
+        "&capacity_period=month&capacity_days=365",
         **api_headers,
     )
     assert monthly_statistics.status_code == 200
     monthly_points = monthly_statistics.json()["data"]["capacity_series"]
     assert monthly_points[0]["basis"] is None
 
+    assert (
+        client.get(
+            f"/api/v1/statistics/participants/{participant.id}/api-usage",
+            **api_headers,
+        ).status_code
+        == 400
+    )
     api_usage = client.get(
-        f"/api/v1/statistics/participants/{participant.id}/api-usage",
+        f"/api/v1/statistics/participants/{participant.id}/api-usage"
+        f"?account_id={account.id}",
         **api_headers,
     )
     assert api_usage.status_code == 200

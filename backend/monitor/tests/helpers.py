@@ -5,7 +5,13 @@ from decimal import Decimal
 from django.test import Client
 from django.utils import timezone
 
-from monitor.models import Observation, Participant, ParticipantSnapshot
+from monitor.models import (
+    AccountParticipant,
+    MonitoredAccount,
+    Observation,
+    Participant,
+    ParticipantSnapshot,
+)
 
 
 def jwt_login(
@@ -30,10 +36,109 @@ def jwt_login(
     return {"HTTP_AUTHORIZATION": f"Bearer {access}"}, response
 
 
+def create_monitored_account(
+    external_account_id: int = 7,
+    *,
+    name: str | None = None,
+    quota_query_mode: str = "passive",
+    enabled: bool = True,
+) -> MonitoredAccount:
+    account, _created = MonitoredAccount.objects.update_or_create(
+        external_account_id=external_account_id,
+        defaults={
+            "name": name or f"OpenAI 账号 {external_account_id}",
+            "quota_query_mode": quota_query_mode,
+            "enabled": enabled,
+        },
+    )
+    return account
+
+
+def create_participant(
+    *,
+    share_percent: Decimal | int | str | None = None,
+    is_owner: bool = False,
+    account: MonitoredAccount | None = None,
+    account_id: int = 7,
+    **participant_fields,
+) -> Participant:
+    participant = Participant.objects.create(
+        share_percent=(
+            Decimal(str(share_percent))
+            if share_percent is not None
+            else Decimal("0")
+        ),
+        is_owner=is_owner,
+        **participant_fields,
+    )
+    if share_percent is not None or is_owner or account is not None:
+        membership_account = account or create_monitored_account(account_id)
+        AccountParticipant.objects.get_or_create(
+            account=membership_account,
+            participant=participant,
+        )
+    return participant
+
+
+def account_membership(
+    participant: Participant,
+    external_account_id: int = 7,
+) -> AccountParticipant:
+    return participant.account_memberships.get(
+        account__external_account_id=external_account_id
+    )
+
+
+def participant_snapshot(
+    *,
+    observation: Observation,
+    participant: Participant,
+    share_percent: Decimal | int | str | None = None,
+    is_owner: bool | None = None,
+    **snapshot_fields,
+) -> ParticipantSnapshot:
+    membership = (
+        AccountParticipant.objects.select_related("account")
+        .filter(
+            account__external_account_id=observation.account_id,
+            participant=participant,
+        )
+        .first()
+    )
+    if membership is None:
+        raise AssertionError("snapshot fixture requires an account usage row")
+    if share_percent is None:
+        share_percent = participant.share_percent
+    if is_owner is None:
+        is_owner = participant.is_owner
+    recommended = snapshot_fields.get("recommended_balance_usd")
+    if recommended is not None:
+        snapshot_fields.setdefault("recommended_balance_min_usd", recommended)
+        snapshot_fields.setdefault("recommended_balance_max_usd", recommended)
+    return ParticipantSnapshot(
+        observation=observation,
+        participant=participant,
+        share_percent=Decimal(str(share_percent)),
+        is_owner=is_owner,
+        **snapshot_fields,
+    )
+
+
+def create_participant_snapshot(**fields) -> ParticipantSnapshot:
+    snapshot = participant_snapshot(**fields)
+    snapshot.save(force_insert=True)
+    return snapshot
+
+
 def create_recommendation_snapshot(
     participant: Participant,
     recommended: Decimal = Decimal("123.45"),
 ) -> ParticipantSnapshot:
+    account = create_monitored_account(7)
+    membership, _created = AccountParticipant.objects.get_or_create(
+        account=account,
+        participant=participant,
+    )
     now = timezone.now()
     reset_at = now + timedelta(days=4)
     observation = Observation.objects.create(
@@ -49,9 +154,14 @@ def create_recommendation_snapshot(
         total_actual_cost=Decimal("400"),
         effective_usd_per_percent=Decimal("20"),
     )
-    return ParticipantSnapshot.objects.create(
+    if participant.latest_balance_usd is None:
+        participant.latest_balance_usd = Decimal("80")
+        participant.save(update_fields=["latest_balance_usd", "updated_at"])
+    return create_participant_snapshot(
         observation=observation,
         participant=participant,
+        share_percent=participant.share_percent,
+        is_owner=participant.is_owner,
         raw_selected_cost=Decimal("200"),
         selected_cost=Decimal("200"),
         current_balance_usd=Decimal("80"),

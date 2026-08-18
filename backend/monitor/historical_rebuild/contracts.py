@@ -12,11 +12,12 @@ from ..fact_utils import (
     canonical_rows_digest,
 )
 from ..models import (
+    Participant,
     AppSettings,
     HistoricalRebuildRun,
+    MonitoredAccount,
     Observation,
     ObservationFastCorrection,
-    Participant,
     ParticipantBalanceSample,
     ParticipantSnapshot,
     ParticipantUsageSample,
@@ -41,9 +42,11 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def config_digest(config: AppSettings) -> str:
+def config_digest(
+    config: AppSettings,
+    account: MonitoredAccount,
+) -> str:
     fields = (
-        "openai_account_id",
         "timezone",
         "cost_basis",
         "weekly_quota_model",
@@ -52,17 +55,23 @@ def config_digest(config: AppSettings) -> str:
         "safety_factor",
         "daily_estimate_min_percent_span",
     )
-    return canonical_digest({field: getattr(config, field) for field in fields})
+    values = {field: getattr(config, field) for field in fields}
+    values["account"] = {
+        "external_account_id": account.external_account_id,
+        "quota_query_mode": account.quota_query_mode,
+        "enabled": account.enabled,
+    }
+    return canonical_digest(values)
 
 
-def participant_policy_digest() -> str:
+def participant_policy_digest(_account: MonitoredAccount) -> str:
     return canonical_rows_digest(
         Participant.objects.order_by("id")
         .values(
             "id",
             "sub2api_user_id",
-            "share_percent",
             "enabled",
+            "share_percent",
             "is_owner",
         )
         .iterator(chunk_size=512)

@@ -44,7 +44,12 @@ from monitor.integrations.sub2api import (
     WeeklyWindow,
 )
 from monitor import database_transfer
-from monitor.tests.helpers import create_recommendation_snapshot, jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    create_recommendation_snapshot,
+    jwt_login,
+)
 
 @pytest.mark.django_db
 def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
@@ -54,15 +59,13 @@ def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.cost_basis = "actual"
     config.fast_correction_enabled = True
     config.save()
-    participant = Participant.objects.create(
-        name="已配置参与者",
-        sub2api_user_id=51,
-        share_percent=100,
-    )
+    participant = create_participant(name="已配置参与者",
+    sub2api_user_id=51,
+    share_percent=100,)
     reset_at = timezone.now() + timedelta(days=4)
 
     class FakeClient:
@@ -133,7 +136,7 @@ def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
             ]
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
-    result = run_monitor(force_upstream=True, source="manual")
+    result = run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     assert result["status"] == "calibrated"
     observation = Observation.objects.get()
@@ -201,14 +204,12 @@ def test_disabled_fast_correction_skips_log_reads_and_preserves_null_interval(
     monkeypatch,
 ):
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.fast_correction_enabled = False
     config.save()
-    Participant.objects.create(
-        name="车友",
-        sub2api_user_id=51,
-        share_percent=100,
-    )
+    create_participant(name="车友",
+    sub2api_user_id=51,
+    share_percent=100,)
     reset_at = timezone.now() + timedelta(days=4)
 
     class FakeClient:
@@ -240,7 +241,7 @@ def test_disabled_fast_correction_skips_log_reads_and_preserves_null_interval(
             raise AssertionError("关闭 FAST 修正后不应读取请求日志")
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
-    run_monitor(force_upstream=True, source="manual")
+    run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     observation = Observation.objects.get()
     assert observation.fast_correction_standard_cost is None
@@ -255,7 +256,7 @@ def test_unsafe_fast_rebuild_endpoint_is_removed_and_missing_facts_are_preserved
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
+    create_monitored_account(7)
     config.fast_correction_enabled = True
     config.save()
     cycle_start = timezone.now().replace(microsecond=0) - timedelta(days=2)

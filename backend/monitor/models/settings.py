@@ -7,6 +7,41 @@ from django.db import models
 from .validators import validate_service_url
 
 
+class MonitoredAccount(models.Model):
+    """One quota-bearing OpenAI account exposed by the configured Sub2API channel."""
+
+    QUERY_MODE_CHOICES = (
+        ("passive", "仅读取 Sub2API 被动快照"),
+        ("direct", "调用上游账号额度接口"),
+    )
+
+    external_account_id = models.BigIntegerField(unique=True)
+    name = models.CharField(max_length=160)
+    enabled = models.BooleanField(default=True)
+    quota_query_mode = models.CharField(
+        max_length=16,
+        choices=QUERY_MODE_CHOICES,
+        default="passive",
+    )
+    last_local_check_at = models.DateTimeField(null=True, blank=True)
+    last_upstream_check_at = models.DateTimeField(null=True, blank=True)
+    last_success_at = models.DateTimeField(null=True, blank=True)
+    next_local_check_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "external_account_id"]
+        verbose_name = "监控上游账号"
+        verbose_name_plural = "监控上游账号"
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.external_account_id})"
+
+
+
+
 class AppSettings(models.Model):
     """单例业务配置。
 
@@ -22,12 +57,7 @@ class AppSettings(models.Model):
         validators=[validate_service_url],
     )
     sub2api_admin_token_encrypted = models.TextField(blank=True)
-    openai_account_id = models.BigIntegerField(null=True, blank=True)
-    quota_query_mode = models.CharField(
-        max_length=16,
-        choices=(("passive", "仅读取 Sub2API 被动快照"), ("direct", "调用上游账号额度接口")),
-        default="passive",
-    )
+
     request_timeout_seconds = models.PositiveIntegerField(default=20)
     verify_tls = models.BooleanField(default=True)
     timezone = models.CharField(max_length=64, default="Asia/Shanghai")

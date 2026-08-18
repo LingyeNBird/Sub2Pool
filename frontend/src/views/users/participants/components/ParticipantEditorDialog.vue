@@ -27,7 +27,7 @@ const form = reactive<ParticipantFormData>({
   sub2api_user_id: 0,
   sub2api_username: "",
   sub2api_email: "",
-  share_percent: 50,
+  share_percent: 0,
   is_owner: false,
   enabled: true,
   notes: "",
@@ -65,34 +65,19 @@ function applySelectedUser() {
   if (!form.name) form.name = user.username || user.email || `用户 ${user.id}`;
 }
 
-function open(participant: Participant | null, defaultShare: number) {
+function open(participant: Participant | null) {
   editingParticipant.value = participant;
-  Object.assign(
-    form,
-    participant
-      ? {
-          name: participant.name,
-          email: participant.email,
-          sub2api_user_id: participant.sub2api_user_id,
-          sub2api_username: participant.sub2api_username,
-          sub2api_email: participant.sub2api_email,
-          share_percent: participant.share_percent,
-          is_owner: participant.is_owner,
-          enabled: participant.enabled,
-          notes: participant.notes,
-        }
-      : {
-          name: "",
-          email: "",
-          sub2api_user_id: 0,
-          sub2api_username: "",
-          sub2api_email: "",
-          share_percent: defaultShare,
-          is_owner: defaultShare === 100,
-          enabled: true,
-          notes: "",
-        },
-  );
+  Object.assign(form, {
+    name: participant?.name ?? "",
+    email: participant?.email ?? "",
+    sub2api_user_id: participant?.sub2api_user_id ?? 0,
+    sub2api_username: participant?.sub2api_username ?? "",
+    sub2api_email: participant?.sub2api_email ?? "",
+    share_percent: participant?.share_percent ?? 0,
+    is_owner: participant?.is_owner ?? false,
+    enabled: participant?.enabled ?? true,
+    notes: participant?.notes ?? "",
+  });
   dialog.value?.showModal();
 }
 
@@ -113,100 +98,110 @@ defineExpose({ open, close });
 
 <template>
   <dialog ref="dialog" class="modal">
-    <div class="modal-box w-[calc(100vw-2rem)] max-w-lg overflow-x-hidden">
+    <div class="modal-box w-[calc(100vw-2rem)] max-w-xl overflow-x-hidden">
       <h2 class="text-lg font-bold">
         {{ editingParticipant ? "编辑参与者" : "添加参与者" }}
       </h2>
-      <form class="mt-4 grid gap-3" @submit.prevent="submit">
-        <fieldset class="fieldset">
-          <label class="label">显示名称</label>
-          <input v-model="form.name" class="input w-full" required />
-        </fieldset>
-        <fieldset class="fieldset">
-          <label class="label">邮箱（备注用）</label>
-          <input v-model="form.email" type="email" class="input w-full" />
-        </fieldset>
-        <div class="grid gap-3">
-          <fieldset class="fieldset min-w-0">
-            <label class="label">Sub2API 用户</label>
-            <div class="grid min-w-0 gap-2 overflow-hidden">
-              <select
-                v-model.number="form.sub2api_user_id"
-                class="select w-full max-w-full min-w-0 truncate"
-                required
-                @change="applySelectedUser"
-              >
-                <option :value="0" disabled>请选择 Sub2API 用户</option>
-                <option
-                  v-if="
-                    form.sub2api_user_id && !hasUserOption(form.sub2api_user_id)
-                  "
-                  :value="form.sub2api_user_id"
-                >
-                  当前用户（{{ participantIdentity(form) }}）
-                </option>
-                <option v-for="user in users" :key="user.id" :value="user.id">
-                  {{ user.username || user.email || `用户 ${user.id}` }}（ID
-                  {{ user.id }} · {{ userRoleLabel(user.role) }} ·
-                  {{ user.status || "未知状态" }}）
-                </option>
-              </select>
-              <button
-                type="button"
-                class="btn justify-self-end btn-sm"
-                :disabled="loadingUsers"
-                @click="$emit('refreshUsers')"
-              >
-                <span
-                  v-if="loadingUsers"
-                  class="loading loading-xs loading-spinner"
-                ></span>
-                <AppIcon v-else name="arrow-path" class="size-4" />
-                {{ loadingUsers ? "读取中" : "刷新用户" }}
-              </button>
-            </div>
-            <p v-if="userListMessage" class="label text-success">
-              {{ userListMessage }}
-            </p>
-            <p v-if="userListError" class="label text-error">
-              {{ userListError }}
-            </p>
+      <form class="mt-4 grid gap-4" @submit.prevent="submit">
+        <div class="grid gap-3 sm:grid-cols-2">
+          <fieldset class="fieldset">
+            <label class="label">显示名称</label>
+            <input v-model="form.name" class="input w-full" required />
           </fieldset>
           <fieldset class="fieldset">
-            <label class="label">周限权益比例（%）</label>
-            <input
-              v-model.number="form.share_percent"
-              type="number"
-              min="0"
-              max="100"
-              step="0.001"
-              class="input w-full"
-              required
-            />
+            <label class="label">邮箱（备注用）</label>
+            <input v-model="form.email" type="email" class="input w-full" />
           </fieldset>
         </div>
-        <div class="alert text-sm alert-info">
-          <AppIcon name="information-circle" class="size-5" />
-          <span>
-            权益填写合同份额，不是当前剩余额度。例如上游已用 10%，双方仍各填
-            50%；首次测算会按 Sub2API
-            用户的历史用量，把已用部分归属给实际使用者。
-          </span>
-        </div>
+
+        <fieldset class="fieldset min-w-0">
+          <label class="label">Sub2API 全局用户</label>
+          <div class="grid min-w-0 gap-2 overflow-hidden">
+            <select
+              v-model.number="form.sub2api_user_id"
+              class="select w-full max-w-full min-w-0 truncate"
+              required
+              @change="applySelectedUser"
+            >
+              <option :value="0" disabled>请选择 Sub2API 用户</option>
+              <option
+                v-if="
+                  form.sub2api_user_id && !hasUserOption(form.sub2api_user_id)
+                "
+                :value="form.sub2api_user_id"
+              >
+                当前用户（{{ participantIdentity(form) }}）
+              </option>
+              <option v-for="user in users" :key="user.id" :value="user.id">
+                {{ user.username || user.email || `用户 ${user.id}` }}（ID
+                {{ user.id }} · {{ userRoleLabel(user.role) }} ·
+                {{ user.status || "未知状态" }}）
+              </option>
+            </select>
+            <button
+              type="button"
+              class="btn justify-self-end btn-sm"
+              :disabled="loadingUsers"
+              @click="$emit('refreshUsers')"
+            >
+              <span
+                v-if="loadingUsers"
+                class="loading loading-xs loading-spinner"
+              ></span>
+              <AppIcon v-else name="arrow-path" class="size-4" />
+              {{ loadingUsers ? "读取中" : "刷新用户" }}
+            </button>
+          </div>
+          <p v-if="userListMessage" class="label text-success">
+            {{ userListMessage }}
+          </p>
+          <p v-if="userListError" class="label text-error">
+            {{ userListError }}
+          </p>
+        </fieldset>
+
+        <section class="rounded-box border border-base-300 bg-base-200 p-4">
+          <div class="flex items-start gap-3">
+            <AppIcon name="scale" class="mt-0.5 size-5 shrink-0 opacity-60" />
+            <div>
+              <h3 class="font-semibold">全局混池合同</h3>
+              <p class="mt-1 text-xs leading-relaxed opacity-60">
+                Sub2API
+                用户只有一个全局余额，因此所有启用上游账号统一按这一份合同权益结算。各账号只分别记录用量，不再单独配置参与关系或份额。
+              </p>
+            </div>
+          </div>
+          <div class="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <fieldset class="fieldset">
+              <label class="label">混池合同权益（%）</label>
+              <input
+                v-model.number="form.share_percent"
+                type="number"
+                min="0"
+                max="100"
+                step="0.001"
+                class="input w-full"
+                required
+              />
+              <p class="label">所有启用参与者的混池权益合计不能超过 100%。</p>
+            </fieldset>
+            <label class="label gap-2 self-center sm:mt-5">
+              <input
+                v-model="form.is_owner"
+                type="checkbox"
+                class="toggle toggle-sm"
+              />
+              车主
+            </label>
+          </div>
+        </section>
+
         <fieldset class="fieldset">
           <label class="label">备注</label>
           <textarea v-model="form.notes" class="textarea w-full"></textarea>
         </fieldset>
         <label class="label justify-between">
-          这是车主
-          <input
-            v-model="form.is_owner"
-            type="checkbox"
-            class="toggle toggle-sm"
-          />
-        </label>
-        <label class="label justify-between">
-          启用监控
+          启用这个 Sub2API 用户
           <input
             v-model="form.enabled"
             type="checkbox"

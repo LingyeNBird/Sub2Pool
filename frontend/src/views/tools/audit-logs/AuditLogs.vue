@@ -8,6 +8,7 @@ import { ApiError, api } from "@/services/api";
 import type {
   ConfirmDialogHandle,
   MonitorSchedule,
+  MonitoredAccount,
   Observation,
   ObservationRebuildResult,
   ObservationListData,
@@ -31,6 +32,8 @@ import type {
 
 const toIso = useZonedDateTimeIso();
 const rows = ref<Observation[]>([]);
+const accounts = ref<MonitoredAccount[]>([]);
+const selectedAccountId = ref<number | null>(null);
 const summary = reactive<ObservationSummary>({
   total: 0,
   valid_count: 0,
@@ -88,6 +91,9 @@ function queryString() {
     page: String(pagination.value.page),
     page_size: String(pagination.value.page_size),
   });
+  if (selectedAccountId.value != null) {
+    query.set("account_id", String(selectedAccountId.value));
+  }
   if (filters.from) query.set("from", toIso(filters.from));
   if (filters.to) query.set("to", toIso(filters.to));
   if (filters.source) query.set("source", filters.source);
@@ -120,7 +126,10 @@ async function run() {
   running.value = true;
   message.value = "";
   try {
-    await api("monitor/run", { method: "POST" });
+    await api("monitor/run", {
+      method: "POST",
+      body: JSON.stringify({ account_id: selectedAccountId.value }),
+    });
     pagination.value.page = 1;
     await load();
   } catch (error) {
@@ -232,9 +241,14 @@ async function rebuildCalculations() {
   message.value = "";
   success.value = "";
   try {
-    const result = await api<ObservationRebuildResult>("observations/rebuild", {
-      method: "POST",
-    });
+    const query =
+      selectedAccountId.value == null
+        ? ""
+        : `?account_id=${selectedAccountId.value}`;
+    const result = await api<ObservationRebuildResult>(
+      `observations/rebuild${query}`,
+      { method: "POST" },
+    );
     await load();
     success.value = `计算重建完成，共重算 ${result.rebuilt_observations} 条观测记录。`;
   } catch (error) {
@@ -259,7 +273,28 @@ function changePage(page: number) {
   void load();
 }
 
-onMounted(load);
+async function initialize() {
+  try {
+    accounts.value = await api<MonitoredAccount[]>(
+      "settings/monitored-accounts",
+    );
+    selectedAccountId.value =
+      accounts.value.find((item) => item.enabled)?.id ??
+      accounts.value[0]?.id ??
+      null;
+  } catch (error) {
+    message.value = error instanceof ApiError ? error.message : "加载账号失败";
+  }
+  await load();
+}
+
+function selectAccount() {
+  pagination.value.page = 1;
+  manualRangeStart.value = null;
+  void load();
+}
+
+onMounted(initialize);
 </script>
 
 <template>
@@ -272,6 +307,18 @@ onMounted(load);
         </ul>
       </div>
     </div>
+    <select
+      v-if="accounts.length"
+      v-model.number="selectedAccountId"
+      class="select select-sm"
+      :disabled="loading || running"
+      aria-label="选择监控账号"
+      @change="selectAccount"
+    >
+      <option v-for="account in accounts" :key="account.id" :value="account.id">
+        {{ account.name }}
+      </option>
+    </select>
     <button class="btn btn-primary btn-sm" :disabled="running" @click="run">
       <span v-if="running" class="loading loading-xs loading-spinner"></span>
       <AppIcon v-else name="play" class="size-4" />

@@ -19,7 +19,12 @@ from monitor.models import (
     Sub2APIUserUsageSample,
     UsageSamplePoint,
 )
-from monitor.tests.helpers import jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    create_participant_snapshot,
+    jwt_login,
+)
 from monitor.serializers import ParticipantWriteSerializer
 
 
@@ -31,8 +36,8 @@ def test_participant_crud_never_invents_or_rewrites_historical_membership():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
+    account = create_monitored_account(7)
+    config.save()
     observed_at = timezone.now().replace(microsecond=0) - timedelta(days=30)
     window_started_at = observed_at - timedelta(hours=2)
     reset_at = observed_at + timedelta(days=6)
@@ -102,6 +107,7 @@ def test_participant_crud_never_invents_or_rewrites_historical_membership():
             "name": "current participant",
             "sub2api_user_id": 51,
             "share_percent": "40",
+            "is_owner": False,
             "enabled": True,
         },
         content_type="application/json",
@@ -125,17 +131,18 @@ def test_participant_crud_never_invents_or_rewrites_historical_membership():
         selected_cost=Decimal("20"),
         raw_selected_cost=Decimal("20"),
     )
-    historical_snapshot = ParticipantSnapshot.objects.create(
-        observation=observation,
-        participant=participant,
-        selected_cost=Decimal("20"),
-        raw_selected_cost=Decimal("20"),
-        remaining_share_percent=Decimal("40"),
-    )
+    historical_snapshot = create_participant_snapshot(observation=observation,
+    participant=participant,
+    selected_cost=Decimal("20"),
+    raw_selected_cost=Decimal("20"),
+    remaining_share_percent=Decimal("40"),)
 
     updated = client.put(
         f"/api/participants/{participant.id}",
-        data={"sub2api_user_id": 52, "share_percent": "60"},
+        data={
+            "sub2api_user_id": 52,
+            "share_percent": "60",
+        },
         content_type="application/json",
         **headers,
     )
@@ -157,13 +164,11 @@ def test_participant_create_update_delete_respect_active_account_fence():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
-    participant = Participant.objects.create(
-        name="现有车友",
-        sub2api_user_id=51,
-        share_percent=50,
-    )
+    account = create_monitored_account(7)
+    config.save()
+    participant = create_participant(name="现有车友",
+    sub2api_user_id=51,
+    share_percent=50,)
     client = Client()
     headers, _ = jwt_login(client)
     guard = LeaseGuard.acquire(7)
@@ -180,7 +185,9 @@ def test_participant_create_update_delete_respect_active_account_fence():
         )
         updated = client.put(
             f"/api/participants/{participant.id}",
-            data={"share_percent": "40"},
+            data={
+                "share_percent": "40",
+            },
             content_type="application/json",
             **headers,
         )
@@ -205,13 +212,11 @@ def test_participant_create_update_delete_respect_active_account_fence():
 @pytest.mark.django_db(transaction=True)
 def test_concurrent_participant_creates_revalidate_share_inside_fence():
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
-    Participant.objects.create(
-        name="既有车友",
-        sub2api_user_id=50,
-        share_percent=20,
-    )
+    account = create_monitored_account(7)
+    config.save()
+    create_participant(name="既有车友",
+    sub2api_user_id=50,
+    share_percent=20,)
     first = ParticipantWriteSerializer(
         data={
             "name": "并发甲",
@@ -250,14 +255,12 @@ def test_concurrent_participant_creates_revalidate_share_inside_fence():
 @pytest.mark.django_db(transaction=True)
 def test_concurrent_partial_updates_merge_against_locked_latest_instance():
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
-    participant = Participant.objects.create(
-        name="现有车友",
-        sub2api_user_id=51,
-        share_percent=50,
-        notes="old",
-    )
+    account = create_monitored_account(7)
+    config.save()
+    participant = create_participant(name="现有车友",
+    sub2api_user_id=51,
+    share_percent=50,
+    notes="old",)
     stale_share = Participant.objects.get(pk=participant.pk)
     stale_notes = Participant.objects.get(pk=participant.pk)
     share_update = ParticipantWriteSerializer(
@@ -294,13 +297,11 @@ def test_participant_api_returns_400_for_locked_share_conflict():
         email="owner@example.com",
     )
     config = AppSettings.load()
-    config.openai_account_id = 7
-    config.save(update_fields=["openai_account_id"])
-    Participant.objects.create(
-        name="既有车友",
-        sub2api_user_id=51,
-        share_percent=70,
-    )
+    account = create_monitored_account(7)
+    config.save()
+    create_participant(name="既有车友",
+    sub2api_user_id=51,
+    share_percent=70,)
     client = Client()
     headers, _ = jwt_login(client)
 
