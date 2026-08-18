@@ -173,6 +173,140 @@ def test_openai_account_discovery_uses_filtered_paginated_admin_api():
         },
     ]
 
+
+@pytest.mark.django_db
+def test_account_status_resources_normalize_safe_runtime_usage_and_stats():
+    config = AppSettings.load()
+    config.sub2api_base_url = "https://sub2api.example/"
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.save()
+    now = timezone.now().replace(microsecond=0)
+    reset_at = now + timedelta(days=4)
+    requested: list[tuple[str, dict[str, str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append((request.url.path, dict(request.url.params)))
+        if request.url.path.endswith("/usage"):
+            data = {
+                "source": "passive",
+                "updated_at": now.isoformat(),
+                "five_hour": {
+                    "utilization": 12.5,
+                    "resets_at": (now + timedelta(hours=2)).isoformat(),
+                    "remaining_seconds": 7200,
+                },
+                "seven_day": {
+                    "utilization": 37.25,
+                    "resets_at": reset_at.isoformat(),
+                    "remaining_seconds": 345600,
+                    "window_stats": {
+                        "requests": 120,
+                        "tokens": 456789,
+                        "cost": 18.75,
+                        "standard_cost": 15,
+                        "user_cost": 20.5,
+                    },
+                },
+            }
+        elif request.url.path.endswith("/stats"):
+            data = {
+                "history": [
+                    {"date": "2026-08-18"},
+                    {"date": "2026-08-19"},
+                ],
+                "summary": {
+                    "days": 30,
+                    "actual_days_used": 12,
+                    "total_cost": 81.25,
+                    "total_standard_cost": 65,
+                    "total_user_cost": 90,
+                    "total_requests": 730,
+                    "total_tokens": 3456789,
+                    "avg_daily_cost": 6.7708,
+                    "avg_daily_requests": 60.8333,
+                    "avg_daily_tokens": 288065.75,
+                    "avg_duration_ms": 1240.5,
+                    "today": {
+                        "date": now.date().isoformat(),
+                        "cost": 4.5,
+                        "user_cost": 5,
+                        "requests": 42,
+                        "tokens": 123456,
+                    },
+                }
+            }
+        else:
+            data = {
+                "id": 42,
+                "name": "GPT Pro 主账号",
+                "platform": "openai",
+                "type": "oauth",
+                "status": "active",
+                "schedulable": True,
+                "current_concurrency": 2,
+                "concurrency": 10,
+                "last_used_at": now.isoformat(),
+                "rate_limited_at": None,
+                "rate_limit_reset_at": None,
+                "overload_until": None,
+                "temp_unschedulable_until": None,
+                "temp_unschedulable_reason": "",
+                "error_message": "",
+                "credentials": {"has_access_token": True},
+            }
+        return httpx.Response(
+            200,
+            json={"code": 0, "message": "success", "data": data},
+        )
+
+    with Sub2APIClient(config) as client:
+        client.client.close()
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"x-api-key": "admin-secret"},
+        )
+        runtime = client.account_runtime_status(42)
+        usage = client.account_usage_status(42)
+        stats = client.account_usage_stats(42, days=30)
+
+    assert runtime == {
+        "name": "GPT Pro 主账号",
+        "account_type": "oauth",
+        "status": "active",
+        "schedulable": True,
+        "current_concurrency": 2,
+        "concurrency_limit": 10,
+        "last_used_at": now.isoformat(),
+        "rate_limited_at": None,
+        "rate_limit_reset_at": None,
+        "overload_until": None,
+        "temp_unschedulable_until": None,
+        "temp_unschedulable_reason": None,
+        "error_message": None,
+    }
+    assert usage["source"] == "passive"
+    assert usage["seven_day"] == {
+        "used_percent": 37.25,
+        "reset_at": reset_at.isoformat(),
+        "remaining_seconds": 345600,
+        "request_count": 120,
+        "token_count": 456789,
+        "account_cost_usd": 18.75,
+        "standard_cost_usd": 15.0,
+        "user_cost_usd": 20.5,
+    }
+    assert usage["five_hour"]["used_percent"] == 12.5
+    assert stats["request_count"] == 730
+    assert stats["token_count"] == 3456789
+    assert stats["account_cost_usd"] == 81.25
+    assert stats["actual_days_used"] == 2
+    assert stats["today"]["request_count"] == 42
+    assert requested == [
+        ("/api/v1/admin/accounts/42", {}),
+        ("/api/v1/admin/accounts/42/usage", {"source": "passive"}),
+        ("/api/v1/admin/accounts/42/stats", {"days": "30"}),
+    ]
+
 @pytest.mark.django_db
 def test_sub2api_user_discovery_includes_admin_accounts():
     config = AppSettings.load()
