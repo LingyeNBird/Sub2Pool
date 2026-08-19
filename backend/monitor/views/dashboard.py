@@ -316,10 +316,8 @@ def _prepare_balance_operation(
         ):
             raise BalanceOperationConflict("该参与者尚无可应用的聚合额度建议")
         recommended = Decimal(str(aggregate["recommended_balance_usd"]))
-        if recommended <= 0:
-            raise BalanceOperationConflict(
-                "Sub2API 原生余额调整接口不允许把余额设为 0，请前往管理后台手动处理"
-            )
+        if recommended < 0:
+            raise BalanceOperationConflict("聚合额度建议不能为负数")
         accounts = {
             item.external_account_id: item
             for item in MonitoredAccount.objects.select_for_update().filter(

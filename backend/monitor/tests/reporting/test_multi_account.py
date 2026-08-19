@@ -335,6 +335,74 @@ def test_applying_aggregate_recommendation_writes_one_global_balance_and_two_sou
 
 
 @pytest.mark.django_db
+def test_applying_exhausted_contract_sets_global_balance_to_zero(monkeypatch):
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    participant = Participant.objects.create(
+        name="exhausted rider",
+        sub2api_user_id=501,
+        share_percent=Decimal("50"),
+        latest_balance_usd=Decimal("80"),
+    )
+    account = MonitoredAccount.objects.create(
+        external_account_id=71,
+        name="主账号",
+    )
+    AccountParticipant.objects.create(
+        account=account,
+        participant=participant,
+    )
+    snapshot = create_account_snapshot(
+        account=account,
+        participant=participant,
+        share_percent=participant.share_percent,
+        recommended=Decimal("0"),
+        recommended_min=Decimal("0"),
+        recommended_max=Decimal("0"),
+        charged_percent=Decimal("60"),
+        observed_at=timezone.now().replace(microsecond=0),
+    )
+    calls: list[tuple[int, Decimal]] = []
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def set_user_balance_from_recommendation(self, user_id, balance):
+            calls.append((user_id, balance))
+            return balance
+
+    monkeypatch.setattr("monitor.views.dashboard.Sub2APIClient", FakeClient)
+    client = Client()
+    headers, _response = jwt_login(client)
+
+    response = client.post(
+        f"/api/dashboard/participants/{participant.id}/apply-recommendation",
+        **headers,
+    )
+
+    assert response.status_code == 200, response.json()
+    assert calls == [(501, Decimal("0"))]
+    operation = ParticipantBalanceOperation.objects.get()
+    assert operation.state == "committed"
+    assert operation.requested_balance_usd == Decimal("0")
+    participant.refresh_from_db()
+    snapshot.refresh_from_db()
+    assert participant.latest_balance_usd == Decimal("0")
+    assert snapshot.current_balance_usd == Decimal("0")
+    assert snapshot.recommendation_applied is True
+
+
+@pytest.mark.django_db
 def test_monitor_run_samples_every_global_participant_on_each_account(
     monkeypatch,
 ):

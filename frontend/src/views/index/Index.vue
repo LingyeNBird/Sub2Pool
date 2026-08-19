@@ -83,7 +83,7 @@ function openAdminApi() {
 async function applyRecommendation(participant: Participant) {
   if (
     participant.snapshot?.recommended_balance_usd == null ||
-    participant.snapshot.recommended_balance_usd <= 0 ||
+    participant.snapshot.recommended_balance_usd < 0 ||
     applyingParticipantId.value != null
   ) {
     return;

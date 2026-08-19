@@ -126,10 +126,23 @@ class UserResourceMixin:
         balance: Decimal,
     ) -> Decimal:
         """把用户余额设为建议值；不会修改并发、分组、订阅或任何其他配置。"""
-        if balance <= 0:
-            raise Sub2APIError(
-                "Sub2API 原生余额调整接口只接受大于 0 的余额，请前往管理后台手动处理"
-            )
+        if balance < 0:
+            raise Sub2APIError("建议余额不能为负数")
+
+        operation = "set"
+        amount = balance
+        if balance == 0:
+            current = self.user_balance(user_id).balance
+            if current < 0:
+                raise Sub2APIError("Sub2API 返回了负数用户余额，无法安全清零")
+            if current == 0:
+                return Decimal("0")
+            # 原生余额接口要求请求金额大于 0，但允许以原子 subtract 到 0。
+            # 先读后扣期间若余额发生变化，上游会拒绝负数结果或返回非零值；
+            # 两种情况都会进入现有对账流程，不会误记为已清零。
+            operation = "subtract"
+            amount = current
+
         url = urljoin(
             self.base_url,
             f"api/v1/admin/users/{user_id}/balance",
@@ -138,8 +151,8 @@ class UserResourceMixin:
             response = self.client.post(
                 url,
                 json={
-                    "balance": float(balance),
-                    "operation": "set",
+                    "balance": float(amount),
+                    "operation": operation,
                     "notes": "Sub2Pool 一键应用额度建议",
                 },
                 headers={"Idempotency-Key": uuid4().hex},

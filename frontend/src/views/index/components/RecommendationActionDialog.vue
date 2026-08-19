@@ -20,7 +20,7 @@ const participant = ref<Participant | null>(null);
 function canApplyRecommendation() {
   return (
     participant.value?.snapshot?.recommended_balance_usd != null &&
-    participant.value.snapshot.recommended_balance_usd > 0
+    participant.value.snapshot.recommended_balance_usd >= 0
   );
 }
 

@@ -519,6 +519,74 @@ def test_recommendation_balance_write_uses_dedicated_sub2api_endpoint():
         "notes": "Sub2Pool 一键应用额度建议",
     }
 
+
+@pytest.mark.django_db
+def test_zero_recommendation_atomically_subtracts_current_balance():
+    config = AppSettings.load()
+    config.sub2api_base_url = "https://sub2api.example/"
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.save()
+    requested: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            requested.append({"method": "GET", "path": request.url.path})
+            return httpx.Response(
+                200,
+                json={
+                    "code": 0,
+                    "message": "success",
+                    "data": {
+                        "id": 51,
+                        "balance": 80,
+                        "frozen_balance": 0,
+                    },
+                },
+            )
+        requested.append(
+            {
+                "method": request.method,
+                "path": request.url.path,
+                "idempotency_key": request.headers["idempotency-key"],
+                "body": json.loads(request.content),
+            }
+        )
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "message": "success",
+                "data": {"id": 51, "balance": 0},
+            },
+        )
+
+    with Sub2APIClient(config) as client:
+        client.client.close()
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"x-api-key": "admin-secret"},
+        )
+        confirmed = client.set_user_balance_from_recommendation(
+            51,
+            Decimal("0"),
+        )
+
+    assert confirmed == Decimal("0")
+    assert requested == [
+        {"method": "GET", "path": "/api/v1/admin/users/51"},
+        {
+            "method": "POST",
+            "path": "/api/v1/admin/users/51/balance",
+            "idempotency_key": requested[1]["idempotency_key"],
+            "body": {
+                "balance": 80.0,
+                "operation": "subtract",
+                "notes": "Sub2Pool 一键应用额度建议",
+            },
+        },
+    ]
+    assert requested[1]["idempotency_key"]
+
 @pytest.mark.django_db
 def test_connection_test_uses_unsaved_form_without_persisting(monkeypatch):
     get_user_model().objects.create_superuser(

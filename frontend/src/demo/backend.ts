@@ -731,7 +731,7 @@ export async function demoRequest(
     const participant = state.participants.find(
       (item) => item.id === Number(applyRecommendation[1]),
     );
-    if (!participant?.snapshot?.recommended_balance_usd)
+    if (participant?.snapshot?.recommended_balance_usd == null)
       return failure("该参与者暂无可应用建议", 409);
     participant.snapshot.current_balance_usd =
       participant.snapshot.recommended_balance_usd;
