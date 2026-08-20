@@ -65,7 +65,7 @@ def test_readonly_api_key_lifecycle_and_scope():
         attribution_started_at=observation.attribution_started_at,
         observed_at=now,
         cost_basis="actual",
-        fast_correction_enabled=True,
+        fast_correction_enabled=config.fast_correction_enabled,
         participant_total_usd=Decimal("120"),
         weekly_total_estimate_usd=Decimal("2000"),
         participant_weekly_percent=Decimal("6"),

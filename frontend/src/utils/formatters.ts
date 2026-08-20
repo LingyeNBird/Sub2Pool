@@ -8,7 +8,11 @@ export function formatCostTerms(
   breakdown: CostBreakdown | null | undefined,
   showFastCorrection: boolean,
 ): string {
-  if (!showFastCorrection || !breakdown) return formatCurrency(total);
+  const hasHistoricalCorrection =
+    breakdown != null && Math.abs(breakdown.fast_correction_usd) >= 0.005;
+  if ((!showFastCorrection && !hasHistoricalCorrection) || !breakdown) {
+    return formatCurrency(total);
+  }
   return `${formatCurrency(breakdown.sub2api_cost_usd)} + ${formatCurrency(
     breakdown.fast_correction_usd,
   )} FAST`;
@@ -19,8 +23,11 @@ export function formatCostBreakdown(
   breakdown: CostBreakdown | null | undefined,
   showFastCorrection: boolean,
 ): string {
+  const hasHistoricalCorrection =
+    breakdown != null && Math.abs(breakdown.fast_correction_usd) >= 0.005;
+  const showBreakdown = showFastCorrection || hasHistoricalCorrection;
   const terms = formatCostTerms(total, breakdown, showFastCorrection);
-  return showFastCorrection && breakdown
+  return showBreakdown && breakdown
     ? `${terms} = ${formatCurrency(breakdown.total_cost_usd)}`
     : terms;
 }

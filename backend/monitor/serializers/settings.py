@@ -48,6 +48,7 @@ SETTINGS_FIELDS = (
     "cost_basis",
     "weekly_quota_model",
     "fast_correction_enabled",
+    "fast_pricing_upgrade_notice_pending",
     "initial_usd_per_percent",
     "safety_factor",
     "daily_estimate_min_percent_span",

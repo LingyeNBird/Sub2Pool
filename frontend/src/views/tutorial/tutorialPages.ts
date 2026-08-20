@@ -277,9 +277,9 @@ export const tutorialGroups: TutorialGroup[] = [
           {
             title: "FAST 修正",
             paragraphs: [
-              "启用 FAST 修正后，系统会只读成功采样区间内的请求日志，识别 FAST 请求并补足 Sub2API 与上游套餐之间的倍率差异。",
-              "关闭 FAST 修正只会停止后续完整采样的日志修正并隐藏相关观测列，不会删除已有事实；重新启用也只影响之后形成的完整采样。",
-              "缺失的历史 FAST 事实会保持未知；系统不会用当前仍可查询的日志推测过去的完整请求集合。后续完整采样仍会正常保存 FAST 修正。",
+              "Sub2API 0.1.179 起可以在渠道定价中直接设置 FAST 倍率。OpenAI OAuth 渠道设为 2.5 后，应保持 Sub2Pool 的兼容修正关闭，避免重复计费。",
+              "兼容修正仅用于 Sub2API 仍按 2 倍记录 FAST 成本的旧版或未调整渠道。启用后，系统会只读成功采样区间内的请求日志并补足到 2.5 倍。",
+              "关闭兼容修正只会停止后续完整采样的日志修正，不会删除已有事实；历史修正仍参与重放和成本拆分。缺失的历史事实保持未知，不会用当前日志推测或覆盖。",
             ],
           },
         ],
@@ -636,7 +636,7 @@ export const tutorialGroups: TutorialGroup[] = [
     "account": {"id": 3, "external_account_id": 8801, "name": "主账号"},
     "capacity_period": "day",
     "capacity_series": [],
-    "fast_correction_enabled": true,
+    "fast_correction_enabled": false,
     "capacity_summary": {
       "cycle": {},
       "today": {}
@@ -684,7 +684,7 @@ export const tutorialGroups: TutorialGroup[] = [
     "starts_at": "2026-08-05T00:00:00+00:00",
     "observed_to": "2026-08-11T09:20:00+00:00",
     "cost_basis": "actual",
-    "fast_correction_enabled": true,
+    "fast_correction_enabled": false,
     "participant_total_usd": 480.0,
     "weekly_total_estimate_usd": 2000.0,
     "participant_weekly_percent": 24.0,

@@ -50,12 +50,49 @@ from monitor.integrations.sub2api import (
     WeeklyWindow,
 )
 from monitor import database_transfer
+from monitor.reporting.costs import FastCorrectionBreakdownPresenter
 from monitor.tests.helpers import (
     create_monitored_account,
     create_participant,
     create_recommendation_snapshot,
     jwt_login,
 )
+
+
+@pytest.mark.django_db
+def test_disabled_fast_mode_still_reports_saved_historical_correction():
+    config = AppSettings.load()
+    config.cost_basis = "actual"
+    config.fast_correction_enabled = False
+    config.save()
+    now = timezone.now()
+    observation = Observation.objects.create(
+        account_id=7,
+        observed_at=now,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=4),
+        attribution_started_at=now - timedelta(days=3),
+        upstream_used_percent=Decimal("20"),
+        interval_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("100"),
+        selected_total_cost=Decimal("125"),
+        total_standard_cost=Decimal("125"),
+        total_actual_cost=Decimal("125"),
+        fast_correction_standard_cost=Decimal("25"),
+        fast_correction_actual_cost=Decimal("25"),
+        effective_usd_per_percent=Decimal("6.25"),
+    )
+
+    breakdown = FastCorrectionBreakdownPresenter(config, 7).for_observation(
+        observation
+    )
+
+    assert breakdown == {
+        "sub2api_cost_usd": 100.0,
+        "fast_correction_usd": 25.0,
+        "total_cost_usd": 125.0,
+    }
+
 
 @pytest.mark.django_db
 def test_statistics_groups_capacity_and_participant_usage():

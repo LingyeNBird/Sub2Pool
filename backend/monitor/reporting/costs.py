@@ -11,13 +11,13 @@ CENT = Decimal("0.01")
 
 
 class FastCorrectionBreakdownPresenter:
-    """把重放后的累计成本拆成 Sub2API 原值与累计 FAST 修正。"""
+    """把累计成本拆成 Sub2API 原值与已保存的历史 FAST 修正。"""
 
     def __init__(self, config: AppSettings, account_id: int | None):
-        self.enabled = bool(config.fast_correction_enabled)
+        # 当前开关只控制新事实采集；历史事实即使停用后也必须继续展示。
         self.prefix = (
             FastCorrectionPrefix(account_id, config.cost_basis)
-            if self.enabled and account_id
+            if account_id
             else None
         )
 

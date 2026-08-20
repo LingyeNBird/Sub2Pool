@@ -13,13 +13,13 @@ const emit = defineEmits<{ save: [] }>();
   >
     <div class="card-body">
       <h2 class="card-title">
-        <AppIcon name="bolt" class="size-5" />FAST 修正
+        <AppIcon name="bolt" class="size-5" />兼容旧版 FAST 修正
       </h2>
 
       <div class="flex items-center justify-between gap-4">
         <SettingLabel
-          label="计算 FAST 修正"
-          help="开启后，每次成功形成上游观测时都会只读该采样区间内的 Sub2API 请求日志，把 FAST 请求从 Sub2API 当前的 2 倍口径修正为上游套餐的 2.5 倍口径。关闭后停止计算新采样，已有修正事实不会删除。"
+          label="补足 Sub2API 的 2 倍 FAST 计费"
+          help="仅当 Sub2API 实际仍按 2 倍记录 FAST 成本时开启。Sub2API 0.1.179 起可在渠道定价中直接配置 FAST 倍率；渠道已设为 2.5 时必须关闭此处，避免重复修正。关闭只停止新事实采集，历史修正永久保留。"
         />
         <input
           v-model="settings.fast_correction_enabled"
@@ -42,8 +42,8 @@ const emit = defineEmits<{ save: [] }>();
       </div>
 
       <p class="text-sm leading-6 opacity-70">
-        开启后只影响后续完整采样；已有 FAST
-        事实不会删除，缺失的历史事实不会自动补写。
+        推荐在 Sub2API 的 OpenAI OAuth 渠道中把 FAST 倍率设置为
+        2.5，并保持此兼容开关关闭。旧版或仍按 2 倍计费的渠道可以重新开启。
       </p>
 
       <button

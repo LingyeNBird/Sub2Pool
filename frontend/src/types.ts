@@ -628,6 +628,7 @@ export interface AppSettingsData {
   cost_basis: string;
   weekly_quota_model: "time_varying" | "constant_average";
   fast_correction_enabled: boolean;
+  fast_pricing_upgrade_notice_pending: boolean;
   fast_correction_rebuild_recommended: boolean;
   fast_correction_missing_intervals: number;
   initial_usd_per_percent: number;
