@@ -55,10 +55,27 @@ defineExpose({ reveal });
         <h2 class="card-title">
           <AppIcon name="key" class="size-5" />只读 API
         </h2>
-        <p class="mt-2 text-sm leading-6 opacity-70">
-          为外部程序提供参与者表格和额度统计数据。API Key
-          永久有效，直到重新生成或废弃。
-        </p>
+      </div>
+
+      <div class="alert items-start alert-info">
+        <AppIcon name="information-circle" class="mt-0.5 size-5 shrink-0" />
+        <div class="min-w-0 text-sm leading-6">
+          <p>
+            这枚 Key
+            可读取全部已开放的额度业务数据，包括监控账号、额度总览、参与者、观测与
+            FAST 明细、粒子轨迹、统计和通知正文。
+          </p>
+          <p class="mt-1">
+            它不继承普通系统用户的页面或参与者范围。只应交给受信任的服务端程序，并通过
+            HTTPS 传输。
+          </p>
+          <RouterLink
+            to="/tutorial?page=readonly-api"
+            class="mt-2 inline-flex link font-medium link-primary"
+          >
+            查看端点、参数与响应文档
+          </RouterLink>
+        </div>
       </div>
 
       <div v-if="configured" class="rounded-box bg-base-100 p-4">

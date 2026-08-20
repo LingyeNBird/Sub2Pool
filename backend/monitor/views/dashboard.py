@@ -10,6 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from .base import AdminAPIView, PageAccessAPIView, error, ok
+from ..api_auth import ReadOnlyAPIKeyAuthentication
 from ..access import visible_participant_ids
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 from ..history_state import LeaseBusyError, LeaseGuard, LeaseLostError
@@ -240,6 +241,13 @@ class DashboardView(PageAccessAPIView):
                 "model_diagnostics": observation.model_diagnostics,
             }
         return ok(data)
+
+
+class ReadOnlyDashboardView(DashboardView):
+    """External API-key view exposing the dashboard summary."""
+
+    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    http_method_names = ["get", "head", "options"]
 
 
 class BalanceOperationConflict(RuntimeError):

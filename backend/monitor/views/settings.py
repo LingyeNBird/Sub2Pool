@@ -3,7 +3,7 @@ from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
-from ..api_auth import generate_readonly_api_key
+from ..api_auth import ReadOnlyAPIKeyAuthentication, generate_readonly_api_key
 
 from rest_framework.serializers import ValidationError
 from .base import AdminAPIView, PageAccessAPIView, error, ok
@@ -213,6 +213,13 @@ class MonitoredAccountListView(PageAccessAPIView):
                 ]
             )
         return ok(MonitoredAccountSerializer(account).data, 201)
+
+
+class ReadOnlyMonitoredAccountListView(MonitoredAccountListView):
+    """External API-key view exposing configured monitored accounts."""
+
+    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    http_method_names = ["get", "head", "options"]
 
 
 class MonitoredAccountDetailView(AdminAPIView):

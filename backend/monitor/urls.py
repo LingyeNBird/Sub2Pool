@@ -9,10 +9,11 @@ from .views.auth import (
     PasswordView,
     RefreshView,
 )
-from .views.account_status import AccountStatusView
+from .views.account_status import AccountStatusView, ReadOnlyAccountStatusView
 from .views.dashboard import (
     ApplyParticipantRecommendationView,
     DashboardView,
+    ReadOnlyDashboardView,
 )
 from .views.database import DatabaseExportView, DatabaseImportView
 from .views.maintenance import (
@@ -27,10 +28,13 @@ from .views.participants import (
     ReadOnlyParticipantListView,
     Sub2APIUserListView,
 )
-from .views.particle_trajectory import ParticleTrajectoryView
+from .views.particle_trajectory import (
+    ParticleTrajectoryView,
+    ReadOnlyParticleTrajectoryView,
+)
 from .views.public import AuthClientConfigView, HealthView
 from .views.readonly_api import ReadOnlyAPIRootView, ReadOnlyOpenAPIView
-from .views.notifications import NotificationListView
+from .views.notifications import NotificationListView, ReadOnlyNotificationListView
 from .views.observations import (
     ObservationExclusionView,
     ObservationFastCorrectionDetailView,
@@ -39,6 +43,8 @@ from .views.observations import (
     ObservationManualStartView,
     ObservationRebuildView,
     ObservationRestoreView,
+    ReadOnlyObservationFastCorrectionDetailView,
+    ReadOnlyObservationListView,
 )
 from .views.security import (
     BlockedIPAddressDetailView,
@@ -48,6 +54,7 @@ from .views.security import (
 from .views.settings import (
     MonitoredAccountDetailView,
     MonitoredAccountListView,
+    ReadOnlyMonitoredAccountListView,
     OpenAIAccountListView,
     SettingsView,
     ReadOnlyAPIKeyView,
@@ -96,12 +103,22 @@ urlpatterns = [
     ),
     path("v1", ReadOnlyAPIRootView.as_view()),
     path("v1/openapi.json", ReadOnlyOpenAPIView.as_view()),
+    path("v1/accounts", ReadOnlyMonitoredAccountListView.as_view()),
+    path("v1/dashboard", ReadOnlyDashboardView.as_view()),
+    path("v1/account-status", ReadOnlyAccountStatusView.as_view()),
     path("v1/participants", ReadOnlyParticipantListView.as_view()),
+    path("v1/observations", ReadOnlyObservationListView.as_view()),
+    path(
+        "v1/observations/<int:observation_id>/fast-correction",
+        ReadOnlyObservationFastCorrectionDetailView.as_view(),
+    ),
+    path("v1/particle-trajectory", ReadOnlyParticleTrajectoryView.as_view()),
     path("v1/statistics", ReadOnlyStatisticsView.as_view()),
     path(
         "v1/statistics/participants/<int:participant_id>/api-usage",
         ReadOnlyParticipantAPIUsageView.as_view(),
     ),
+    path("v1/notifications", ReadOnlyNotificationListView.as_view()),
     path("database/export", DatabaseExportView.as_view()),
     path("database/import", DatabaseImportView.as_view()),
     path("participants/sub2api-users", Sub2APIUserListView.as_view()),

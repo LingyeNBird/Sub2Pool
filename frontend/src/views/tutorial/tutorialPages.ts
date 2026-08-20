@@ -468,7 +468,7 @@ export const tutorialGroups: TutorialGroup[] = [
         group: "API 文档",
         title: "只读数据 API",
         summary:
-          "使用永久 API Key 读取参与者表格、额度统计和当前周期 API 用量构成。",
+          "使用永久 API Key 读取账号、额度、参与者、观测、模型、统计和通知数据。",
         icon: "code-bracket",
         sections: [
           {
@@ -478,12 +478,13 @@ export const tutorialGroups: TutorialGroup[] = [
               "完整 Key 只在生成后的模态框中显示一次，请立即复制到调用方的密钥管理系统。",
               "关闭模态框后，页面只显示尾部四位。服务端只保存 SHA-256 摘要，无法找回原 Key。",
               "Key 没有到期时间。重新生成会立即使旧 Key 失效；点击“废弃”会关闭全部外部只读访问。",
+              "Sub2Pool 只维护一枚全局只读 Key。它拥有全部已开放只读端点的数据范围，不继承普通系统用户的页面权限或参与者范围。",
             ],
             notes: [
               {
                 tone: "warning",
                 title: "仅通过 HTTPS 传输",
-                text: "API Key 等同于读取权限凭据。不要放在 URL、查询参数、日志或前端公开代码中。",
+                text: "API Key 等同于完整业务数据读取凭据。只应交给受信任的服务端程序；不要放在 URL、查询参数、日志或前端公开代码中。",
               },
             ],
           },
@@ -506,8 +507,9 @@ export const tutorialGroups: TutorialGroup[] = [
                 title: "常见状态码",
                 language: "text",
                 code: `200  请求成功
+400  查询参数无效
 401  未提供 Key、Key 无效、已重新生成或已废弃
-404  参与者不存在
+404  参与者或观测记录不存在
 405  该只读端点不允许写入
 409  尚未形成当前上游周期或尚未配置上游账号
 502  读取 Sub2API 数据失败`,
@@ -542,6 +544,98 @@ export const tutorialGroups: TutorialGroup[] = [
                 tone: "info",
                 title: "文档也受只读 Key 保护",
                 text: "没有有效 API Key 时，索引和 OpenAPI 文档都会返回 401；它们不会向匿名访问者公开你的接口结构。",
+              },
+            ],
+          },
+          {
+            title: "账号发现、额度总览与上游状态",
+            paragraphs: [
+              "GET /api/v1/accounts 返回全部监控账号及本地采集状态。其他按账号查询的接口使用这里的 id 作为 account_id；external_account_id 才是 Sub2API 上游账号 ID。",
+              "GET /api/v1/dashboard 返回额度总览、当前周期、待处理建议和全部账号摘要。account_id 可选；省略时选择第一个启用账号。",
+              "GET /api/v1/account-status 会对每个监控账号执行 Sub2API 只读查询，返回运行状态、额度窗口和 30 天统计。单个账号失败会写入该账号的 warnings，不会中断其他账号。",
+            ],
+            codeBlocks: [
+              {
+                title: "发现账号并读取指定账号总览",
+                language: "bash",
+                code: `curl --request GET \\
+  --url https://sub2pool.example.com/api/v1/accounts \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey'
+
+curl --get \\
+  --url https://sub2pool.example.com/api/v1/dashboard \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey' \\
+  --data-urlencode 'account_id=3'`,
+              },
+              {
+                title: "读取全部上游账号状态",
+                language: "bash",
+                code: `curl --request GET \\
+  --url https://sub2pool.example.com/api/v1/account-status \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey'`,
+              },
+            ],
+          },
+          {
+            title: "观测记录与 FAST 修正事实",
+            paragraphs: [
+              "GET /api/v1/observations 分页返回一个监控账号的观测记录、参与者快照和筛选后汇总。account_id 可选；省略时选择第一个启用账号。",
+              "GET /api/v1/observations/{observation_id}/fast-correction 返回该原始采样区间已经持久化的 FAST 请求数、计费成本、修正金额和逐用户明细。该接口不会联网补算缺失事实。",
+            ],
+            bullets: [
+              "page、page_size：页码和每页数量；page_size 最大 100。",
+              "from、to：ISO 8601 观测时间边界。",
+              "source：scheduled、manual、exhausted 或 reset。",
+              "query_mode：passive 或 direct。",
+            ],
+            codeBlocks: [
+              {
+                title: "读取被动采集的最近观测",
+                language: "bash",
+                code: `curl --get \\
+  --url https://sub2pool.example.com/api/v1/observations \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey' \\
+  --data-urlencode 'account_id=3' \\
+  --data-urlencode 'query_mode=passive' \\
+  --data-urlencode 'page_size=50'`,
+              },
+              {
+                title: "读取观测 42 的 FAST 明细",
+                language: "bash",
+                code: `curl --request GET \\
+  --url https://sub2pool.example.com/api/v1/observations/42/fast-correction \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey'`,
+              },
+            ],
+          },
+          {
+            title: "粒子轨迹与通知记录",
+            paragraphs: [
+              "GET /api/v1/particle-trajectory 对所选账号和周期执行确定性只读重放，返回容量区间、代表粒子、有效样本量和自适应范围扩展事件。account_id 与 period 均可选；period 使用响应 periods 数组中的 id。",
+              "GET /api/v1/notifications 分页返回通知收件人、主题、正文、发送状态和错误，同时提供类型、参与者和状态筛选项。",
+            ],
+            bullets: [
+              "通知支持 page、page_size、from、to、event_type、participant、subject 和 status。",
+              'participant 可传参与者 ID；传 "system" 只读取不关联参与者的系统通知。',
+              "通知正文和收件地址属于敏感业务数据，应限制调用方和日志访问范围。",
+            ],
+            codeBlocks: [
+              {
+                title: "读取指定账号的当前粒子轨迹",
+                language: "bash",
+                code: `curl --get \\
+  --url https://sub2pool.example.com/api/v1/particle-trajectory \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey' \\
+  --data-urlencode 'account_id=3'`,
+              },
+              {
+                title: "读取失败通知",
+                language: "bash",
+                code: `curl --get \\
+  --url https://sub2pool.example.com/api/v1/notifications \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey' \\
+  --data-urlencode 'status=failed' \\
+  --data-urlencode 'page_size=50'`,
               },
             ],
           },
@@ -603,7 +697,7 @@ export const tutorialGroups: TutorialGroup[] = [
           {
             title: "GET /api/v1/statistics",
             paragraphs: [
-              "按 account_id 返回一个监控账号的容量历史、当前折算摘要和参与者用量序列。account_id 使用监控账号列表中的内部 ID，不是上游账号 ID。",
+              "按 account_id 返回一个监控账号的容量历史、当前折算摘要和参与者用量序列。account_id 使用 GET /api/v1/accounts 返回的内部 id，不是 external_account_id。",
               "capacity_series 是所选账号按天或按月的周限等效额度历史；capacity_summary 包含本周期累计折算、今日折算及其计算依据；participant_series 包含所有启用参与者在所选账号中的用量。",
             ],
             bullets: [
@@ -636,7 +730,7 @@ export const tutorialGroups: TutorialGroup[] = [
     "account": {"id": 3, "external_account_id": 8801, "name": "主账号"},
     "capacity_period": "day",
     "capacity_series": [],
-    "fast_correction_enabled": false,
+    "fast_correction_enabled": true,
     "capacity_summary": {
       "cycle": {},
       "today": {}
@@ -684,7 +778,7 @@ export const tutorialGroups: TutorialGroup[] = [
     "starts_at": "2026-08-05T00:00:00+00:00",
     "observed_to": "2026-08-11T09:20:00+00:00",
     "cost_basis": "actual",
-    "fast_correction_enabled": false,
+    "fast_correction_enabled": true,
     "participant_total_usd": 480.0,
     "weekly_total_estimate_usd": 2000.0,
     "participant_weekly_percent": 24.0,
@@ -706,8 +800,9 @@ export const tutorialGroups: TutorialGroup[] = [
           {
             title: "权限边界",
             bullets: [
-              "只读 API Key 不能访问系统设置、登录记录、通知记录、原始观测或数据库备份。",
-              "只读 API Key 不能新增、编辑或删除参与者，也不能触发测算、一键调额或任何维护操作。",
+              "只读 API Key 可读取全部监控账号、总览、参与者、观测与 FAST 明细、粒子轨迹、统计、API 用量构成和通知记录。",
+              "只读 API Key 不能访问系统设置、系统用户、登录记录、IP 封禁或数据库备份。",
+              "只读 API Key 不能新增、编辑或删除数据，也不能触发测算、补算 FAST、一键调额或任何维护操作。",
               "系统管理员的 JWT 与只读 API Key 相互独立；重新生成或废弃 API Key 不会影响网页登录。",
             ],
           },

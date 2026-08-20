@@ -13,6 +13,7 @@ from monitor.models import (
     AppSettings,
     MonitoredAccount,
     Observation,
+    NotificationEvent,
     Participant,
     ParticipantAPIUsageSnapshot,
 )
@@ -92,6 +93,15 @@ def test_readonly_api_key_lifecycle_and_scope():
             },
         ],
     )
+    notification = NotificationEvent.objects.create(
+        event_type="test",
+        participant=participant,
+        dedupe_key="readonly-api-test",
+        recipient="rider@example.com",
+        subject="额度测试",
+        body="只读 API 通知正文",
+        status="sent",
+    )
 
     assert client.get("/api/v1").status_code == 401
     assert client.get("/api/v1/openapi.json").status_code == 401
@@ -118,42 +128,55 @@ def test_readonly_api_key_lifecycle_and_scope():
     assert "readonly_api_key_hash" not in settings_data
     assert "api_key" not in settings_data
 
+    assert client.get("/api/v1", **admin_headers).status_code == 401
+
     api_headers = {"HTTP_AUTHORIZATION": f"Bearer {api_key}"}
     api_index = client.get("/api/v1", **api_headers)
     assert api_index.status_code == 200
     index_data = api_index.json()["data"]
     assert index_data["openapi"] == "/api/v1/openapi.json"
     assert index_data["authentication"]["scheme"] == "bearer"
-    assert {
-        endpoint["path"] for endpoint in index_data["endpoints"]
-    } == {
+    expected_endpoint_paths = {
+        "/api/v1/accounts",
+        "/api/v1/dashboard",
+        "/api/v1/account-status",
         "/api/v1/participants",
+        "/api/v1/observations",
+        "/api/v1/observations/{observation_id}/fast-correction",
+        "/api/v1/particle-trajectory",
         "/api/v1/statistics",
         "/api/v1/statistics/participants/{participant_id}/api-usage",
+        "/api/v1/notifications",
     }
+    assert {
+        endpoint["path"] for endpoint in index_data["endpoints"]
+    } == expected_endpoint_paths
 
     openapi_response = client.get("/api/v1/openapi.json", **api_headers)
     assert openapi_response.status_code == 200
     openapi = openapi_response.json()
     assert openapi["openapi"] == "3.1.0"
+    assert openapi["info"]["version"] == "1.2.0"
     assert openapi["servers"] == [{"url": "/api"}]
     assert set(openapi["paths"]) == {
         "/v1",
         "/v1/openapi.json",
-        "/v1/participants",
-        "/v1/statistics",
-        "/v1/statistics/participants/{participant_id}/api-usage",
+        *(path.removeprefix("/api") for path in expected_endpoint_paths),
     }
+    assert {
+        f"/api{path}"
+        for path in openapi["paths"]
+        if path not in {"/v1", "/v1/openapi.json"}
+    } == expected_endpoint_paths
     assert openapi["security"] == [{"ReadOnlyApiKey": []}]
     assert (
         openapi["components"]["securitySchemes"]["ReadOnlyApiKey"]["scheme"]
         == "bearer"
     )
     schemas = openapi["components"]["schemas"]
-    assert schemas["CapacityPoint"]["properties"]["basis"]["type"] == [
-        "object",
-        "null",
-    ]
+    assert schemas["CapacityPoint"]["properties"]["basis"]["oneOf"][0][
+        "$ref"
+    ].endswith("/CapacityClosingBasis")
     assert schemas["ApiKeyUsage"]["properties"]["api_key_id"]["type"] == [
         "integer",
         "null",
@@ -164,12 +187,89 @@ def test_readonly_api_key_lifecycle_and_scope():
     assert schemas["AggregateRecommendation"]["properties"]["allocation_model"][
         "const"
     ] == "pooled_account_sum"
+    assert schemas["ParticipantSnapshot"]["properties"]["allocation_model"][
+        "enum"
+    ] == ["time_varying", "constant_average"]
+    assert schemas["ObservationList"]["properties"]["items"]["items"][
+        "$ref"
+    ].endswith("/Observation")
+    assert schemas["AccountStatus"]["properties"]["accounts"]["items"][
+        "$ref"
+    ].endswith("/AccountStatusAccount")
+    assert schemas["NotificationList"]["properties"]["items"]["items"][
+        "$ref"
+    ].endswith("/Notification")
+
+    referenced_schemas = set()
+
+    def collect_schema_references(value):
+        if isinstance(value, dict):
+            reference = value.get("$ref")
+            if isinstance(reference, str) and reference.startswith(
+                "#/components/schemas/"
+            ):
+                referenced_schemas.add(reference.rsplit("/", 1)[-1])
+            for child in value.values():
+                collect_schema_references(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect_schema_references(child)
+
+    collect_schema_references(openapi)
+    assert referenced_schemas <= set(schemas)
 
     participants = client.get("/api/v1/participants", **api_headers)
     assert participants.status_code == 200
     assert participants.json()["data"][0]["id"] == participant.id
     participant_data = participants.json()["data"][0]
     assert participant_data["account_breakdowns"][0]["account_id"] == account.id
+
+    accounts = client.get("/api/v1/accounts", **api_headers)
+    assert accounts.status_code == 200
+    assert accounts.json()["data"][0]["external_account_id"] == 7
+
+    dashboard = client.get(
+        f"/api/v1/dashboard?account_id={account.id}",
+        **api_headers,
+    )
+    assert dashboard.status_code == 200
+    assert dashboard.json()["data"]["selected_account_id"] == account.id
+
+    account_status = client.get("/api/v1/account-status", **api_headers)
+    assert account_status.status_code == 200
+    assert account_status.json()["data"]["configured"] is False
+    assert account_status.json()["data"]["accounts"][0]["id"] == account.id
+
+    observations = client.get(
+        f"/api/v1/observations?account_id={account.id}&page_size=1",
+        **api_headers,
+    )
+    assert observations.status_code == 200
+    assert observations.json()["data"]["items"][0]["id"] == observation.id
+    assert observations.json()["data"]["pagination"]["total"] == 1
+
+    fast_detail = client.get(
+        f"/api/v1/observations/{observation.id}/fast-correction",
+        **api_headers,
+    )
+    assert fast_detail.status_code == 200
+    assert fast_detail.json()["data"]["observation_id"] == observation.id
+    assert fast_detail.json()["data"]["calculated"] is False
+
+    trajectory = client.get(
+        f"/api/v1/particle-trajectory?account_id={account.id}",
+        **api_headers,
+    )
+    assert trajectory.status_code == 200
+    assert trajectory.json()["data"]["account"]["id"] == account.id
+
+    notifications = client.get(
+        "/api/v1/notifications?status=sent&page_size=1",
+        **api_headers,
+    )
+    assert notifications.status_code == 200
+    assert notifications.json()["data"]["items"][0]["id"] == notification.id
+    assert notifications.json()["data"]["items"][0]["body"] == notification.body
 
     assert client.get("/api/v1/statistics", **api_headers).status_code == 400
     statistics = client.get(
@@ -205,12 +305,26 @@ def test_readonly_api_key_lifecycle_and_scope():
     assert api_usage.json()["data"]["participant_total_usd"] == 120.0
     assert api_usage.json()["data"]["api_keys"][1]["api_key_id"] is None
 
-    assert client.post("/api/v1/participants", **api_headers).status_code == 405
-    assert (
-        client.post("/api/v1/openapi.json", **api_headers).status_code
-        == 405
-    )
+    read_paths = [
+        "/api/v1/accounts",
+        f"/api/v1/dashboard?account_id={account.id}",
+        "/api/v1/account-status",
+        "/api/v1/participants",
+        f"/api/v1/observations?account_id={account.id}",
+        f"/api/v1/observations/{observation.id}/fast-correction",
+        f"/api/v1/particle-trajectory?account_id={account.id}",
+        f"/api/v1/statistics?account_id={account.id}",
+        (
+            f"/api/v1/statistics/participants/{participant.id}/api-usage"
+            f"?account_id={account.id}"
+        ),
+        "/api/v1/notifications",
+    ]
+    for path in read_paths:
+        assert client.post(path, **api_headers).status_code == 405
+    assert client.post("/api/v1/openapi.json", **api_headers).status_code == 405
     assert client.get("/api/settings", **api_headers).status_code == 401
+    assert client.get("/api/login-events", **api_headers).status_code == 401
 
     rotated_response = client.post(
         "/api/settings/readonly-api-key",

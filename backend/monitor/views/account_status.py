@@ -8,6 +8,7 @@ from typing import Any
 from django.utils import timezone
 
 from .base import PageAccessAPIView, ok
+from ..api_auth import ReadOnlyAPIKeyAuthentication
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError, WeeklyWindow
 from ..models import AppSettings, MonitoredAccount, PagePermission
 
@@ -128,3 +129,10 @@ class AccountStatusView(PageAccessAPIView):
                     row["warnings"].append(f"{STATS_DAYS} 天统计：{exc}")
 
         return ok(data)
+
+
+class ReadOnlyAccountStatusView(AccountStatusView):
+    """External API-key view exposing live upstream account status."""
+
+    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    http_method_names = ["get", "head", "options"]
