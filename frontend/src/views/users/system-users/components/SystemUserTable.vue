@@ -5,10 +5,12 @@ import type { SystemUser } from "@/types";
 defineProps<{
   users: SystemUser[];
   loading: boolean;
+  editable: boolean;
 }>();
 
 defineEmits<{
   edit: [user: SystemUser];
+  editPermissions: [user: SystemUser];
   remove: [user: SystemUser];
 }>();
 
@@ -23,7 +25,7 @@ const dateTime = useDateTime("从未登录");
           <AppIcon name="identification" class="size-5" />用户与可见范围
         </h2>
         <p class="mt-1 text-sm opacity-60">
-          普通用户只能进入额度统计页面，并且只能看到绑定参与者的账号用量。
+          页面权限控制可进入的功能；参与者权限限制各页面中可见的具体参与者。
         </p>
       </div>
       <div v-if="loading" class="flex justify-center py-10">
@@ -34,10 +36,11 @@ const dateTime = useDateTime("从未登录");
           <thead>
             <tr>
               <th>用户</th>
-              <th>绑定参与者</th>
+              <th>页面权限</th>
+              <th>可见参与者</th>
               <th>状态</th>
               <th>最近登录</th>
-              <th></th>
+              <th v-if="editable"></th>
             </tr>
           </thead>
           <tbody>
@@ -49,6 +52,11 @@ const dateTime = useDateTime("从未登录");
                 </div>
               </td>
               <td>
+                <span class="badge badge-sm badge-primary">
+                  {{ user.page_permissions.length }} 个页面
+                </span>
+              </td>
+              <td>
                 <div class="flex max-w-lg flex-wrap gap-1">
                   <span
                     v-for="(name, index) in user.participant_names"
@@ -56,6 +64,12 @@ const dateTime = useDateTime("从未登录");
                     class="badge badge-ghost badge-sm"
                   >
                     {{ name }}
+                  </span>
+                  <span
+                    v-if="!user.participant_names.length"
+                    class="text-sm opacity-50"
+                  >
+                    未选择
                   </span>
                 </div>
               </td>
@@ -68,12 +82,18 @@ const dateTime = useDateTime("从未登录");
                 </span>
               </td>
               <td class="whitespace-nowrap">{{ dateTime(user.last_login) }}</td>
-              <td class="text-right whitespace-nowrap">
+              <td v-if="editable" class="text-right whitespace-nowrap">
                 <button
                   class="btn btn-ghost btn-xs"
                   @click="$emit('edit', user)"
                 >
                   编辑
+                </button>
+                <button
+                  class="btn btn-ghost text-primary btn-xs"
+                  @click="$emit('editPermissions', user)"
+                >
+                  编辑权限
                 </button>
                 <button
                   class="btn btn-ghost text-error btn-xs"

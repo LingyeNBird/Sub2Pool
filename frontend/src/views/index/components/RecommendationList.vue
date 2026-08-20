@@ -6,6 +6,7 @@ import RecommendationCard from "./RecommendationCard.vue";
 defineProps<{
   participants: Participant[];
   appliedParticipantIds: number[];
+  readOnly: boolean;
 }>();
 
 defineEmits<{
@@ -26,6 +27,7 @@ defineEmits<{
           :key="participant.id"
           :participant="participant"
           :applied="appliedParticipantIds.includes(participant.id)"
+          :read-only="readOnly"
           @select="$emit('select', $event)"
         />
       </div>

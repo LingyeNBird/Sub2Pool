@@ -23,7 +23,7 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const visibleNavigation = computed(() =>
-  navigation.filter((item) => auth.isStaff || !item.adminOnly),
+  navigation.filter((item) => auth.canAccess(item.permission)),
 );
 const menu = ref<HTMLElement | null>(null);
 const sidebar = ref<HTMLElement | null>(null);

@@ -1,17 +1,23 @@
-"""Non-admin system-user write serializers."""
+"""Non-admin system-user identity and permission serializers."""
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
-from ..models import Participant
+from ..models import (
+    PARTICIPANT_SCOPED_PAGE_PERMISSIONS,
+    PagePermission,
+    Participant,
+    SystemUserPageAccess,
+)
 
 User = get_user_model()
 
 
 class SystemUserWriteSerializer(serializers.Serializer):
-    """普通系统用户写入契约；管理员账号不通过该接口管理。"""
+    """Ordinary system-user identity; access grants are managed separately."""
 
     username = serializers.CharField(
         max_length=150,
@@ -26,12 +32,6 @@ class SystemUserWriteSerializer(serializers.Serializer):
         write_only=True,
     )
     is_active = serializers.BooleanField(default=True)
-    participant_ids = serializers.PrimaryKeyRelatedField(
-        source="participants",
-        many=True,
-        allow_empty=False,
-        queryset=Participant.objects.all(),
-    )
 
     def validate_username(self, value: str) -> str:
         queryset = User.objects.filter(username__iexact=value)
@@ -42,6 +42,18 @@ class SystemUserWriteSerializer(serializers.Serializer):
         return value
 
     def validate(self, attrs):
+        unexpected_fields = set(self.initial_data) - set(self.fields)
+        if unexpected_fields:
+            raise serializers.ValidationError(
+                {
+                    field: (
+                        "请通过系统用户权限接口修改该字段"
+                        if field == "participant_ids"
+                        else "不支持该字段"
+                    )
+                    for field in sorted(unexpected_fields)
+                }
+            )
         password = attrs.get("password", "")
         if self.instance is None and not password:
             raise serializers.ValidationError({"password": "添加用户时必须设置密码"})
@@ -66,7 +78,6 @@ class SystemUserWriteSerializer(serializers.Serializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        participants = validated_data.pop("participants")
         password = validated_data.pop("password")
         user = User(
             **validated_data,
@@ -75,19 +86,72 @@ class SystemUserWriteSerializer(serializers.Serializer):
         )
         user.set_password(password)
         user.save()
-        user.quota_participants.set(participants)
         return user
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        participants = validated_data.pop("participants", None)
         password = validated_data.pop("password", "")
         for field, value in validated_data.items():
             setattr(instance, field, value)
         if password:
             instance.set_password(password)
         instance.save()
-        if participants is not None:
-            instance.quota_participants.set(participants)
+        return instance
 
+
+class SystemUserPermissionSerializer(serializers.Serializer):
+    page_permissions = serializers.ListField(
+        child=serializers.ChoiceField(choices=PagePermission.choices),
+        allow_empty=True,
+    )
+    participant_ids = serializers.PrimaryKeyRelatedField(
+        source="participants",
+        many=True,
+        allow_empty=True,
+        queryset=Participant.objects.all(),
+    )
+
+    def validate_page_permissions(self, value):
+        if len(value) != len(set(value)):
+            raise serializers.ValidationError("页面权限不能重复")
+        return value
+
+    def validate(self, attrs):
+        unexpected_fields = set(self.initial_data) - set(self.fields)
+        if unexpected_fields:
+            raise serializers.ValidationError(
+                {
+                    field: "不支持该字段"
+                    for field in sorted(unexpected_fields)
+                }
+            )
+        page_permissions = set(attrs["page_permissions"])
+        if (
+            page_permissions & PARTICIPANT_SCOPED_PAGE_PERMISSIONS
+            and not attrs["participants"]
+        ):
+            raise serializers.ValidationError(
+                {
+                    "participant_ids": (
+                        "已开放包含参与者数据的页面，请至少选择一个可查看的参与者"
+                    )
+                }
+            )
+        return attrs
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        page_permissions = validated_data["page_permissions"]
+        participants = validated_data["participants"]
+        SystemUserPageAccess.objects.filter(user=instance).delete()
+        SystemUserPageAccess.objects.bulk_create(
+            [
+                SystemUserPageAccess(user=instance, page_code=page_code)
+                for page_code in page_permissions
+            ]
+        )
+        instance.quota_participants.set(participants)
+        prefetch_cache = getattr(instance, "_prefetched_objects_cache", {})
+        prefetch_cache.pop("page_accesses", None)
+        prefetch_cache.pop("quota_participants", None)
         return instance

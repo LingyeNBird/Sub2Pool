@@ -33,7 +33,7 @@ async function logout() {
       style="position-anchor: --header-profile-anchor"
     >
       <li class="menu-title">{{ auth.username }}</li>
-      <li v-if="auth.isStaff">
+      <li v-if="auth.canAccess('settings')">
         <RouterLink to="/settings">系统设置</RouterLink>
       </li>
       <li><button type="button" @click="logout">退出登录</button></li>

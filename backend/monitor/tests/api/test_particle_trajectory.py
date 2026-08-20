@@ -6,7 +6,12 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from django.utils import timezone
 
-from monitor.models import AppSettings, Observation
+from monitor.models import (
+    AppSettings,
+    Observation,
+    PagePermission,
+    SystemUserPageAccess,
+)
 from monitor.replay import rebuild_account, rebuild_observation_suffix
 from monitor.particle_trajectory import _trajectory_periods
 from monitor.tests.helpers import create_monitored_account, jwt_login
@@ -354,9 +359,13 @@ def test_particle_trajectory_defers_continuous_zero_plateau_until_usage():
 
 @pytest.mark.django_db
 def test_particle_trajectory_allows_authenticated_system_user():
-    get_user_model().objects.create_user(
+    viewer = get_user_model().objects.create_user(
         username="viewer",
         password="very-strong-password",
+    )
+    SystemUserPageAccess.objects.create(
+        user=viewer,
+        page_code=PagePermission.PARTICLE_FILTER,
     )
     client = Client()
     headers, _ = jwt_login(client, username="viewer")

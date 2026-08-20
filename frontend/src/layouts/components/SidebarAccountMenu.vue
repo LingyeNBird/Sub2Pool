@@ -43,7 +43,7 @@ async function logout() {
       popover
       style="position-anchor: --sidebar-account-anchor"
     >
-      <li v-if="auth.isStaff">
+      <li v-if="auth.canAccess('settings')">
         <RouterLink to="/settings">
           <AppIcon name="cog-6-tooth" class="size-4" />
           系统设置

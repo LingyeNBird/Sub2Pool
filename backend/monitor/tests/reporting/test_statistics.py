@@ -25,10 +25,12 @@ from monitor.models import (
     Observation,
     ObservationFastCorrection,
     Participant,
+    PagePermission,
     ParticipantAPIUsageSnapshot,
     ParticipantSnapshot,
     ParticipantUsageSample,
     Sub2APIUserUsageSample,
+    SystemUserPageAccess,
 )
 from monitor.notifications import send_notification
 from monitor.replay import (
@@ -366,13 +368,21 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
     config.cost_basis = "actual"
     config.fast_correction_enabled = True
     config.save()
-    participant = create_participant(name="车友",
-    sub2api_user_id=22,
-    share_percent=50,)
+    participant = create_participant(
+        name="车友",
+        sub2api_user_id=22,
+        share_percent=50,
+    )
     participant.authorized_users.add(viewer)
-    hidden = create_participant(name="未授权车友",
-    sub2api_user_id=23,
-    share_percent=50,)
+    hidden = create_participant(
+        name="未授权车友",
+        sub2api_user_id=23,
+        share_percent=50,
+    )
+    SystemUserPageAccess.objects.create(
+        user=viewer,
+        page_code=PagePermission.STATISTICS,
+    )
     now = timezone.now()
     starts_at = now - timedelta(days=2)
     Observation.objects.create(

@@ -1,13 +1,13 @@
 """参与者资源 API。"""
 
 from rest_framework import status
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from ..api_auth import ReadOnlyAPIKeyAuthentication
 
-from .base import AdminAPIView, AuthenticatedAPIView, error, ok
+from .base import AdminAPIView, PageAccessAPIView, error, ok
+from ..access import visible_participants_for
 from ..reporting import participant_data
 from ..history_state import fenced_fact_write
-from ..models import AppSettings, MonitoredAccount, Participant
+from ..models import AppSettings, MonitoredAccount, PagePermission, Participant
 from ..serializers import ParticipantWriteSerializer
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 
@@ -56,20 +56,15 @@ class Sub2APIUserListView(AdminAPIView):
 
 
 
-class ParticipantListView(AuthenticatedAPIView):
-    def get_permissions(self):
-        permission_classes = (
-            [IsAuthenticated] if self.request.method == "GET" else [IsAdminUser]
-        )
-        return [permission() for permission in permission_classes]
+class ParticipantListView(PageAccessAPIView):
+    required_page_permissions = (PagePermission.PARTICIPANTS,)
 
     def get(self, request):
         config = AppSettings.load()
-        participants = Participant.objects.prefetch_related(
-            "account_memberships__account"
+        participants = visible_participants_for(
+            request.user,
+            Participant.objects.prefetch_related("account_memberships__account"),
         )
-        if not request.user.is_staff:
-            participants = participants.filter(authorized_users=request.user)
         return ok([participant_data(item, config) for item in participants])
 
     def post(self, request):

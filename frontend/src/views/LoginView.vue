@@ -64,9 +64,7 @@ async function submit() {
     const next =
       typeof route.query.next === "string" && route.query.next.startsWith("/")
         ? route.query.next
-        : auth.isStaff
-          ? "/"
-          : "/statistics";
+        : (auth.firstAccessiblePath() ?? "/no-access");
     await router.replace(next);
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "登录失败";

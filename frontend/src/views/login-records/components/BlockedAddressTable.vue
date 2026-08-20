@@ -4,6 +4,7 @@ import type { BlockedIPAddress } from "@/types";
 
 defineProps<{
   blockedAddresses: BlockedIPAddress[];
+  editable: boolean;
 }>();
 
 defineEmits<{
@@ -33,7 +34,7 @@ const dateTime = useDateTime();
               <th>地址</th>
               <th>备注</th>
               <th>封禁时间</th>
-              <th></th>
+              <th v-if="editable"></th>
             </tr>
           </thead>
           <tbody>
@@ -46,7 +47,7 @@ const dateTime = useDateTime();
               <td class="font-mono text-xs">{{ item.address }}</td>
               <td>{{ item.notes || "—" }}</td>
               <td class="whitespace-nowrap">{{ dateTime(item.created_at) }}</td>
-              <td class="text-right">
+              <td v-if="editable" class="text-right">
                 <button
                   class="btn btn-ghost text-error btn-xs"
                   @click="$emit('unblock', item)"

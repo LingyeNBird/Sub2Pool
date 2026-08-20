@@ -16,6 +16,7 @@ defineProps<{
   manualRangeStart: Observation | null;
   rebuilding: boolean;
   fastCorrectionEnabled: boolean;
+  editable: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -61,6 +62,7 @@ function isAtOrAfter(row: Observation, start: Observation) {
           <AppIcon name="document-magnifying-glass" class="size-5" />校准历史
         </h2>
         <button
+          v-if="editable"
           type="button"
           class="btn btn-sm"
           :disabled="rebuilding || loading"
@@ -74,7 +76,7 @@ function isAtOrAfter(row: Observation, start: Observation) {
           {{ rebuilding ? "重建中" : "重建计算" }}
         </button>
       </div>
-      <div v-if="manualRangeStart" class="alert py-3 alert-info">
+      <div v-if="editable && manualRangeStart" class="alert py-3 alert-info">
         <AppIcon name="arrows-right-left" class="size-5" />
         <div class="grow text-sm">
           <div class="font-medium">已选择开始记录</div>
@@ -239,60 +241,62 @@ function isAtOrAfter(row: Observation, start: Observation) {
                     >
                       详情
                     </button>
-                    <template v-if="manualRangeStart">
-                      <button
-                        v-if="isAtOrAfter(row, manualRangeStart)"
-                        class="btn btn-ghost text-primary btn-xs"
-                        @click="emit('endManualRange', row)"
-                      >
-                        {{
-                          row.id === manualRangeStart.id
-                            ? "同记录作终点"
-                            : "设为终点"
-                        }}
-                      </button>
-                      <span v-else class="px-2 text-xs opacity-45">
-                        早于开始
-                      </span>
-                    </template>
-                    <template v-else-if="row.excluded">
-                      <button
-                        class="btn btn-ghost text-success btn-xs"
-                        :disabled="restoringId === row.id"
-                        @click="emit('restore', row)"
-                      >
-                        <span
-                          v-if="restoringId === row.id"
-                          class="loading loading-xs loading-spinner"
-                        ></span>
-                        恢复
-                      </button>
-                    </template>
-                    <template v-else>
-                      <button
-                        class="btn btn-ghost text-primary btn-xs"
-                        @click="emit('beginManualRange', row)"
-                      >
-                        {{ row.is_manual_start ? "调整区间" : "设置区间" }}
-                      </button>
-                      <button
-                        v-if="row.is_manual_start"
-                        class="btn btn-ghost text-primary btn-xs"
-                        :disabled="manualStartId === row.id"
-                        @click="emit('clearManualStart', row)"
-                      >
-                        <span
-                          v-if="manualStartId === row.id"
-                          class="loading loading-xs loading-spinner"
-                        ></span>
-                        取消区间
-                      </button>
-                      <button
-                        class="btn btn-ghost text-warning btn-xs"
-                        @click="emit('exclude', row)"
-                      >
-                        排除
-                      </button>
+                    <template v-if="editable">
+                      <template v-if="manualRangeStart">
+                        <button
+                          v-if="isAtOrAfter(row, manualRangeStart)"
+                          class="btn btn-ghost text-primary btn-xs"
+                          @click="emit('endManualRange', row)"
+                        >
+                          {{
+                            row.id === manualRangeStart.id
+                              ? "同记录作终点"
+                              : "设为终点"
+                          }}
+                        </button>
+                        <span v-else class="px-2 text-xs opacity-45">
+                          早于开始
+                        </span>
+                      </template>
+                      <template v-else-if="row.excluded">
+                        <button
+                          class="btn btn-ghost text-success btn-xs"
+                          :disabled="restoringId === row.id"
+                          @click="emit('restore', row)"
+                        >
+                          <span
+                            v-if="restoringId === row.id"
+                            class="loading loading-xs loading-spinner"
+                          ></span>
+                          恢复
+                        </button>
+                      </template>
+                      <template v-else>
+                        <button
+                          class="btn btn-ghost text-primary btn-xs"
+                          @click="emit('beginManualRange', row)"
+                        >
+                          {{ row.is_manual_start ? "调整区间" : "设置区间" }}
+                        </button>
+                        <button
+                          v-if="row.is_manual_start"
+                          class="btn btn-ghost text-primary btn-xs"
+                          :disabled="manualStartId === row.id"
+                          @click="emit('clearManualStart', row)"
+                        >
+                          <span
+                            v-if="manualStartId === row.id"
+                            class="loading loading-xs loading-spinner"
+                          ></span>
+                          取消区间
+                        </button>
+                        <button
+                          class="btn btn-ghost text-warning btn-xs"
+                          @click="emit('exclude', row)"
+                        >
+                          排除
+                        </button>
+                      </template>
                     </template>
                   </div>
                 </td>

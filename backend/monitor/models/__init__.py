@@ -1,6 +1,11 @@
 """Database models grouped by business domain."""
 from .validators import PERCENT_VALIDATORS, validate_service_url
 
+from .access import (
+    PARTICIPANT_SCOPED_PAGE_PERMISSIONS,
+    PagePermission,
+    SystemUserPageAccess,
+)
 
 from .settings import AppSettings, MonitoredAccount
 from .participants import AccountParticipant, Participant
@@ -34,6 +39,8 @@ __all__ = [
     "Observation",
     "ObservationFastCorrection",
     "ParticipantAPIUsageSnapshot",
+    "PagePermission",
+    "PARTICIPANT_SCOPED_PAGE_PERMISSIONS",
     "Participant",
     "ParticipantSnapshot",
     "ParticipantBalanceOperation",
@@ -41,6 +48,7 @@ __all__ = [
     "ParticipantBalanceSample",
     "ParticipantUsageSample",
     "Sub2APIUserUsageSample",
+    "SystemUserPageAccess",
     "UsageSamplePoint",
     "PERCENT_VALIDATORS",
     "validate_service_url",

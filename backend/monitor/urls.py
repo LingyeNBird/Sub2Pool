@@ -58,7 +58,11 @@ from .views.statistics import (
     ReadOnlyStatisticsView,
     StatisticsView,
 )
-from .views.users import SystemUserDetailView, SystemUserListView
+from .views.users import (
+    SystemUserDetailView,
+    SystemUserListView,
+    SystemUserPermissionView,
+)
 
 urlpatterns = [
     path("health", HealthView.as_view()),
@@ -98,6 +102,10 @@ urlpatterns = [
     path("participants/<int:participant_id>", ParticipantDetailView.as_view()),
     path("system-users", SystemUserListView.as_view()),
     path("system-users/<int:user_id>", SystemUserDetailView.as_view()),
+    path(
+        "system-users/<int:user_id>/permissions",
+        SystemUserPermissionView.as_view(),
+    ),
     path("observations", ObservationListView.as_view()),
     path(
         "observations/<int:observation_id>/fast-correction",

@@ -13,6 +13,7 @@ defineProps<{
   blockedAddresses: BlockedIPAddress[];
   pagination: PaginationMeta;
   loading: boolean;
+  editable: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -80,6 +81,7 @@ function existingBlock(
                   v-if="item.request_ip"
                   class="btn btn-ghost font-mono btn-xs"
                   :disabled="
+                    !editable ||
                     Boolean(
                       existingBlock(
                         blockedAddresses,
@@ -121,6 +123,7 @@ function existingBlock(
                     :key="address"
                     class="btn btn-ghost font-mono btn-xs"
                     :disabled="
+                      !editable ||
                       Boolean(
                         existingBlock(blockedAddresses, address, 'webrtc'),
                       )
@@ -147,6 +150,7 @@ function existingBlock(
                   v-if="item.remote_ip"
                   class="btn btn-ghost font-mono btn-xs"
                   :disabled="
+                    !editable ||
                     Boolean(
                       existingBlock(blockedAddresses, item.remote_ip, 'remote'),
                     )

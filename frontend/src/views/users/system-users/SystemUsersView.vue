@@ -4,19 +4,28 @@ import { computed, onMounted, ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
+import { useAuthStore } from "@/stores/auth";
 import type { ConfirmDialogHandle, Participant, SystemUser } from "@/types";
 
 import SystemUserEditorDialog from "./components/SystemUserEditorDialog.vue";
+import SystemUserPermissionDialog from "./components/SystemUserPermissionDialog.vue";
 import SystemUserStats from "./components/SystemUserStats.vue";
 import SystemUserTable from "./components/SystemUserTable.vue";
-import type { SystemUserEditorHandle, SystemUserFormData } from "./types";
+import type {
+  SystemUserEditorHandle,
+  SystemUserFormData,
+  SystemUserPermissionEditorHandle,
+  SystemUserPermissionFormData,
+} from "./types";
 
+const auth = useAuthStore();
 const users = ref<SystemUser[]>([]);
 const participants = ref<Participant[]>([]);
 const loading = ref(true);
 const saving = ref(false);
 const message = ref("");
 const editor = ref<SystemUserEditorHandle | null>(null);
+const permissionEditor = ref<SystemUserPermissionEditorHandle | null>(null);
 const confirmDialog = ref<ConfirmDialogHandle | null>(null);
 
 const activeCount = computed(
@@ -30,12 +39,17 @@ async function load() {
   loading.value = true;
   message.value = "";
   try {
-    const [userRows, participantRows] = await Promise.all([
-      api<SystemUser[]>("system-users"),
-      api<Participant[]>("participants"),
-    ]);
-    users.value = userRows;
-    participants.value = participantRows;
+    if (auth.isStaff) {
+      const [userRows, participantRows] = await Promise.all([
+        api<SystemUser[]>("system-users"),
+        api<Participant[]>("participants"),
+      ]);
+      users.value = userRows;
+      participants.value = participantRows;
+    } else {
+      users.value = await api<SystemUser[]>("system-users");
+      participants.value = [];
+    }
   } catch (error) {
     message.value =
       error instanceof ApiError ? error.message : "加载系统用户失败";
@@ -48,14 +62,42 @@ async function save(form: SystemUserFormData, userId: number | null) {
   message.value = "";
   saving.value = true;
   try {
-    await api(userId ? `system-users/${userId}` : "system-users", {
-      method: userId ? "PATCH" : "POST",
-      body: jsonBody(form),
-    });
+    const savedUser = await api<SystemUser>(
+      userId ? `system-users/${userId}` : "system-users",
+      {
+        method: userId ? "PATCH" : "POST",
+        body: jsonBody(form),
+      },
+    );
     editor.value?.close();
     await load();
+    if (userId == null) {
+      permissionEditor.value?.open(
+        users.value.find((user) => user.id === savedUser.id) ?? savedUser,
+      );
+    }
   } catch (error) {
     editor.value?.showApiError(error);
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function savePermissions(
+  form: SystemUserPermissionFormData,
+  userId: number,
+) {
+  message.value = "";
+  saving.value = true;
+  try {
+    await api<SystemUser>(`system-users/${userId}/permissions`, {
+      method: "PATCH",
+      body: jsonBody(form),
+    });
+    permissionEditor.value?.close();
+    await load();
+  } catch (error) {
+    permissionEditor.value?.showApiError(error);
   } finally {
     saving.value = false;
   }
@@ -94,7 +136,11 @@ onMounted(load);
         </ul>
       </div>
     </div>
-    <button class="btn btn-primary btn-sm" @click="editor?.open(null)">
+    <button
+      v-if="auth.isStaff"
+      class="btn btn-primary btn-sm"
+      @click="editor?.open(null)"
+    >
       <AppIcon name="user-plus" class="size-4" />添加用户
     </button>
   </PageShellHeader>
@@ -112,14 +158,23 @@ onMounted(load);
   <SystemUserTable
     :users="users"
     :loading="loading"
+    :editable="auth.isStaff"
     @edit="editor?.open($event)"
+    @edit-permissions="permissionEditor?.open($event)"
     @remove="remove"
   />
   <SystemUserEditorDialog
+    v-if="auth.isStaff"
     ref="editor"
-    :participants="participants"
     :saving="saving"
     @save="save"
   />
-  <ConfirmDialog ref="confirmDialog" />
+  <SystemUserPermissionDialog
+    v-if="auth.isStaff"
+    ref="permissionEditor"
+    :participants="participants"
+    :saving="saving"
+    @save="savePermissions"
+  />
+  <ConfirmDialog v-if="auth.isStaff" ref="confirmDialog" />
 </template>

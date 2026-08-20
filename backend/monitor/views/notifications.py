@@ -1,14 +1,24 @@
 """通知审计查询接口。"""
 
-from .base import AdminAPIView, error, ok
+from django.db.models import Q
+
+from .base import PageAccessAPIView, error, ok
+from ..access import visible_participants_for
 from ..reporting import iso
 from .record_helpers import paginated_rows, query_datetime
-from ..models import NotificationEvent, Participant
+from ..models import NotificationEvent, PagePermission, Participant
 
 
-class NotificationListView(AdminAPIView):
+class NotificationListView(PageAccessAPIView):
+    required_page_permissions = (PagePermission.NOTIFICATIONS,)
+
     def get(self, request):
         queryset = NotificationEvent.objects.select_related("participant")
+        if not request.user.is_staff:
+            queryset = queryset.filter(
+                Q(participant__authorized_users=request.user)
+                | Q(participant__isnull=True)
+            )
         try:
             created_from = query_datetime(request, "from")
             created_to = query_datetime(request, "to")
@@ -89,7 +99,7 @@ class NotificationListView(AdminAPIView):
                     ],
                     "participants": [
                         {"id": item.id, "name": item.name}
-                        for item in Participant.objects.all()
+                        for item in visible_participants_for(request.user)
                     ],
                     "statuses": [
                         {"value": value, "label": label}

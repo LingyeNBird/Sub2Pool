@@ -2,16 +2,18 @@
 
 from django.shortcuts import get_object_or_404
 
-from .base import AdminAPIView, error, ok
+from .base import AdminAPIView, PageAccessAPIView, error, ok
 from ..reporting import iso
 from .record_helpers import paginated_rows
 from ..login_audit import request_addresses
-from ..models import BlockedIPAddress, LoginEvent
+from ..models import BlockedIPAddress, LoginEvent, PagePermission
 from ..serializers import BlockedIPAddressSerializer
 
 
-class BlockedIPAddressListView(AdminAPIView):
+class BlockedIPAddressListView(PageAccessAPIView):
     """列出封禁项，并允许管理员从登录审计记录创建封禁。"""
+
+    required_page_permissions = (PagePermission.LOGIN_RECORDS,)
 
     def get(self, _request):
         rows = BlockedIPAddress.objects.select_related("login_event")
@@ -43,7 +45,9 @@ class BlockedIPAddressDetailView(AdminAPIView):
         return ok()
 
 
-class LoginEventListView(AdminAPIView):
+class LoginEventListView(PageAccessAPIView):
+    required_page_permissions = (PagePermission.LOGIN_RECORDS,)
+
     def get(self, request):
         queryset = LoginEvent.objects.all()
         rows, pagination = paginated_rows(request, queryset)

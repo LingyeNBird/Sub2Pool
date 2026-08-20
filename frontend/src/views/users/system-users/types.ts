@@ -1,3 +1,4 @@
+import type { PagePermission } from "@/config/pagePermissions";
 import type { SystemUser } from "@/types";
 
 export interface SystemUserFormData {
@@ -5,11 +6,21 @@ export interface SystemUserFormData {
   email: string;
   password?: string;
   is_active: boolean;
+}
+
+export interface SystemUserPermissionFormData {
+  page_permissions: PagePermission[];
   participant_ids: number[];
 }
 
 export interface SystemUserEditorHandle {
   open: (user: SystemUser | null) => void;
+  close: () => void;
+  showApiError: (error: unknown) => void;
+}
+
+export interface SystemUserPermissionEditorHandle {
+  open: (user: SystemUser) => void;
   close: () => void;
   showApiError: (error: unknown) => void;
 }

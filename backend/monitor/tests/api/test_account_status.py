@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 
 from monitor.integrations.sub2api import Sub2APIError, WeeklyWindow
-from monitor.models import AppSettings
+from monitor.models import AppSettings, PagePermission, SystemUserPageAccess
 from monitor.secrets import encrypt_secret
 from monitor.tests.helpers import create_monitored_account, jwt_login
 from monitor.views.account_status import _fallback_usage
@@ -172,9 +172,9 @@ def test_account_status_returns_each_account_and_isolates_upstream_failures(
 
 
 @pytest.mark.django_db
-def test_account_status_requires_staff_permission():
+def test_account_status_requires_page_permission():
     user_model = get_user_model()
-    user_model.objects.create_user(
+    user = user_model.objects.create_user(
         username="viewer",
         password="viewer-password",
     )
@@ -188,3 +188,9 @@ def test_account_status_requires_staff_permission():
         password="viewer-password",
     )
     assert client.get("/api/account-status", **headers).status_code == 403
+
+    SystemUserPageAccess.objects.create(
+        user=user,
+        page_code=PagePermission.ACCOUNT_STATUS,
+    )
+    assert client.get("/api/account-status", **headers).status_code == 200

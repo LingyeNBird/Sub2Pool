@@ -9,8 +9,9 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
 
-from .base import AuthenticatedAPIView, error, ok
+from .base import PageAccessAPIView, error, ok
 from .query_params import bounded_query_int, monitored_account_query
+from ..access import visible_participants_for
 from ..api_auth import ReadOnlyAPIKeyAuthentication
 from ..api_usage import (
     api_usage_snapshot_data,
@@ -18,7 +19,7 @@ from ..api_usage import (
     latest_cycle_observation,
 )
 from ..integrations.sub2api import Sub2APIError
-from ..models import AppSettings, Participant
+from ..models import AppSettings, PagePermission, Participant
 from ..reporting import (
     FastCorrectionBreakdownPresenter,
     capacity_series,
@@ -27,7 +28,9 @@ from ..reporting import (
 )
 
 
-class StatisticsView(AuthenticatedAPIView):
+class StatisticsView(PageAccessAPIView):
+    required_page_permissions = (PagePermission.STATISTICS,)
+
     def get(self, request):
         config = AppSettings.load()
         try:
@@ -115,13 +118,16 @@ class ReadOnlyStatisticsView(StatisticsView):
         return super().get(request)
 
 
-class ParticipantAPIUsageView(AuthenticatedAPIView):
+class ParticipantAPIUsageView(PageAccessAPIView):
     """按当前归属周期只读聚合一个参与者的 Sub2API API 密钥用量。"""
 
+    required_page_permissions = (PagePermission.STATISTICS,)
+
     def get(self, request, participant_id: int):
-        participants = Participant.objects.filter(enabled=True)
-        if not request.user.is_staff:
-            participants = participants.filter(authorized_users=request.user)
+        participants = visible_participants_for(
+            request.user,
+            Participant.objects.filter(enabled=True),
+        )
         participant = get_object_or_404(participants, pk=participant_id)
         config = AppSettings.load()
         try:

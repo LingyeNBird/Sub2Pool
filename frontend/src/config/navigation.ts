@@ -1,3 +1,5 @@
+import type { PagePermission } from "./pagePermissions";
+
 export interface NavigationLink {
   label: string;
   to: string;
@@ -14,7 +16,7 @@ export interface NavigationGroup {
   label: string;
   icon: string;
   to?: string;
-  adminOnly?: boolean;
+  permission: PagePermission;
   children?: NavigationChild[];
 }
 
@@ -23,63 +25,66 @@ export const navigation: NavigationGroup[] = [
     label: "额度总览",
     icon: "home",
     to: "/",
-    adminOnly: true,
+    permission: "dashboard",
   },
   {
     label: "账号状态",
     icon: "server",
     to: "/account-status",
-    adminOnly: true,
+    permission: "account_status",
   },
   {
     label: "参与者",
     icon: "user-group",
     to: "/participants",
+    permission: "participants",
   },
   {
     label: "系统用户",
     icon: "user-plus",
     to: "/system-users",
-    adminOnly: true,
+    permission: "system_users",
   },
   {
     label: "观测记录",
     icon: "chart-bar",
     to: "/observations",
-    adminOnly: true,
+    permission: "observations",
   },
   {
     label: "粒子轨迹",
     icon: "sparkles",
     to: "/particle-filter",
+    permission: "particle_filter",
   },
   {
     label: "额度统计",
     icon: "presentation-chart-line",
     to: "/statistics",
+    permission: "statistics",
   },
   {
     label: "通知记录",
     icon: "bell",
     to: "/notifications",
-    adminOnly: true,
+    permission: "notifications",
   },
   {
     label: "登录记录",
     icon: "finger-print",
     to: "/login-records",
-    adminOnly: true,
+    permission: "login_records",
   },
   {
     label: "系统设置",
     icon: "cog-6-tooth",
     to: "/settings",
-    adminOnly: true,
+    permission: "settings",
   },
   {
     label: "使用教程",
     icon: "book-open",
-    adminOnly: true,
+    permission: "tutorial",
     children: [
       { label: "开始使用", section: true },
       { label: "产品概览", to: "/tutorial", exactQuery: true },

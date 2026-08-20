@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
+import { useAuthStore } from "@/stores/auth";
 import type { ConfirmDialogHandle, ConfirmDialogOptions } from "@/types";
 
 import AllocationModelCard from "./components/AllocationModelCard.vue";
@@ -16,6 +17,7 @@ import SamplingStrategyCard from "./components/SamplingStrategyCard.vue";
 import Sub2APIConnectionCard from "./components/Sub2APIConnectionCard.vue";
 import { useSettingsPage } from "./composables/useSettingsPage";
 
+const auth = useAuthStore();
 const confirmDialog = ref<ConfirmDialogHandle | null>(null);
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 
@@ -122,13 +124,21 @@ async function handleRevokeReadOnlyAPIKey() {
     <AppIcon name="check-circle" class="size-5" />
     <span>{{ success }}</span>
   </div>
+  <div v-if="settings && !auth.isStaff" class="col-span-12 alert alert-info">
+    <AppIcon name="information-circle" class="size-5" />
+    <span>当前账号拥有系统设置查看权限，但只有管理员可以修改配置。</span>
+  </div>
   <section v-if="loading" class="card col-span-12 bg-base-200 shadow-xs">
     <div class="card-body items-center">
       <span class="loading loading-lg loading-spinner"></span>
     </div>
   </section>
 
-  <div v-if="settings" class="col-span-12 columns-1 gap-6 xl:columns-2">
+  <fieldset
+    v-if="settings"
+    :disabled="!auth.isStaff"
+    class="col-span-12 columns-1 gap-6 xl:columns-2"
+  >
     <Sub2APIConnectionCard
       v-model:settings="settings"
       v-model:admin-token="adminToken"
@@ -201,6 +211,6 @@ async function handleRevokeReadOnlyAPIKey() {
       @generate="handleGenerateReadOnlyAPIKey"
       @revoke="handleRevokeReadOnlyAPIKey"
     />
-  </div>
+  </fieldset>
   <ConfirmDialog ref="confirmDialog" />
 </template>

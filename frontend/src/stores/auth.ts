@@ -2,6 +2,10 @@ import { ref } from "vue";
 import { defineStore } from "pinia";
 
 import {
+  pagePermissionRoutes,
+  type PagePermission,
+} from "@/config/pagePermissions";
+import {
   api,
   clearAccessToken,
   jsonBody,
@@ -12,12 +16,14 @@ import type { WebRtcNetworkInfo } from "@/services/webrtc";
 interface AuthIdentity {
   username: string;
   is_staff: boolean;
+  page_permissions: PagePermission[];
   timezone: string;
 }
 
 export const useAuthStore = defineStore("auth", () => {
   const username = ref("");
   const isStaff = ref(false);
+  const pagePermissions = ref<PagePermission[]>([]);
   const timezone = ref("Asia/Shanghai");
   const ready = ref(false);
 
@@ -25,6 +31,7 @@ export const useAuthStore = defineStore("auth", () => {
     clearAccessToken();
     username.value = "";
     isStaff.value = false;
+    pagePermissions.value = [];
     timezone.value = "Asia/Shanghai";
     ready.value = true;
   }
@@ -32,11 +39,23 @@ export const useAuthStore = defineStore("auth", () => {
   function applyIdentity(data: AuthIdentity): void {
     username.value = data.username;
     isStaff.value = data.is_staff;
+    pagePermissions.value = [...data.page_permissions];
     timezone.value = data.timezone;
   }
 
   function setTimezone(value: string): void {
     timezone.value = value;
+  }
+
+  function canAccess(pagePermission: PagePermission): boolean {
+    return isStaff.value || pagePermissions.value.includes(pagePermission);
+  }
+
+  function firstAccessiblePath(): string | null {
+    if (isStaff.value) return "/";
+    return (
+      pagePermissionRoutes.find((item) => canAccess(item.code))?.path ?? null
+    );
   }
 
   async function refresh(): Promise<boolean> {
@@ -82,6 +101,9 @@ export const useAuthStore = defineStore("auth", () => {
   return {
     username,
     isStaff,
+    pagePermissions,
+    canAccess,
+    firstAccessiblePath,
     ready,
     timezone,
     refresh,

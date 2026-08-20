@@ -2,14 +2,21 @@
 
 from django.utils import timezone
 
-from .base import AdminAPIView, error, ok
+from .base import PageAccessAPIView, error, ok
 from ..reporting import iso
 from ..engine import run_monitor
-from ..models import AppSettings, HistoryMaintenanceState, MonitoredAccount
+from ..models import (
+    AppSettings,
+    HistoryMaintenanceState,
+    MonitoredAccount,
+    PagePermission,
+)
 from ..integrations.sub2api import Sub2APIError
 
 
-class RunMonitorView(AdminAPIView):
+class RunMonitorView(PageAccessAPIView):
+    required_page_permissions = (PagePermission.OBSERVATIONS,)
+
     def get(self, _request):
         """Return global scheduler state and each account's independent lease."""
         config = AppSettings.load()

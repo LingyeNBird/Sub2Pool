@@ -1,12 +1,14 @@
 """粒子滤波历史周期轨迹接口。"""
 
-from .base import AuthenticatedAPIView, error, ok
-from ..models import AppSettings
+from .base import PageAccessAPIView, error, ok
+from ..models import AppSettings, PagePermission
 from .query_params import monitored_account_query
 from ..particle_trajectory import particle_trajectory_data
 
 
-class ParticleTrajectoryView(AuthenticatedAPIView):
+class ParticleTrajectoryView(PageAccessAPIView):
+    required_page_permissions = (PagePermission.PARTICLE_FILTER,)
+
     def get(self, request):
         raw_period_id = request.query_params.get("period")
         try:

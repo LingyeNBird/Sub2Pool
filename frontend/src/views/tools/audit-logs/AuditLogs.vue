@@ -5,6 +5,7 @@ import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { useZonedDateTimeIso } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
+import { useAuthStore } from "@/stores/auth";
 import type {
   ConfirmDialogHandle,
   MonitorSchedule,
@@ -30,6 +31,7 @@ import type {
   ObservationSummary,
 } from "./types";
 
+const auth = useAuthStore();
 const toIso = useZonedDateTimeIso();
 const rows = ref<Observation[]>([]);
 const accounts = ref<MonitoredAccount[]>([]);
@@ -319,7 +321,12 @@ onMounted(initialize);
         {{ account.name }}
       </option>
     </select>
-    <button class="btn btn-primary btn-sm" :disabled="running" @click="run">
+    <button
+      v-if="auth.isStaff"
+      class="btn btn-primary btn-sm"
+      :disabled="running"
+      @click="run"
+    >
       <span v-if="running" class="loading loading-xs loading-spinner"></span>
       <AppIcon v-else name="play" class="size-4" />
       立即测算
@@ -353,6 +360,7 @@ onMounted(initialize);
     :manual-range-start="manualRangeStart"
     :rebuilding="rebuilding"
     :fast-correction-enabled="fastCorrectionEnabled"
+    :editable="auth.isStaff"
     @filter="openFilter"
     @detail="detailDialog?.open($event)"
     @cost-detail="costDetailDialog?.open($event)"
@@ -372,14 +380,16 @@ onMounted(initialize);
   <FastCorrectionDetailDialog ref="fastCorrectionDetailDialog" />
   <ObservationDetailDialog ref="detailDialog" />
   <ExcludeObservationDialog
+    v-if="auth.isStaff"
     ref="excludeDialog"
     :submitting="excluding"
     @confirm="confirmExclude"
   />
   <ManualStartDialog
+    v-if="auth.isStaff"
     ref="manualStartDialog"
     :submitting="manualStartId !== null"
     @confirm="confirmManualStart"
   />
-  <ConfirmDialog ref="confirmDialog" />
+  <ConfirmDialog v-if="auth.isStaff" ref="confirmDialog" />
 </template>

@@ -127,7 +127,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     try {
       settings.value = await api<AppSettingsData>("settings");
       await loadMonitoredAccounts();
-      if (settings.value.sub2api_token_configured) {
+      if (auth.isStaff && settings.value.sub2api_token_configured) {
         await loadOpenAIAccounts(false);
       }
     } catch (error) {

@@ -7,9 +7,9 @@ from typing import Any
 
 from django.utils import timezone
 
-from .base import AdminAPIView, ok
+from .base import PageAccessAPIView, ok
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError, WeeklyWindow
-from ..models import AppSettings, MonitoredAccount
+from ..models import AppSettings, MonitoredAccount, PagePermission
 
 
 STATS_DAYS = 30
@@ -61,8 +61,10 @@ def _fallback_usage(
     }
 
 
-class AccountStatusView(AdminAPIView):
+class AccountStatusView(PageAccessAPIView):
     """Fetch every configured upstream account directly from Sub2API."""
+
+    required_page_permissions = (PagePermission.ACCOUNT_STATUS,)
 
     def get(self, request):
         config = AppSettings.load()

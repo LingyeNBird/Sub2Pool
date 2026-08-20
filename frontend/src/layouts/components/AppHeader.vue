@@ -54,7 +54,7 @@ const pageTitle = computed(() => String(route.meta.title ?? "Dashboard"));
       </svg>
     </label>
     <HeaderThemeMenu />
-    <HeaderNotifications v-if="auth.isStaff" />
+    <HeaderNotifications v-if="auth.canAccess('notifications')" />
     <HeaderProfileMenu />
   </header>
 </template>

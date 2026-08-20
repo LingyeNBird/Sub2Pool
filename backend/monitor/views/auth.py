@@ -14,6 +14,7 @@ from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .base import AuthenticatedAPIView, PublicAPIView, error, ok
+from ..access import page_permissions_for
 from ..ip_blocking import blocked_webrtc_addresses, empty_block_response
 from ..login_audit import record_login_attempt, request_addresses
 from ..serializers import LoginSerializer, PasswordChangeSerializer
@@ -156,6 +157,7 @@ class LoginView(PublicAPIView):
             {
                 "username": user.get_username(),
                 "is_staff": user.is_staff,
+                "page_permissions": page_permissions_for(user),
                 "access": access,
                 "timezone": AppSettings.load().timezone,
             }
@@ -200,6 +202,7 @@ class MeView(AuthenticatedAPIView):
             {
                 "username": request.user.get_username(),
                 "is_staff": request.user.is_staff,
+                "page_permissions": page_permissions_for(request.user),
                 "timezone": AppSettings.load().timezone,
             }
         )

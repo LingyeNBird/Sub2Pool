@@ -9,14 +9,16 @@ from django.db import DatabaseError, transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from .base import AdminAPIView, error, ok
-from ..history_state import LeaseBusyError, LeaseGuard, LeaseLostError
+from .base import AdminAPIView, PageAccessAPIView, error, ok
+from ..access import visible_participant_ids
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
+from ..history_state import LeaseBusyError, LeaseGuard, LeaseLostError
 from ..models import (
     AppSettings,
     HistoryMaintenanceState,
     MonitoredAccount,
     Observation,
+    PagePermission,
     Participant,
     ParticipantBalanceOperation,
     ParticipantBalanceOperationSource,
@@ -73,7 +75,9 @@ def _selected_account(request) -> tuple[list[MonitoredAccount], MonitoredAccount
     return accounts, selected
 
 
-class DashboardView(AdminAPIView):
+class DashboardView(PageAccessAPIView):
+    required_page_permissions = (PagePermission.DASHBOARD,)
+
     def get(self, request):
         config = AppSettings.load()
         try:
@@ -103,15 +107,21 @@ class DashboardView(AdminAPIView):
             if external_account_id is not None
             else None
         )
-        participant_rows = [
+        all_participant_rows = [
             participant_data(item, config)
             for item in Participant.objects.filter(enabled=True).prefetch_related(
                 "account_memberships__account"
             )
         ]
+        visible_ids = visible_participant_ids(request.user)
+        participant_rows = [
+            item
+            for item in all_participant_rows
+            if visible_ids is None or item["id"] in visible_ids
+        ]
         selected_snapshots = []
         if account is not None:
-            for participant in participant_rows:
+            for participant in all_participant_rows:
                 breakdown = next(
                     (
                         item

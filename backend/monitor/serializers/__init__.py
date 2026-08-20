@@ -8,7 +8,7 @@ from .settings import (
     SETTINGS_FIELDS,
     Sub2APIConnectionSerializer,
 )
-from .users import SystemUserWriteSerializer
+from .users import SystemUserPermissionSerializer, SystemUserWriteSerializer
 
 __all__ = [
     "AppSettingsSerializer",
@@ -19,5 +19,6 @@ __all__ = [
     "PasswordChangeSerializer",
     "SETTINGS_FIELDS",
     "Sub2APIConnectionSerializer",
+    "SystemUserPermissionSerializer",
     "SystemUserWriteSerializer",
 ]

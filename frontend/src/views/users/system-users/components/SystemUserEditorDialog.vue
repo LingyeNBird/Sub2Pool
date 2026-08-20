@@ -2,19 +2,13 @@
 import { reactive, ref } from "vue";
 
 import { ApiError } from "@/services/api";
-import type { Participant, SystemUser } from "@/types";
+import type { SystemUser } from "@/types";
 
 import type { SystemUserFormData } from "../types";
 
-type FieldErrorKey =
-  | "username"
-  | "email"
-  | "password"
-  | "participant_ids"
-  | "non_field_errors";
+type FieldErrorKey = "username" | "email" | "password" | "non_field_errors";
 
-const props = defineProps<{
-  participants: Participant[];
+defineProps<{
   saving: boolean;
 }>();
 
@@ -29,7 +23,6 @@ const fieldErrors = reactive<Record<FieldErrorKey, string[]>>({
   username: [],
   email: [],
   password: [],
-  participant_ids: [],
   non_field_errors: [],
 });
 const form = reactive({
@@ -37,7 +30,6 @@ const form = reactive({
   email: "",
   password: "",
   is_active: true,
-  participant_ids: [] as number[],
 });
 
 function clearFormErrors() {
@@ -84,9 +76,7 @@ function validateForm() {
   if (form.password && form.password.length < 10) {
     fieldErrors.password = ["密码至少需要 10 个字符"];
   }
-  if (!form.participant_ids.length) {
-    fieldErrors.participant_ids = ["请至少选择一个参与者"];
-  }
+
   const valid = !Object.values(fieldErrors).some((errors) => errors.length);
   if (!valid) formMessage.value = "请检查标红的表单项";
   return valid;
@@ -102,14 +92,12 @@ function open(user: SystemUser | null) {
           email: user.email,
           password: "",
           is_active: user.is_active,
-          participant_ids: [...user.participant_ids],
         }
       : {
           username: "",
           email: "",
           password: "",
           is_active: true,
-          participant_ids: [],
         },
   );
   clearFormErrors();
@@ -129,7 +117,6 @@ function submit() {
       username: form.username,
       email: form.email,
       is_active: form.is_active,
-      participant_ids: [...form.participant_ids],
       ...(form.password ? { password: form.password } : {}),
     },
     editingUser.value?.id ?? null,
@@ -224,36 +211,7 @@ defineExpose({ open, close, showApiError });
             {{ error }}
           </p>
         </fieldset>
-        <fieldset class="fieldset">
-          <legend class="label">可查看的参与者（至少选择一个）</legend>
-          <div class="grid gap-2 rounded-box bg-base-200 p-3 sm:grid-cols-2">
-            <label
-              v-for="participant in props.participants"
-              :key="participant.id"
-              class="label cursor-pointer justify-start gap-3"
-            >
-              <input
-                v-model="form.participant_ids"
-                type="checkbox"
-                class="checkbox checkbox-sm"
-                :value="participant.id"
-              />
-              <span>
-                <span class="font-medium">{{ participant.name }}</span>
-                <span class="ml-1 text-xs opacity-60">
-                  {{ participant.sub2api_identity }}
-                </span>
-              </span>
-            </label>
-          </div>
-          <p
-            v-for="error in fieldErrors.participant_ids"
-            :key="error"
-            class="mt-1 text-xs text-error"
-          >
-            {{ error }}
-          </p>
-        </fieldset>
+
         <label class="label justify-between">
           允许登录
           <input

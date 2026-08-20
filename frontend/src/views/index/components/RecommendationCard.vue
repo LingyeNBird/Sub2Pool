@@ -5,6 +5,7 @@ import { formatCurrency, formatCurrencyRange } from "@/utils/formatters";
 defineProps<{
   participant: Participant;
   applied: boolean;
+  readOnly: boolean;
 }>();
 
 defineEmits<{
@@ -16,9 +17,13 @@ defineEmits<{
   <button
     type="button"
     class="relative w-full min-w-0 rounded-box border border-base-300 bg-base-100 p-5 text-left"
-    :class="applied ? 'cursor-default' : 'cursor-pointer'"
-    :disabled="applied"
-    :aria-label="`处理参与者 ${participant.name} 的额度建议`"
+    :class="applied || readOnly ? 'cursor-default' : 'cursor-pointer'"
+    :disabled="applied || readOnly"
+    :aria-label="
+      readOnly
+        ? `参与者 ${participant.name} 的额度建议`
+        : `处理参与者 ${participant.name} 的额度建议`
+    "
     @click="$emit('select', participant)"
   >
     <AppIcon

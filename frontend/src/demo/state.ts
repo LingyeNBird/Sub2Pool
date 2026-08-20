@@ -1,3 +1,4 @@
+import type { PagePermission } from "@/config/pagePermissions";
 import type {
   APIUsageBreakdown,
   AppSettingsData,
@@ -22,8 +23,8 @@ import type {
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 
-const DEMO_STATE_KEY = "sub2pool:demo:v6:state";
-const DEMO_AUTH_KEY = "sub2pool:demo:v1:auth";
+const DEMO_STATE_KEY = "sub2pool:demo:v7:state";
+const DEMO_AUTH_KEY = "sub2pool:demo:v2:auth";
 const DEMO_ANCHOR = Date.UTC(2026, 7, 12, 4, 0, 0);
 const HOUR = 3_600_000;
 const DAY = HOUR * 24;
@@ -31,6 +32,7 @@ const DAY = HOUR * 24;
 export interface DemoAuthIdentity {
   username: string;
   is_staff: boolean;
+  page_permissions: PagePermission[];
   timezone: string;
 }
 
@@ -46,7 +48,7 @@ interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 6;
+  version: 7;
   clock: string;
   nextParticipantId: number;
   nextSystemUserId: number;
@@ -823,7 +825,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 6,
+    version: 7,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextSystemUserId: 3,
@@ -845,6 +847,7 @@ function initializeState(): DemoState {
         username: "starlight",
         email: "starlight@example.test",
         is_active: true,
+        page_permissions: ["participants", "particle_filter", "statistics"],
         participant_ids: [2],
         participant_names: ["远星"],
         last_login: iso(DEMO_ANCHOR - 8 * HOUR),
@@ -855,6 +858,7 @@ function initializeState(): DemoState {
         username: "forest",
         email: "forest@example.test",
         is_active: true,
+        page_permissions: ["participants", "particle_filter", "statistics"],
         participant_ids: [3],
         participant_names: ["林舟"],
         last_login: iso(DEMO_ANCHOR - 19 * HOUR),
@@ -880,7 +884,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 6) return parsed;
+      if (parsed.version === 7) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }

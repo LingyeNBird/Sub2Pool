@@ -7,6 +7,7 @@ import {
 import DashboardLayout from "@/layouts/DashboardLayout.vue";
 import { useAuthStore } from "@/stores/auth";
 import LoginView from "@/views/LoginView.vue";
+import NoAccessView from "@/views/NoAccessView.vue";
 import NotFoundView from "@/views/NotFoundView.vue";
 
 import { appRoutes } from "./routes";
@@ -30,10 +31,16 @@ const router = createRouter({
       children: [
         ...appRoutes,
         {
+          path: "no-access",
+          name: "no-access",
+          component: NoAccessView,
+          meta: { title: "暂无访问权限" },
+        },
+        {
           path: ":pathMatch(.*)*",
           name: "not-found",
           component: NotFoundView,
-          meta: { title: "页面不存在", adminOnly: true },
+          meta: { title: "页面不存在" },
         },
       ],
     },
@@ -48,10 +55,14 @@ router.beforeEach(async (to) => {
     return { name: "login", query: { next: to.fullPath } };
   }
   if (to.name === "login" && authenticated) {
-    return { name: auth.isStaff ? "dashboard" : "statistics" };
+    return auth.firstAccessiblePath() ?? { name: "no-access" };
   }
-  if (authenticated && !auth.isStaff && to.meta.adminOnly) {
-    return { name: "statistics" };
+  if (
+    authenticated &&
+    to.meta.permission &&
+    !auth.canAccess(to.meta.permission)
+  ) {
+    return auth.firstAccessiblePath() ?? { name: "no-access" };
   }
   return true;
 });

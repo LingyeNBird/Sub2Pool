@@ -1,3 +1,5 @@
+import type { PagePermission } from "@/config/pagePermissions";
+
 export interface Snapshot {
   participant_id: number;
   participant_name: string;
@@ -207,6 +209,7 @@ export interface SystemUser {
   username: string;
   email: string;
   is_active: boolean;
+  page_permissions: PagePermission[];
   participant_ids: number[];
   participant_names: string[];
   last_login: string | null;

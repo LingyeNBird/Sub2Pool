@@ -5,7 +5,8 @@ from decimal import Decimal
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 
-from .base import AdminAPIView, error, ok
+from .base import AdminAPIView, PageAccessAPIView, error, ok
+from ..access import visible_participant_ids
 from ..reporting import iso, snapshot_data
 from .query_params import monitored_account_query
 from .record_helpers import paginated_rows, query_datetime
@@ -17,6 +18,7 @@ from ..fast_correction.constants import (
 from ..models import (
     AppSettings,
     Observation,
+    PagePermission,
     Participant,
     Sub2APIUserUsageSample,
 )
@@ -29,9 +31,12 @@ from ..replay import (
 )
 
 
-class ObservationListView(AdminAPIView):
+class ObservationListView(PageAccessAPIView):
+    required_page_permissions = (PagePermission.OBSERVATIONS,)
+
     def get(self, request):
         config = AppSettings.load()
+        visible_ids = visible_participant_ids(request.user)
         try:
             account = monitored_account_query(request)
         except ValueError as exc:
@@ -184,6 +189,8 @@ class ObservationListView(AdminAPIView):
                     "participants": [
                         snapshot_data(snapshot)
                         for snapshot in item.participant_snapshots.all()
+                        if visible_ids is None
+                        or snapshot.participant_id in visible_ids
                     ],
                 }
             )
@@ -211,16 +218,33 @@ class ObservationListView(AdminAPIView):
         )
 
 
-class ObservationFastCorrectionDetailView(AdminAPIView):
+class ObservationFastCorrectionDetailView(PageAccessAPIView):
     """展示一个采样区间内已持久化的 FAST 修正事实。"""
 
-    def get(self, _request, observation_id: int):
+    required_page_permissions = (PagePermission.OBSERVATIONS,)
+
+    def get(self, request, observation_id: int):
         config = AppSettings.load()
         observation = get_object_or_404(
             Observation.objects.prefetch_related("fast_corrections"),
             pk=observation_id,
         )
         details = list(observation.fast_corrections.all())
+        visible_ids = visible_participant_ids(request.user)
+        participant_queryset = Participant.objects.filter(
+            sub2api_user_id__in=[item.sub2api_user_id for item in details],
+        )
+        if visible_ids is not None:
+            participant_queryset = participant_queryset.filter(id__in=visible_ids)
+        participants = {
+            item.sub2api_user_id: item for item in participant_queryset
+        }
+        if visible_ids is not None:
+            details = [
+                item
+                for item in details
+                if item.sub2api_user_id in participants
+            ]
         user_ids = [item.sub2api_user_id for item in details]
         user_samples = {
             item.sub2api_user_id: item
@@ -232,9 +256,8 @@ class ObservationFastCorrectionDetailView(AdminAPIView):
         }
         participants = {
             item.sub2api_user_id: item
-            for item in Participant.objects.filter(
-                sub2api_user_id__in=user_ids,
-            )
+            for item in participants.values()
+            if item.sub2api_user_id in user_ids
         }
         fast_cost_field = (
             "fast_actual_cost"
@@ -254,7 +277,12 @@ class ObservationFastCorrectionDetailView(AdminAPIView):
         fast_request_count = sum(
             item.fast_request_count for item in details
         )
-        request_count = observation.fast_correction_request_count
+        request_counts = [item.request_count for item in details]
+        request_count = (
+            sum(request_counts)
+            if all(value is not None for value in request_counts)
+            else None
+        )
         fast_billed_cost = sum(
             (getattr(item, fast_cost_field) for item in details),
             Decimal("0"),

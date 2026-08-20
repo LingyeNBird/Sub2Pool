@@ -1,23 +1,36 @@
-"""管理员维护普通系统用户及其可见参与者范围。"""
+"""System-user identity and page/participant permission management."""
 
 from django.contrib.auth import get_user_model
 from rest_framework import status
 
-from .base import AdminAPIView, error, ok
+from .base import AdminAPIView, PageAccessAPIView, error, ok
+from ..access import page_permissions_for, visible_participant_ids
+from ..models import PagePermission
 from ..reporting import iso
-from ..serializers import SystemUserWriteSerializer
+from ..serializers import (
+    SystemUserPermissionSerializer,
+    SystemUserWriteSerializer,
+)
 
 
 User = get_user_model()
 
 
-def system_user_data(user) -> dict:
-    participants = list(user.quota_participants.order_by("id"))
+def system_user_data(
+    user,
+    allowed_participant_ids: set[int] | None = None,
+) -> dict:
+    participants = sorted(user.quota_participants.all(), key=lambda item: item.id)
+    if allowed_participant_ids is not None:
+        participants = [
+            item for item in participants if item.id in allowed_participant_ids
+        ]
     return {
         "id": user.id,
         "username": user.get_username(),
         "email": user.email,
         "is_active": user.is_active,
+        "page_permissions": page_permissions_for(user),
         "participant_ids": [item.id for item in participants],
         "participant_names": [item.name for item in participants],
         "last_login": iso(user.last_login),
@@ -25,14 +38,22 @@ def system_user_data(user) -> dict:
     }
 
 
-class SystemUserListView(AdminAPIView):
-    def get(self, _request):
+class SystemUserListView(PageAccessAPIView):
+    required_page_permissions = (PagePermission.SYSTEM_USERS,)
+
+    def get(self, request):
         users = (
             User.objects.filter(is_staff=False, is_superuser=False)
-            .prefetch_related("quota_participants")
+            .prefetch_related("quota_participants", "page_accesses")
             .order_by("username")
         )
-        return ok([system_user_data(user) for user in users])
+        allowed_ids = visible_participant_ids(request.user)
+        return ok(
+            [
+                system_user_data(user, allowed_participant_ids=allowed_ids)
+                for user in users
+            ]
+        )
 
     def post(self, request):
         serializer = SystemUserWriteSerializer(data=request.data)
@@ -50,7 +71,7 @@ class SystemUserDetailView(AdminAPIView):
                 is_staff=False,
                 is_superuser=False,
             )
-            .prefetch_related("quota_participants")
+            .prefetch_related("quota_participants", "page_accesses")
             .first()
         )
 
@@ -73,3 +94,25 @@ class SystemUserDetailView(AdminAPIView):
             return error("系统用户不存在", status.HTTP_404_NOT_FOUND)
         user.delete()
         return ok({"deleted": True})
+
+
+class SystemUserPermissionView(AdminAPIView):
+    def patch(self, request, user_id: int):
+        user = (
+            User.objects.filter(
+                pk=user_id,
+                is_staff=False,
+                is_superuser=False,
+            )
+            .prefetch_related("quota_participants", "page_accesses")
+            .first()
+        )
+        if user is None:
+            return error("系统用户不存在", status.HTTP_404_NOT_FOUND)
+        serializer = SystemUserPermissionSerializer(
+            user,
+            data=request.data,
+        )
+        if not serializer.is_valid():
+            return error("系统用户权限校验失败", details=serializer.errors)
+        return ok(system_user_data(serializer.save()))

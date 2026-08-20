@@ -54,25 +54,31 @@ from monitor.tests.helpers import (
 )
 
 @pytest.mark.django_db
-def test_regular_user_only_reads_bound_participant_statistics():
+def test_regular_user_page_access_and_participant_scope_are_enforced():
     User = get_user_model()
     User.objects.create_superuser(
         username="owner",
         password="very-strong-password",
         email="owner@example.com",
     )
-    first = create_participant(name="甲",
-    sub2api_user_id=101,
-    sub2api_username="rider-a",
-    share_percent=50,)
-    second = create_participant(name="乙",
-    sub2api_user_id=102,
-    sub2api_username="rider-b",
-    share_percent=50,)
-    third = create_participant(name="丙",
-    sub2api_user_id=103,
-    sub2api_username="unbound-rider",
-    share_percent=0,)
+    first = create_participant(
+        name="甲",
+        sub2api_user_id=101,
+        sub2api_username="rider-a",
+        share_percent=50,
+    )
+    second = create_participant(
+        name="乙",
+        sub2api_user_id=102,
+        sub2api_username="rider-b",
+        share_percent=50,
+    )
+    third = create_participant(
+        name="丙",
+        sub2api_user_id=103,
+        sub2api_username="unbound-rider",
+        share_percent=0,
+    )
     client = Client()
     admin_headers, _ = jwt_login(client)
 
@@ -84,26 +90,80 @@ def test_regular_user_only_reads_bound_participant_statistics():
                 "email": "viewer@example.com",
                 "password": "Rider-Access-2026!secure",
                 "is_active": True,
-                "participant_ids": [first.id, second.id],
             }
         ),
         content_type="application/json",
         **admin_headers,
     )
     assert created.status_code == 201
+    assert created.json()["data"]["page_permissions"] == []
+    assert created.json()["data"]["participant_ids"] == []
     user_id = created.json()["data"]["id"]
+
+    missing_scope = client.patch(
+        f"/api/system-users/{user_id}/permissions",
+        data=json.dumps(
+            {
+                "page_permissions": ["participants"],
+                "participant_ids": [],
+            }
+        ),
+        content_type="application/json",
+        **admin_headers,
+    )
+    assert missing_scope.status_code == 400
+    assert missing_scope.json()["details"]["participant_ids"]
+
+    granted_pages = [
+        "dashboard",
+        "participants",
+        "system_users",
+        "observations",
+        "statistics",
+        "notifications",
+    ]
+    permissions = client.patch(
+        f"/api/system-users/{user_id}/permissions",
+        data=json.dumps(
+            {
+                "page_permissions": granted_pages,
+                "participant_ids": [first.id, second.id],
+            }
+        ),
+        content_type="application/json",
+        **admin_headers,
+    )
+    assert permissions.status_code == 200
+    assert permissions.json()["data"]["page_permissions"] == granted_pages
+    assert permissions.json()["data"]["participant_ids"] == [first.id, second.id]
+
+    identity_scope_attempt = client.patch(
+        f"/api/system-users/{user_id}",
+        data=json.dumps({"participant_ids": [third.id]}),
+        content_type="application/json",
+        **admin_headers,
+    )
+    assert identity_scope_attempt.status_code == 400
+    assert identity_scope_attempt.json()["details"]["participant_ids"]
+
     regular = User.objects.get(pk=user_id)
     assert regular.is_staff is False
     assert list(
         regular.quota_participants.order_by("id").values_list("id", flat=True)
     ) == [first.id, second.id]
 
+    hidden_user = User.objects.create_user(
+        username="hidden-rider",
+        password="hidden-rider-password",
+    )
+    third.authorized_users.add(hidden_user)
+
     config = AppSettings.load()
     create_monitored_account(7)
     config.save()
     now = timezone.now()
     attribution_started_at = now - timedelta(days=2)
-    for participant, cost in ((first, 120), (second, 240)):
+    for participant, cost in ((first, 120), (second, 240), (third, 360)):
         ParticipantUsageSample.objects.create(
             participant=participant,
             account_id=7,
@@ -113,6 +173,25 @@ def test_regular_user_only_reads_bound_participant_statistics():
             raw_selected_cost=cost,
             selected_cost=cost,
         )
+        create_recommendation_snapshot(participant)
+        NotificationEvent.objects.create(
+            event_type="recommendation_changed",
+            participant=participant,
+            dedupe_key=f"participant-{participant.id}",
+            recipient="audit@example.com",
+            subject=f"{participant.name} 通知",
+            body="participant notification",
+            status="sent",
+        )
+    NotificationEvent.objects.create(
+        event_type="collection_error",
+        participant=None,
+        dedupe_key="system-notification",
+        recipient="audit@example.com",
+        subject="系统通知",
+        body="system notification",
+        status="sent",
+    )
 
     regular_client = Client()
     regular_headers, logged_in = jwt_login(
@@ -120,10 +199,14 @@ def test_regular_user_only_reads_bound_participant_statistics():
         username="rider-viewer",
         password="Rider-Access-2026!secure",
     )
-    assert logged_in.json()["data"]["is_staff"] is False
-    assert regular_client.get("/api/auth/me", **regular_headers).json()["data"][
-        "is_staff"
-    ] is False
+    login_identity = logged_in.json()["data"]
+    assert login_identity["is_staff"] is False
+    assert login_identity["page_permissions"] == granted_pages
+    me_identity = regular_client.get("/api/auth/me", **regular_headers).json()[
+        "data"
+    ]
+    assert me_identity["is_staff"] is False
+    assert me_identity["page_permissions"] == granted_pages
 
     statistics = regular_client.get("/api/statistics", **regular_headers)
     assert statistics.status_code == 200
@@ -131,6 +214,7 @@ def test_regular_user_only_reads_bound_participant_statistics():
         item["participant_id"]
         for item in statistics.json()["data"]["participant_series"]
     ] == [first.id, second.id]
+
     visible_participants = regular_client.get(
         "/api/participants",
         **regular_headers,
@@ -140,9 +224,45 @@ def test_regular_user_only_reads_bound_participant_statistics():
         first.id,
         second.id,
     ]
-    assert third.id not in {
-        item["id"] for item in visible_participants.json()["data"]
+
+    dashboard = regular_client.get("/api/dashboard", **regular_headers)
+    assert dashboard.status_code == 200
+    assert {
+        item["id"] for item in dashboard.json()["data"]["participants"]
+    } == {first.id, second.id}
+
+    observations = regular_client.get("/api/observations", **regular_headers)
+    assert observations.status_code == 200
+    observed_participant_ids = {
+        snapshot["participant_id"]
+        for row in observations.json()["data"]["items"]
+        for snapshot in row["participants"]
     }
+    assert observed_participant_ids == {first.id, second.id}
+
+    notifications = regular_client.get("/api/notifications", **regular_headers)
+    assert notifications.status_code == 200
+    assert {
+        item["participant_name"]
+        for item in notifications.json()["data"]["items"]
+    } == {None, first.name, second.name}
+
+    system_users = regular_client.get("/api/system-users", **regular_headers)
+    assert system_users.status_code == 200
+    assert third.name not in {
+        name
+        for user in system_users.json()["data"]
+        for name in user["participant_names"]
+    }
+
+    for denied_path in (
+        "/api/account-status",
+        "/api/login-events",
+        "/api/settings",
+        "/api/particle-trajectory",
+    ):
+        assert regular_client.get(denied_path, **regular_headers).status_code == 403
+
     assert (
         regular_client.post(
             "/api/participants",
@@ -159,36 +279,34 @@ def test_regular_user_only_reads_bound_participant_statistics():
         == 403
     )
     assert (
-        regular_client.put(
-            f"/api/participants/{first.id}",
-            data=json.dumps({"name": "越权修改"}),
+        regular_client.post(
+            "/api/monitor/run",
+            data=json.dumps({"account_id": 7}),
             content_type="application/json",
             **regular_headers,
         ).status_code
         == 403
     )
     assert (
-        regular_client.delete(
-            f"/api/participants/{first.id}",
+        regular_client.patch(
+            f"/api/system-users/{user_id}/permissions",
+            data=json.dumps(
+                {
+                    "page_permissions": ["dashboard"],
+                    "participant_ids": [first.id],
+                }
+            ),
+            content_type="application/json",
             **regular_headers,
         ).status_code
         == 403
     )
-    for admin_path in (
-        "/api/dashboard",
-        "/api/login-events",
-        "/api/settings",
-        "/api/system-users",
-    ):
-        assert regular_client.get(admin_path, **regular_headers).status_code == 403
 
     updated = client.patch(
-        f"/api/system-users/{user_id}",
+        f"/api/system-users/{user_id}/permissions",
         data=json.dumps(
             {
-                "username": "rider-viewer",
-                "email": "viewer@example.com",
-                "is_active": True,
+                "page_permissions": ["statistics"],
                 "participant_ids": [second.id],
             }
         ),
@@ -196,18 +314,15 @@ def test_regular_user_only_reads_bound_participant_statistics():
         **admin_headers,
     )
     assert updated.status_code == 200
+    assert regular_client.get("/api/participants", **regular_headers).status_code == 403
     filtered = regular_client.get("/api/statistics", **regular_headers)
     assert [
         item["participant_id"]
         for item in filtered.json()["data"]["participant_series"]
     ] == [second.id]
-    filtered_participants = regular_client.get(
-        "/api/participants",
-        **regular_headers,
-    )
-    assert [item["id"] for item in filtered_participants.json()["data"]] == [
-        second.id
-    ]
+    assert regular_client.get("/api/auth/me", **regular_headers).json()["data"][
+        "page_permissions"
+    ] == ["statistics"]
 
     deleted = client.delete(
         f"/api/system-users/{user_id}",
@@ -223,9 +338,6 @@ def test_system_user_validation_returns_field_errors():
         password="very-strong-password",
         email="owner@example.com",
     )
-    participant = create_participant(name="甲",
-    sub2api_user_id=101,
-    share_percent=100,)
     client = Client()
     headers, _ = jwt_login(client)
 
@@ -237,7 +349,6 @@ def test_system_user_validation_returns_field_errors():
                 "email": "viewer@example.com",
                 "password": "123",
                 "is_active": True,
-                "participant_ids": [participant.id],
             }
         ),
         content_type="application/json",
@@ -250,6 +361,52 @@ def test_system_user_validation_returns_field_errors():
     assert payload["details"]["password"]
     assert not get_user_model().objects.filter(username="viewer").exists()
 
+
+@pytest.mark.django_db
+def test_non_participant_page_grants_allow_read_dependencies():
+    User = get_user_model()
+    User.objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    viewer = User.objects.create_user(
+        username="page-viewer",
+        password="page-viewer-password",
+    )
+    admin_client = Client()
+    admin_headers, _ = jwt_login(admin_client)
+    response = admin_client.patch(
+        f"/api/system-users/{viewer.id}/permissions",
+        data=json.dumps(
+            {
+                "page_permissions": [
+                    "particle_filter",
+                    "login_records",
+                    "settings",
+                ],
+                "participant_ids": [],
+            }
+        ),
+        content_type="application/json",
+        **admin_headers,
+    )
+    assert response.status_code == 200
+
+    client = Client()
+    headers, _ = jwt_login(
+        client,
+        username="page-viewer",
+        password="page-viewer-password",
+    )
+    for path in (
+        "/api/particle-trajectory",
+        "/api/login-events",
+        "/api/ip-blocks",
+        "/api/settings",
+        "/api/settings/monitored-accounts",
+    ):
+        assert client.get(path, **headers).status_code != 403
 @pytest.mark.django_db
 def test_refresh_rotation_blacklists_old_cookie_and_logout_clears_current_cookie():
     get_user_model().objects.create_superuser(

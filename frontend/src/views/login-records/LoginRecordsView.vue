@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
+import { useAuthStore } from "@/stores/auth";
 import type {
   BlockedIPAddress,
   BlockedIPSource,
@@ -16,6 +17,7 @@ import LoginAttemptTable from "./components/LoginAttemptTable.vue";
 import LoginStats from "./components/LoginStats.vue";
 import type { IPBlockDialogHandle, PendingBlockAction } from "./types";
 
+const auth = useAuthStore();
 const data = ref<LoginEventData | null>(null);
 const blockedAddresses = ref<BlockedIPAddress[]>([]);
 const loading = ref(true);
@@ -128,6 +130,7 @@ onMounted(load);
   </div>
   <BlockedAddressTable
     :blocked-addresses="blockedAddresses"
+    :editable="auth.isStaff"
     @unblock="blockDialog?.openUnblock($event)"
   />
   <LoginAttemptTable
@@ -135,10 +138,12 @@ onMounted(load);
     :blocked-addresses="blockedAddresses"
     :pagination="pagination"
     :loading="loading"
+    :editable="auth.isStaff"
     @block="openBlock"
     @page="changePage"
   />
   <IPBlockDialog
+    v-if="auth.isStaff"
     ref="blockDialog"
     :saving="saving"
     @confirm="confirmBlockAction"

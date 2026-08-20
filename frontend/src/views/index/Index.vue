@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api } from "@/services/api";
+import { useAuthStore } from "@/stores/auth";
 import type { DashboardData, Participant } from "@/types";
 
 import AccountExplanationCard from "./components/AccountExplanationCard.vue";
@@ -22,6 +23,7 @@ interface RecommendationDialogHandle {
   close: () => void;
 }
 
+const auth = useAuthStore();
 const data = ref<DashboardData | null>(null);
 const selectedAccountId = ref<number | null>(null);
 const loading = ref(true);
@@ -82,6 +84,7 @@ function openAdminApi() {
 
 async function applyRecommendation(participant: Participant) {
   if (
+    !auth.isStaff ||
     participant.snapshot?.recommended_balance_usd == null ||
     participant.snapshot.recommended_balance_usd < 0 ||
     applyingParticipantId.value != null
@@ -141,6 +144,7 @@ onMounted(load);
         </option>
       </select>
       <button
+        v-if="auth.isStaff"
         class="btn btn-primary btn-sm"
         :disabled="running"
         @click="runCalibration"
@@ -149,7 +153,11 @@ onMounted(load);
         <AppIcon v-else name="arrow-path" class="size-4" />
         {{ running ? "测算中" : "立即测算" }}
       </button>
-      <RouterLink to="/settings" class="btn btn-sm">
+      <RouterLink
+        v-if="auth.canAccess('settings')"
+        to="/settings"
+        class="btn btn-sm"
+      >
         <AppIcon name="cog-6-tooth" class="size-4" />
         系统设置
       </RouterLink>
@@ -198,13 +206,14 @@ onMounted(load);
     v-if="data"
     :participants="data.participants"
     :applied-participant-ids="appliedParticipantIds"
+    :read-only="!auth.isStaff"
     @select="actionDialog?.open($event)"
   />
   <CollectionStatusCard v-if="data" :data="data" />
   <AccountExplanationCard v-if="data" :data="data" />
 
   <RecommendationActionDialog
-    v-if="data"
+    v-if="data && auth.isStaff"
     ref="actionDialog"
     :admin-url="data.sub2api_admin_url"
     :applying-participant-id="applyingParticipantId"

@@ -6,7 +6,7 @@ from django.utils import timezone
 from ..api_auth import generate_readonly_api_key
 
 from rest_framework.serializers import ValidationError
-from .base import AdminAPIView, error, ok
+from .base import AdminAPIView, PageAccessAPIView, error, ok
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 from ..history_state import LeaseLostError, fenced_fact_write
 from ..models import (
@@ -14,6 +14,7 @@ from ..models import (
     AppSettings,
     MonitoredAccount,
     Observation,
+    PagePermission,
     Participant,
 )
 from ..notifications import send_notification
@@ -63,7 +64,9 @@ def _temporary_sub2api_client(
     )
 
 
-class SettingsView(AdminAPIView):
+class SettingsView(PageAccessAPIView):
+    required_page_permissions = (PagePermission.SETTINGS,)
+
     def get(self, _request):
         return ok(AppSettingsSerializer(AppSettings.load()).data)
 
@@ -183,7 +186,15 @@ class TestSub2APIView(AdminAPIView):
             return error(str(exc), 502)
         return ok(result)
 
-class MonitoredAccountListView(AdminAPIView):
+
+class MonitoredAccountListView(PageAccessAPIView):
+    required_page_permissions = (
+        PagePermission.OBSERVATIONS,
+        PagePermission.PARTICLE_FILTER,
+        PagePermission.SETTINGS,
+        PagePermission.STATISTICS,
+    )
+
     def get(self, _request):
         accounts = MonitoredAccount.objects.order_by("name", "external_account_id")
         return ok(MonitoredAccountSerializer(accounts, many=True).data)
