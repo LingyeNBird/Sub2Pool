@@ -3,12 +3,14 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import { useAuthStore } from "@/stores/auth";
 import ConstantAverageAlgorithmTutorial from "./tutorial/components/ConstantAverageAlgorithmTutorial.vue";
 import ParticleFilterAlgorithmTutorial from "./tutorial/components/ParticleFilterAlgorithmTutorial.vue";
 import TutorialCodeBlock from "./tutorial/components/TutorialCodeBlock.vue";
 
 import { tutorialPages, type TutorialNoteTone } from "./tutorial/tutorialPages";
 
+const auth = useAuthStore();
 const route = useRoute();
 const article = ref<HTMLElement | null>(null);
 
@@ -62,7 +64,11 @@ watch(activePageId, async () => {
         </ul>
       </div>
     </div>
-    <RouterLink to="/settings" class="btn btn-primary btn-sm">
+    <RouterLink
+      v-if="auth.isStaff"
+      to="/settings"
+      class="btn btn-primary btn-sm"
+    >
       <AppIcon name="cog-6-tooth" class="size-4" />开始配置
     </RouterLink>
   </PageShellHeader>
@@ -175,7 +181,7 @@ watch(activePageId, async () => {
         </div>
 
         <div
-          v-if="activePage.action"
+          v-if="activePage.action && auth.isStaff"
           class="flex border-t border-base-300 py-6"
         >
           <RouterLink :to="activePage.action.to" class="btn btn-primary btn-sm">
