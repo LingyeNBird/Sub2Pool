@@ -296,37 +296,3 @@ def test_unsafe_fast_rebuild_endpoint_is_removed_and_missing_facts_are_preserved
         assert observation.fast_correction_standard_cost is None
         assert observation.fast_correction_actual_cost is None
         assert observation.fast_correction_request_count is None
-
-
-@pytest.mark.django_db
-def test_admin_can_acknowledge_fast_pricing_upgrade_notice():
-    get_user_model().objects.create_superuser(
-        username="owner",
-        password="very-strong-password",
-        email="owner@example.com",
-    )
-    config = AppSettings.load()
-    config.fast_pricing_upgrade_notice_pending = True
-    config.save(update_fields=["fast_pricing_upgrade_notice_pending"])
-    client = Client()
-    headers, _ = jwt_login(client)
-
-    before = client.get("/api/settings", **headers)
-    assert before.status_code == 200
-    assert (
-        before.json()["data"]["fast_pricing_upgrade_notice_pending"] is True
-    )
-
-    response = client.patch(
-        "/api/settings",
-        data={"fast_pricing_upgrade_notice_pending": False},
-        content_type="application/json",
-        **headers,
-    )
-
-    assert response.status_code == 200
-    assert (
-        response.json()["data"]["fast_pricing_upgrade_notice_pending"] is False
-    )
-    config.refresh_from_db()
-    assert config.fast_pricing_upgrade_notice_pending is False

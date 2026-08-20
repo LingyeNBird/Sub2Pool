@@ -77,8 +77,6 @@ class AppSettings(models.Model):
     )
     # 兼容修正只控制新采样；已落库的历史修正事实永久保留并参与重放。
     fast_correction_enabled = models.BooleanField(default=False)
-    # 升级公告仅面向迁移前已存在的实例；管理员确认后永久关闭。
-    fast_pricing_upgrade_notice_pending = models.BooleanField(default=False)
     initial_usd_per_percent = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("16"))
     safety_factor = models.DecimalField(
         max_digits=6, decimal_places=4, default=Decimal("0.95"),

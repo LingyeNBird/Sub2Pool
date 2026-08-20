@@ -392,6 +392,21 @@ export interface MonitorSchedule {
   server_time: string;
 }
 
+export interface AnnouncementRecord {
+  code: string;
+  title: string;
+  published_at: string;
+  severity: "info" | "warning";
+  paragraphs: string[];
+  read: boolean;
+  read_at: string | null;
+}
+
+export interface AnnouncementListData {
+  items: AnnouncementRecord[];
+  unread_count: number;
+}
+
 export interface NotificationRecord {
   id: number;
   event_type: string;
@@ -628,7 +643,6 @@ export interface AppSettingsData {
   cost_basis: string;
   weekly_quota_model: "time_varying" | "constant_average";
   fast_correction_enabled: boolean;
-  fast_pricing_upgrade_notice_pending: boolean;
   fast_correction_rebuild_recommended: boolean;
   fast_correction_missing_intervals: number;
   initial_usd_per_percent: number;

@@ -1,4 +1,5 @@
 """Notification, login, and IP-block audit models."""
+from django.conf import settings
 from django.db import models
 
 from .participants import Participant
@@ -25,6 +26,33 @@ class NotificationEvent(models.Model):
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["dedupe_key", "-created_at"])]
 
+
+
+class AnnouncementRead(models.Model):
+    """每位管理员对代码内发布公告的持久已读状态。"""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="announcement_reads",
+    )
+    announcement_code = models.CharField(max_length=120)
+    read_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-read_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "announcement_code"],
+                name="unique_user_announcement_read",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["user", "announcement_code"],
+                name="announcement_read_lookup",
+            )
+        ]
 
 class LoginEvent(models.Model):
     """本系统登录尝试审计；WebRTC 地址来自浏览器，只能作为辅助线索。"""

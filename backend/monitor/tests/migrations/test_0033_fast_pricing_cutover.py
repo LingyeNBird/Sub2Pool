@@ -73,3 +73,8 @@ def test_upgrade_disables_legacy_fast_correction_and_announces_cutover():
     fresh = NewSettings.objects.create(pk=2)
     assert fresh.fast_correction_enabled is False
     assert fresh.fast_pricing_upgrade_notice_pending is False
+
+    # 后续测试使用当前模型；显式恢复到最新迁移，避免数据库停在 0033。
+    MigrationExecutor(connection).migrate(
+        [("monitor", "0034_announcement_reads")]
+    )

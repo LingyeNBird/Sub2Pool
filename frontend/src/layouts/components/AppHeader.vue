@@ -5,7 +5,7 @@ import { useRoute } from "vue-router";
 import { useThemeStore } from "@/stores/theme";
 import { useAuthStore } from "@/stores/auth";
 
-import HeaderNotifications from "./HeaderNotifications.vue";
+import HeaderAnnouncements from "./HeaderAnnouncements.vue";
 import HeaderProfileMenu from "./HeaderProfileMenu.vue";
 import HeaderThemeMenu from "./HeaderThemeMenu.vue";
 
@@ -54,7 +54,7 @@ const pageTitle = computed(() => String(route.meta.title ?? "Dashboard"));
       </svg>
     </label>
     <HeaderThemeMenu />
-    <HeaderNotifications v-if="auth.canAccess('notifications')" />
+    <HeaderAnnouncements v-if="auth.isStaff" />
     <HeaderProfileMenu />
   </header>
 </template>

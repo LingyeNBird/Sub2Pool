@@ -3,7 +3,6 @@ import { ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
 import AppHeader from "./components/AppHeader.vue";
-import FastPricingUpgradeNotice from "./components/FastPricingUpgradeNotice.vue";
 import AppSidebar from "./components/AppSidebar.vue";
 
 const route = useRoute();
@@ -46,7 +45,6 @@ watch(
           重置演示数据
         </button>
       </div>
-      <FastPricingUpgradeNotice />
       <div class="grid min-w-0 grid-cols-12 gap-6 p-4 lg:p-10">
         <AppHeader />
         <RouterView />

@@ -17,7 +17,7 @@ from .observations import (
 )
 from .fast_correction import ObservationFastCorrection
 from .api_usage import ParticipantAPIUsageSnapshot
-from .audit import BlockedIPAddress, LoginEvent, NotificationEvent
+from .audit import AnnouncementRead, BlockedIPAddress, LoginEvent, NotificationEvent
 from .history_maintenance import (
     HistoricalRebuildRun,
     HistoryMaintenanceState,
@@ -29,6 +29,7 @@ from .history_maintenance import (
 
 __all__ = [
     "AccountParticipant",
+    "AnnouncementRead",
     "AppSettings",
     "BlockedIPAddress",
     "HistoricalRebuildRun",

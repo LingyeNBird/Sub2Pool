@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .views.announcements import AnnouncementListView, AnnouncementReadView
 from .views.auth import (
     LoginView,
     LogoutView,
@@ -73,6 +74,11 @@ urlpatterns = [
     path("auth/logout", LogoutView.as_view()),
     path("auth/me", MeView.as_view()),
     path("auth/password", PasswordView.as_view()),
+    path("announcements", AnnouncementListView.as_view()),
+    path(
+        "announcements/<slug:announcement_code>/read",
+        AnnouncementReadView.as_view(),
+    ),
     path("login-events", LoginEventListView.as_view()),
     path("ip-blocks", BlockedIPAddressListView.as_view()),
     path("ip-blocks/<int:block_id>", BlockedIPAddressDetailView.as_view()),

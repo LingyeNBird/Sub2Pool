@@ -64,6 +64,7 @@ export interface DemoState {
   notifications: NotificationRecord[];
   loginEvents: LoginEventRecord[];
   blockedAddresses: BlockedIPAddress[];
+  announcementReads: string[];
   settings: AppSettingsData;
   plans: HistoricalRebuildPlan[];
 }
@@ -750,7 +751,6 @@ function baseSettings(): AppSettingsData {
     cost_basis: "actual",
     weekly_quota_model: "time_varying",
     fast_correction_enabled: false,
-    fast_pricing_upgrade_notice_pending: false,
     fast_correction_rebuild_recommended: false,
     fast_correction_missing_intervals: 0,
     initial_usd_per_percent: 30,
@@ -871,6 +871,7 @@ function initializeState(): DemoState {
     notifications: buildNotifications(participants),
     loginEvents: buildLoginEvents(),
     blockedAddresses: [],
+    announcementReads: [],
     settings: baseSettings(),
     plans: [],
   };

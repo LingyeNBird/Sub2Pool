@@ -1,5 +1,7 @@
 import type {
   APIUsageBreakdown,
+  AnnouncementListData,
+  AnnouncementRecord,
   AppSettingsData,
   AccountStatusData,
   BlockedIPAddress,
@@ -56,6 +58,34 @@ function failure(message: string, status = 400, details?: unknown): Response {
 
 function delay(): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, DEMO_DELAY_MS));
+}
+
+const DEMO_ANNOUNCEMENTS: Array<Omit<AnnouncementRecord, "read" | "read_at">> =
+  [
+    {
+      code: "sub2api-fast-pricing-0-1-179",
+      title: "Sub2API 0.1.179 FAST 计费调整",
+      published_at: "2026-08-20T00:00:00Z",
+      severity: "warning",
+      paragraphs: [
+        "Sub2API 0.1.179 起支持在渠道定价中配置 FAST 倍率。未配置时仍可能沿用 2 倍口径；OpenAI OAuth 渠道需要由管理员确认并设置为 2.5。",
+        "为避免上游已经按 2.5 倍计费后，Sub2Pool 再额外补足 25% 造成重复计算，本次升级会自动关闭 Sub2Pool 的兼容 FAST 修正。",
+        "已经保存的历史 FAST 修正事实不会删除，仍会参与历史重放和成本拆分。若你的 Sub2API 渠道仍按 2 倍计费，请在系统设置中重新开启兼容修正。",
+      ],
+    },
+  ];
+
+function announcementData(state: DemoState): AnnouncementListData {
+  const reads = new Set(state.announcementReads ?? []);
+  const items = DEMO_ANNOUNCEMENTS.map((item) => ({
+    ...item,
+    read: reads.has(item.code),
+    read_at: reads.has(item.code) ? state.clock : null,
+  }));
+  return {
+    items,
+    unread_count: items.filter((item) => !item.read).length,
+  };
 }
 
 async function body(options: RequestInit): Promise<Record<string, unknown>> {
@@ -676,6 +706,31 @@ export async function demoRequest(
 
   const denied = authorized();
   if (denied) return denied;
+
+  if (pathname === "announcements" && method === "GET") {
+    if (!demoIdentity()?.is_staff) return failure("没有管理员权限", 403);
+    return envelope(announcementData(state));
+  }
+  const announcementReadMatch = /^announcements\/([a-z0-9-]+)\/read$/.exec(
+    pathname,
+  );
+  if (announcementReadMatch && method === "POST") {
+    if (!demoIdentity()?.is_staff) return failure("没有管理员权限", 403);
+    const item = DEMO_ANNOUNCEMENTS.find(
+      (candidate) => candidate.code === announcementReadMatch[1],
+    );
+    if (!item) return failure("公告不存在", 404);
+    state.announcementReads ??= [];
+    if (!state.announcementReads.includes(item.code)) {
+      state.announcementReads.push(item.code);
+      saveDemoState(state);
+    }
+    return envelope({
+      ...item,
+      read: true,
+      read_at: state.clock,
+    } satisfies AnnouncementRecord);
+  }
 
   if (method === "POST" && pathname === "auth/password") {
     return envelope({ changed: true, access: "demo_access_public_pages" });
