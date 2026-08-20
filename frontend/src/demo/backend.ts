@@ -6,6 +6,7 @@ import type {
   AccountStatusData,
   BlockedIPAddress,
   FastCorrectionDetail,
+  FastCorrectionCalculateResult,
   FastCorrectionRule,
   HistoricalRebuildPlan,
   LoginEventData,
@@ -972,6 +973,27 @@ export async function demoRequest(
   }
   if (method === "GET" && pathname === "observations")
     return envelope(observationsData(state, url));
+  const fastCalculateMatch =
+    /^observations\/(\d+)\/fast-correction\/calculate$/.exec(pathname);
+  if (method === "POST" && fastCalculateMatch) {
+    if (!demoIdentity()?.is_staff) return failure("没有管理员权限", 403);
+    const observation = state.observations.find(
+      (item) => item.id === Number(fastCalculateMatch[1]),
+    );
+    if (!observation) return failure("观测不存在", 404);
+    if (!observation.fast_correction_calculated) {
+      observation.fast_correction_usd = Number(
+        (observation.selected_total_cost * 0.036).toFixed(6),
+      );
+      observation.fast_correction_calculated = true;
+      saveDemoState(state);
+    }
+    return envelope({
+      observation_id: observation.id,
+      fast_correction_usd: observation.fast_correction_usd ?? 0,
+      fast_correction_calculated: true,
+    } satisfies FastCorrectionCalculateResult);
+  }
   const fastMatch = /^observations\/(\d+)\/fast-correction$/.exec(pathname);
   if (method === "GET" && fastMatch) {
     const observation = state.observations.find(

@@ -7,6 +7,8 @@ from django.shortcuts import get_object_or_404
 
 from .base import AdminAPIView, PageAccessAPIView, error, ok
 from ..access import visible_participant_ids
+from ..fast_correction.repair import calculate_missing_fast_correction
+from ..integrations.sub2api import Sub2APIError
 from ..reporting import iso, snapshot_data
 from .query_params import monitored_account_query
 from .record_helpers import paginated_rows, query_datetime
@@ -349,6 +351,20 @@ class ObservationFastCorrectionDetailView(PageAccessAPIView):
                 "users": users,
             }
         )
+
+class ObservationFastCorrectionCalculateView(AdminAPIView):
+    """只补算一条缺失 FAST 事实的原始采样区间。"""
+
+    def post(self, _request, observation_id: int):
+        config = AppSettings.load()
+        observation = get_object_or_404(Observation, pk=observation_id)
+        try:
+            result = calculate_missing_fast_correction(observation, config)
+        except ValueError as exc:
+            return error(str(exc), 400)
+        except Sub2APIError as exc:
+            return error(str(exc), 502)
+        return ok(result)
 
 
 class ObservationRebuildView(AdminAPIView):

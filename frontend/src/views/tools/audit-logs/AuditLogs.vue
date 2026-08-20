@@ -8,6 +8,7 @@ import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import type {
   ConfirmDialogHandle,
+  FastCorrectionCalculateResult,
   MonitorSchedule,
   MonitoredAccount,
   Observation,
@@ -64,6 +65,7 @@ const manualRangeStart = ref<Observation | null>(null);
 const rebuilding = ref(false);
 const success = ref("");
 const fastCorrectionEnabled = ref(true);
+const fastCorrectionCalculatingIds = ref<Set<number>>(new Set());
 
 const filterDialog = ref<InstanceType<typeof ObservationFilterDialog> | null>(
   null,
@@ -138,6 +140,37 @@ async function run() {
     message.value = error instanceof ApiError ? error.message : "测算失败";
   } finally {
     running.value = false;
+  }
+}
+
+function setFastCorrectionCalculating(observationId: number, active: boolean) {
+  const next = new Set(fastCorrectionCalculatingIds.value);
+  if (active) next.add(observationId);
+  else next.delete(observationId);
+  fastCorrectionCalculatingIds.value = next;
+}
+
+async function calculateFastCorrection(row: Observation) {
+  if (row.fast_correction_calculated) return;
+  setFastCorrectionCalculating(row.id, true);
+  message.value = "";
+  try {
+    const result = await api<FastCorrectionCalculateResult>(
+      `observations/${row.id}/fast-correction/calculate`,
+      { method: "POST" },
+    );
+    const current = rows.value.find(
+      (item) => item.id === result.observation_id,
+    );
+    if (current) {
+      current.fast_correction_usd = result.fast_correction_usd;
+      current.fast_correction_calculated = result.fast_correction_calculated;
+    }
+  } catch (error) {
+    message.value =
+      error instanceof ApiError ? error.message : "计算 FAST 修正失败";
+  } finally {
+    setFastCorrectionCalculating(row.id, false);
   }
 }
 
@@ -361,10 +394,12 @@ onMounted(initialize);
     :rebuilding="rebuilding"
     :fast-correction-enabled="fastCorrectionEnabled"
     :editable="auth.isStaff"
+    :fast-correction-calculating-ids="fastCorrectionCalculatingIds"
     @filter="openFilter"
     @detail="detailDialog?.open($event)"
     @cost-detail="costDetailDialog?.open($event)"
     @fast-correction-detail="fastCorrectionDetailDialog?.open($event)"
+    @calculate-fast-correction="calculateFastCorrection"
     @exclude="excludeDialog?.open($event)"
     @restore="restore"
     @begin-manual-range="beginManualRange"

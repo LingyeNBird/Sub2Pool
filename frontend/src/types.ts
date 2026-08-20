@@ -348,6 +348,12 @@ export interface FastCorrectionUserDetail {
   corrected_fast_cost_usd: number;
 }
 
+export interface FastCorrectionCalculateResult {
+  observation_id: number;
+  fast_correction_usd: number;
+  fast_correction_calculated: true;
+}
+
 export interface FastCorrectionDetail {
   observation_id: number;
   started_at: string | null;

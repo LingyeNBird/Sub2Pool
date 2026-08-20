@@ -308,3 +308,156 @@ def test_unsafe_fast_rebuild_endpoint_is_removed_and_missing_facts_are_preserved
         assert observation.fast_correction_standard_cost is None
         assert observation.fast_correction_actual_cost is None
         assert observation.fast_correction_request_count is None
+
+
+@pytest.mark.django_db
+def test_admin_can_calculate_one_missing_fast_interval_without_bulk_rebuild(
+    monkeypatch,
+):
+    User = get_user_model()
+    User.objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    User.objects.create_user(
+        username="viewer",
+        password="Viewer-Access-2026!secure",
+        email="viewer@example.com",
+    )
+    config = AppSettings.load()
+    config.fast_correction_enabled = True
+    config.save()
+    cycle_start = timezone.now().replace(microsecond=0) - timedelta(days=2)
+    reset_at = cycle_start + timedelta(days=7)
+    previous = Observation.objects.create(
+        account_id=7,
+        observed_at=cycle_start + timedelta(hours=1),
+        window_seconds=604800,
+        upstream_resets_at=reset_at,
+        attribution_started_at=cycle_start,
+        upstream_used_percent=Decimal("10"),
+        raw_selected_total_cost=Decimal("100"),
+        selected_total_cost=Decimal("100"),
+        total_standard_cost=Decimal("100"),
+        total_actual_cost=Decimal("100"),
+        effective_usd_per_percent=Decimal("10"),
+    )
+    target = Observation.objects.create(
+        account_id=7,
+        observed_at=cycle_start + timedelta(hours=2),
+        window_seconds=604800,
+        upstream_resets_at=reset_at,
+        attribution_started_at=cycle_start,
+        upstream_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("200"),
+        selected_total_cost=Decimal("200"),
+        total_standard_cost=Decimal("200"),
+        total_actual_cost=Decimal("200"),
+        effective_usd_per_percent=Decimal("10"),
+    )
+    calls = []
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def usage_logs(
+            self,
+            *,
+            account_id,
+            started_at,
+            ended_at,
+            timezone_name,
+        ):
+            calls.append((account_id, started_at, ended_at, timezone_name))
+            return [
+                Sub2APIUsageLog(
+                    id=1,
+                    user_id=51,
+                    account_id=7,
+                    created_at=ended_at - timedelta(minutes=1),
+                    service_tier="priority",
+                    total_cost=Decimal("100"),
+                    actual_cost=Decimal("80"),
+                    model="gpt-5.4",
+                )
+            ]
+
+    monkeypatch.setattr(
+        "monitor.fast_correction.repair.Sub2APIClient",
+        FakeClient,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+    response = client.post(
+        f"/api/observations/{target.id}/fast-correction/calculate",
+        **headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "observation_id": target.id,
+        "fast_correction_usd": 20.0,
+        "fast_correction_calculated": True,
+    }
+    assert calls == [
+        (7, previous.observed_at, target.observed_at, "Asia/Shanghai")
+    ]
+    previous.refresh_from_db()
+    target.refresh_from_db()
+    assert previous.fast_correction_actual_cost is None
+    assert target.fast_correction_started_at == previous.observed_at
+    assert target.fast_correction_standard_cost == Decimal("25")
+    assert target.fast_correction_actual_cost == Decimal("20")
+    assert target.fast_correction_request_count == 1
+    assert target.selected_total_cost == Decimal("220")
+    correction = ObservationFastCorrection.objects.get(observation=target)
+    assert correction.sub2api_user_id == 51
+    assert correction.actual_correction_cost == Decimal("20")
+    settings = client.get("/api/settings", **headers).json()["data"]
+    assert settings["fast_correction_missing_intervals"] == 0
+
+    repeated = client.post(
+        f"/api/observations/{target.id}/fast-correction/calculate",
+        **headers,
+    )
+    assert repeated.status_code == 200
+    assert len(calls) == 1
+
+    regular_client = Client()
+    regular_headers, _ = jwt_login(
+        regular_client,
+        username="viewer",
+        password="Viewer-Access-2026!secure",
+    )
+    assert (
+        regular_client.post(
+            f"/api/observations/{previous.id}/fast-correction/calculate",
+            **regular_headers,
+        ).status_code
+        == 403
+    )
+
+    class FailingClient(FakeClient):
+        def usage_logs(self, **_kwargs):
+            raise Sub2APIError("请求日志暂时不可用")
+
+    monkeypatch.setattr(
+        "monitor.fast_correction.repair.Sub2APIClient",
+        FailingClient,
+    )
+    failed = client.post(
+        f"/api/observations/{previous.id}/fast-correction/calculate",
+        **headers,
+    )
+    assert failed.status_code == 502
+    previous.refresh_from_db()
+    assert previous.fast_correction_standard_cost is None
+    assert previous.fast_correction_actual_cost is None

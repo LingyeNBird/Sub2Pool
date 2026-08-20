@@ -48,7 +48,7 @@ interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 8;
+  version: 9;
   clock: string;
   nextParticipantId: number;
   nextSystemUserId: number;
@@ -549,6 +549,7 @@ function buildPeriods(participants: Participant[]): {
         estimatedPercent,
       );
       const excluded = observationId % 389 === 0;
+      const fastCorrectionCalculated = observationId % 37 !== 0;
       const item: Observation = {
         id: observationId,
         observed_at: iso(observedAt),
@@ -576,8 +577,10 @@ function buildPeriods(participants: Participant[]): {
         capacity_lower_usd: lower,
         capacity_upper_usd: upper,
         model_diagnostics: itemDiagnostics,
-        fast_correction_usd: rounded(selectedCost * 0.036, 6),
-        fast_correction_calculated: true,
+        fast_correction_usd: fastCorrectionCalculated
+          ? rounded(selectedCost * 0.036, 6)
+          : null,
+        fast_correction_calculated: fastCorrectionCalculated,
         valid_sample: !excluded,
         sample_note: excluded
           ? "演示：管理员排除异常观测"
@@ -833,7 +836,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 8,
+    version: 9,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextSystemUserId: 3,
@@ -893,7 +896,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 8) return parsed;
+      if (parsed.version === 9) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }

@@ -16,6 +16,7 @@ defineProps<{
   manualRangeStart: Observation | null;
   rebuilding: boolean;
   fastCorrectionEnabled: boolean;
+  fastCorrectionCalculatingIds: Set<number>;
   editable: boolean;
 }>();
 
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   detail: [row: Observation];
   costDetail: [row: Observation];
   fastCorrectionDetail: [row: Observation];
+  calculateFastCorrection: [row: Observation];
   exclude: [row: Observation];
   restore: [row: Observation];
   beginManualRange: [row: Observation];
@@ -225,6 +227,24 @@ function isAtOrAfter(row: Observation, start: Observation) {
                     @click="emit('fastCorrectionDetail', row)"
                   >
                     {{ formatCurrency(row.fast_correction_usd) }}
+                  </button>
+                  <button
+                    v-else-if="editable"
+                    type="button"
+                    class="inline-flex link cursor-pointer items-center gap-1 font-medium link-hover disabled:cursor-wait disabled:opacity-70"
+                    :disabled="fastCorrectionCalculatingIds.has(row.id)"
+                    title="只计算这一条记录的 FAST 修正"
+                    @click="emit('calculateFastCorrection', row)"
+                  >
+                    <span
+                      v-if="fastCorrectionCalculatingIds.has(row.id)"
+                      class="loading loading-xs loading-spinner"
+                    ></span>
+                    {{
+                      fastCorrectionCalculatingIds.has(row.id)
+                        ? "计算中"
+                        : "未计算"
+                    }}
                   </button>
                   <span v-else class="opacity-60">未计算</span>
                 </td>

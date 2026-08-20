@@ -34,6 +34,7 @@ from .views.notifications import NotificationListView
 from .views.observations import (
     ObservationExclusionView,
     ObservationFastCorrectionDetailView,
+    ObservationFastCorrectionCalculateView,
     ObservationListView,
     ObservationManualStartView,
     ObservationRebuildView,
@@ -116,6 +117,10 @@ urlpatterns = [
     path(
         "observations/<int:observation_id>/fast-correction",
         ObservationFastCorrectionDetailView.as_view(),
+    ),
+    path(
+        "observations/<int:observation_id>/fast-correction/calculate",
+        ObservationFastCorrectionCalculateView.as_view(),
     ),
     path("observations/rebuild", ObservationRebuildView.as_view()),
     path(
