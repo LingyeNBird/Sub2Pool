@@ -65,7 +65,9 @@ const manualRangeStart = ref<Observation | null>(null);
 const rebuilding = ref(false);
 const success = ref("");
 const fastCorrectionEnabled = ref(true);
-const fastCorrectionCalculatingIds = ref<Set<number>>(new Set());
+const fastCorrectionPendingIds = ref<Set<number>>(new Set());
+const fastCorrectionActiveId = ref<number | null>(null);
+const fastCorrectionQueue: number[] = [];
 
 const filterDialog = ref<InstanceType<typeof ObservationFilterDialog> | null>(
   null,
@@ -143,35 +145,58 @@ async function run() {
   }
 }
 
-function setFastCorrectionCalculating(observationId: number, active: boolean) {
-  const next = new Set(fastCorrectionCalculatingIds.value);
+function setFastCorrectionPending(observationId: number, active: boolean) {
+  const next = new Set(fastCorrectionPendingIds.value);
   if (active) next.add(observationId);
   else next.delete(observationId);
-  fastCorrectionCalculatingIds.value = next;
+  fastCorrectionPendingIds.value = next;
 }
 
-async function calculateFastCorrection(row: Observation) {
-  if (row.fast_correction_calculated) return;
-  setFastCorrectionCalculating(row.id, true);
-  message.value = "";
-  try {
-    const result = await api<FastCorrectionCalculateResult>(
-      `observations/${row.id}/fast-correction/calculate`,
-      { method: "POST" },
-    );
-    const current = rows.value.find(
-      (item) => item.id === result.observation_id,
-    );
-    if (current) {
-      current.fast_correction_usd = result.fast_correction_usd;
-      current.fast_correction_calculated = result.fast_correction_calculated;
+async function processFastCorrectionQueue() {
+  if (fastCorrectionActiveId.value !== null) return;
+  while (fastCorrectionQueue.length) {
+    const observationId = fastCorrectionQueue.shift();
+    if (observationId === undefined) continue;
+    const visibleRow = rows.value.find((item) => item.id === observationId);
+    if (visibleRow?.fast_correction_calculated) {
+      setFastCorrectionPending(observationId, false);
+      continue;
     }
-  } catch (error) {
-    message.value =
-      error instanceof ApiError ? error.message : "计算 FAST 修正失败";
-  } finally {
-    setFastCorrectionCalculating(row.id, false);
+
+    fastCorrectionActiveId.value = observationId;
+    try {
+      const result = await api<FastCorrectionCalculateResult>(
+        `observations/${observationId}/fast-correction/calculate`,
+        { method: "POST" },
+      );
+      const current = rows.value.find(
+        (item) => item.id === result.observation_id,
+      );
+      if (current) {
+        current.fast_correction_usd = result.fast_correction_usd;
+        current.fast_correction_calculated = result.fast_correction_calculated;
+      }
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "计算 FAST 修正失败";
+    } finally {
+      fastCorrectionActiveId.value = null;
+      setFastCorrectionPending(observationId, false);
+    }
   }
+}
+
+function calculateFastCorrection(row: Observation) {
+  if (
+    row.fast_correction_calculated ||
+    fastCorrectionPendingIds.value.has(row.id)
+  ) {
+    return;
+  }
+  if (fastCorrectionPendingIds.value.size === 0) message.value = "";
+  setFastCorrectionPending(row.id, true);
+  fastCorrectionQueue.push(row.id);
+  void processFastCorrectionQueue();
 }
 
 async function confirmExclude(row: Observation, reason: string) {
@@ -394,7 +419,8 @@ onMounted(initialize);
     :rebuilding="rebuilding"
     :fast-correction-enabled="fastCorrectionEnabled"
     :editable="auth.isStaff"
-    :fast-correction-calculating-ids="fastCorrectionCalculatingIds"
+    :fast-correction-pending-ids="fastCorrectionPendingIds"
+    :fast-correction-active-id="fastCorrectionActiveId"
     @filter="openFilter"
     @detail="detailDialog?.open($event)"
     @cost-detail="costDetailDialog?.open($event)"

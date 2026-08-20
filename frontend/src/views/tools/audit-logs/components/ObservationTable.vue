@@ -16,7 +16,8 @@ defineProps<{
   manualRangeStart: Observation | null;
   rebuilding: boolean;
   fastCorrectionEnabled: boolean;
-  fastCorrectionCalculatingIds: Set<number>;
+  fastCorrectionPendingIds: Set<number>;
+  fastCorrectionActiveId: number | null;
   editable: boolean;
 }>();
 
@@ -232,18 +233,25 @@ function isAtOrAfter(row: Observation, start: Observation) {
                     v-else-if="editable"
                     type="button"
                     class="inline-flex link cursor-pointer items-center gap-1 font-medium link-hover disabled:cursor-wait disabled:opacity-70"
-                    :disabled="fastCorrectionCalculatingIds.has(row.id)"
+                    :disabled="fastCorrectionPendingIds.has(row.id)"
                     title="只计算这一条记录的 FAST 修正"
                     @click="emit('calculateFastCorrection', row)"
                   >
                     <span
-                      v-if="fastCorrectionCalculatingIds.has(row.id)"
+                      v-if="fastCorrectionActiveId === row.id"
                       class="loading loading-xs loading-spinner"
                     ></span>
+                    <AppIcon
+                      v-else-if="fastCorrectionPendingIds.has(row.id)"
+                      name="clock"
+                      class="size-4"
+                    />
                     {{
-                      fastCorrectionCalculatingIds.has(row.id)
+                      fastCorrectionActiveId === row.id
                         ? "计算中"
-                        : "未计算"
+                        : fastCorrectionPendingIds.has(row.id)
+                          ? "等待中"
+                          : "未计算"
                     }}
                   </button>
                   <span v-else class="opacity-60">未计算</span>

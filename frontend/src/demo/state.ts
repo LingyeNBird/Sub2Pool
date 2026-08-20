@@ -48,7 +48,7 @@ interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 9;
+  version: 10;
   clock: string;
   nextParticipantId: number;
   nextSystemUserId: number;
@@ -549,7 +549,9 @@ function buildPeriods(participants: Participant[]): {
         estimatedPercent,
       );
       const excluded = observationId % 389 === 0;
-      const fastCorrectionCalculated = observationId % 37 !== 0;
+      const fastCorrectionRemainder = observationId % 37;
+      const fastCorrectionCalculated =
+        fastCorrectionRemainder > 5 && fastCorrectionRemainder < 31;
       const item: Observation = {
         id: observationId,
         observed_at: iso(observedAt),
@@ -836,7 +838,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 9,
+    version: 10,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextSystemUserId: 3,
@@ -896,7 +898,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 9) return parsed;
+      if (parsed.version === 10) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }
