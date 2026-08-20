@@ -17,6 +17,8 @@ import {
 } from "@/config/navigation";
 import { useAuthStore } from "@/stores/auth";
 
+import SidebarAccountMenu from "./SidebarAccountMenu.vue";
+
 const faviconUrl = `${import.meta.env.BASE_URL}favicon.png`;
 
 const route = useRoute();
