@@ -291,9 +291,11 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         method: "PATCH",
         body: jsonBody({
           fast_correction_enabled: settings.value.fast_correction_enabled,
+          fast_correction_rules: settings.value.fast_correction_rules,
         }),
       });
       settings.value.fast_correction_enabled = updated.fast_correction_enabled;
+      settings.value.fast_correction_rules = updated.fast_correction_rules;
       settings.value.fast_correction_rebuild_recommended =
         updated.fast_correction_rebuild_recommended;
       settings.value.fast_correction_missing_intervals =

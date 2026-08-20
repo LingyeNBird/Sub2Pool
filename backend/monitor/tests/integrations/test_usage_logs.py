@@ -46,6 +46,7 @@ def test_usage_logs_uses_strict_pagination_and_returns_sampling_rows():
                                 started_at + timedelta(minutes=5)
                             ).isoformat(),
                             "service_tier": "priority",
+                            "model": "gpt-5.6-codex",
                             "total_cost": "4.5",
                             "actual_cost": "3.5",
                             "api_key_id": 91,
@@ -75,6 +76,7 @@ def test_usage_logs_uses_strict_pagination_and_returns_sampling_rows():
     assert len(rows) == 1
     assert rows[0].api_key_id == 91
     assert rows[0].api_key_name == "desktop"
+    assert rows[0].model == "gpt-5.6-codex"
 
 
 @pytest.mark.django_db

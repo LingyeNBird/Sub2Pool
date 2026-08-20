@@ -6,7 +6,11 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.utils import timezone
 
-from .fast_correction.constants import COST_PRECISION, FAST_EXTRA_FACTOR
+from .fast_correction.constants import COST_PRECISION
+from .fast_correction.rules import (
+    FastCorrectionRuleSet,
+    fast_correction_rules_digest,
+)
 from .integrations.sub2api import Sub2APIClient
 from .models import (
     AppSettings,
@@ -31,10 +35,14 @@ def _percentage(numerator: Decimal, denominator: Decimal | None) -> Decimal:
     )
 
 
-def _selected_log_cost(item, config: AppSettings) -> Decimal:
+def _selected_log_cost(
+    item,
+    config: AppSettings,
+    rules: FastCorrectionRuleSet,
+) -> Decimal:
     cost = item.selected(config.cost_basis)
     if config.fast_correction_enabled and item.service_tier == "priority":
-        cost += cost * FAST_EXTRA_FACTOR
+        cost += cost * rules.correction_factor_for_model(item.model)
     return cost.quantize(COST_PRECISION, rounding=ROUND_HALF_UP)
 
 
@@ -64,6 +72,9 @@ def _matching_snapshots(
         attribution_started_at=observation.attribution_started_at,
         cost_basis=config.cost_basis,
         fast_correction_enabled=config.fast_correction_enabled,
+        fast_correction_rules_hash=fast_correction_rules_digest(
+            config.fast_correction_rules
+        ),
     )
 
 
@@ -112,9 +123,10 @@ def refresh_participant_api_usage(
         int(item["id"]): str(item.get("status") or "")
         for item in keys
     }
+    rules = FastCorrectionRuleSet(config.fast_correction_rules)
     costs: defaultdict[int, Decimal] = defaultdict(Decimal)
     for item in logs:
-        costs[item.api_key_id] += _selected_log_cost(item, config)
+        costs[item.api_key_id] += _selected_log_cost(item, config, rules)
         if item.api_key_id and item.api_key_name:
             names.setdefault(item.api_key_id, item.api_key_name)
 
@@ -162,6 +174,9 @@ def refresh_participant_api_usage(
         observed_at=observed_to,
         cost_basis=config.cost_basis,
         fast_correction_enabled=config.fast_correction_enabled,
+        fast_correction_rules_hash=fast_correction_rules_digest(
+            config.fast_correction_rules
+        ),
         participant_total_usd=participant_total,
         weekly_total_estimate_usd=weekly_total,
         participant_weekly_percent=_percentage(participant_total, weekly_total),

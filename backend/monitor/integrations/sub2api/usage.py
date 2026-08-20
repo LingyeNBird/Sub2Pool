@@ -258,6 +258,7 @@ class UsageResourceMixin:
                         ),
                         api_key_id=_positive_int(raw.get("api_key_id")),
                         api_key_name=_api_key_name(raw.get("api_key")),
+                        model=str(raw.get("model") or "").strip(),
                     )
                 )
 

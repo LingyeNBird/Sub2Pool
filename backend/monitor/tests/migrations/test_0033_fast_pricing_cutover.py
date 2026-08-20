@@ -76,5 +76,5 @@ def test_upgrade_disables_legacy_fast_correction_and_announces_cutover():
 
     # 后续测试使用当前模型；显式恢复到最新迁移，避免数据库停在 0033。
     MigrationExecutor(connection).migrate(
-        [("monitor", "0034_announcement_reads")]
+        [("monitor", "0035_fast_correction_model_rules")]
     )

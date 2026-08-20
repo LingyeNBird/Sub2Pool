@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
-from .constants import COST_PRECISION, FAST_EXTRA_FACTOR, ZERO
+from .constants import COST_PRECISION, ZERO
+from .rules import FastCorrectionRuleSet
 from ..integrations.sub2api import Sub2APIUsageLog
 
 
@@ -46,6 +47,7 @@ def aggregate_fast_logs(
     *,
     started_at: datetime,
     ended_at: datetime,
+    rules: FastCorrectionRuleSet,
 ) -> FastCorrectionInterval:
     """把一个采样区间的 FAST 请求按原始 Sub2API 用户 ID 汇总。"""
 
@@ -59,15 +61,24 @@ def aggregate_fast_logs(
                 "count": 0,
                 "standard": ZERO,
                 "actual": ZERO,
+                "standard_correction": ZERO,
+                "actual_correction": ZERO,
             },
         )
         row["request_count"] = int(row["request_count"]) + 1
         if log.service_tier != "priority":
             continue
+        correction_factor = rules.correction_factor_for_model(log.model)
         fast_count += 1
         row["count"] = int(row["count"]) + 1
         row["standard"] = Decimal(row["standard"]) + log.total_cost
         row["actual"] = Decimal(row["actual"]) + log.actual_cost
+        row["standard_correction"] = Decimal(
+            row["standard_correction"]
+        ) + money(log.total_cost * correction_factor)
+        row["actual_correction"] = Decimal(
+            row["actual_correction"]
+        ) + money(log.actual_cost * correction_factor)
 
     users: list[UserFastCorrection] = []
     for user_id in sorted(totals):
@@ -82,9 +93,11 @@ def aggregate_fast_logs(
                 fast_standard_cost=standard,
                 fast_actual_cost=actual,
                 standard_correction_cost=money(
-                    standard * FAST_EXTRA_FACTOR
+                    Decimal(row["standard_correction"])
                 ),
-                actual_correction_cost=money(actual * FAST_EXTRA_FACTOR),
+                actual_correction_cost=money(
+                    Decimal(row["actual_correction"])
+                ),
             )
         )
 

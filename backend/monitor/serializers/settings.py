@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
+from ..fast_correction.rules import normalize_fast_correction_rules
 from ..fast_correction.status import missing_current_cycle_intervals
 from ..models import AppSettings, MonitoredAccount, validate_service_url
 from ..secrets import encrypt_secret
@@ -48,6 +49,7 @@ SETTINGS_FIELDS = (
     "cost_basis",
     "weekly_quota_model",
     "fast_correction_enabled",
+    "fast_correction_rules",
     "initial_usd_per_percent",
     "safety_factor",
     "daily_estimate_min_percent_span",
@@ -204,6 +206,12 @@ class AppSettingsSerializer(serializers.ModelSerializer):
 
     def get_fast_correction_missing_intervals(self, obj) -> int:
         return self._fast_missing_count(obj)
+
+    def validate_fast_correction_rules(self, value):
+        try:
+            return normalize_fast_correction_rules(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
 
     def validate_timezone(self, value: str) -> str:
         try:

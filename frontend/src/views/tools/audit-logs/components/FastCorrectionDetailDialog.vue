@@ -109,22 +109,30 @@ defineExpose<DialogController<[Observation]>>({ open, close });
         </div>
 
         <div
-          class="mt-4 rounded-box border border-base-300 bg-base-200 p-4 text-center"
+          class="stats mt-4 w-full stats-vertical bg-base-200 lg:stats-horizontal"
         >
-          <div class="text-sm opacity-65">修正公式</div>
-          <div class="mt-2 text-lg font-bold tabular-nums">
-            {{ formatCurrency(data.fast_billed_cost_usd) }} × ({{
-              data.upstream_fast_multiplier
-            }}
-            ÷ {{ data.sub2api_fast_multiplier }} − 1) =
-            {{ formatCurrency(data.correction_usd) }}
+          <div class="stat">
+            <div class="stat-title">FAST 原成本</div>
+            <div class="stat-value text-xl">
+              {{ formatCurrency(data.fast_billed_cost_usd) }}
+            </div>
           </div>
-          <div class="mt-2 text-sm opacity-70">
-            Sub2API FAST 成本 {{ formatCurrency(data.fast_billed_cost_usd) }} +
-            修正 {{ formatCurrency(data.correction_usd) }} = 上游等效 FAST 成本
-            {{ formatCurrency(data.corrected_fast_cost_usd) }}
+          <div class="stat">
+            <div class="stat-title">模型规则修正</div>
+            <div class="stat-value text-xl text-primary">
+              {{ formatCurrency(data.correction_usd) }}
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-title">修正后 FAST 成本</div>
+            <div class="stat-value text-xl">
+              {{ formatCurrency(data.corrected_fast_cost_usd) }}
+            </div>
           </div>
         </div>
+        <p class="mt-2 text-sm opacity-65">
+          修正金额按采样时生效的模型规则逐条计算后汇总。
+        </p>
 
         <div class="mt-4 overflow-x-auto">
           <table class="table min-w-[50rem] table-sm">

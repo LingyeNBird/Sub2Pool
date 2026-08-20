@@ -48,7 +48,7 @@ interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 7;
+  version: 8;
   clock: string;
   nextParticipantId: number;
   nextSystemUserId: number;
@@ -750,7 +750,14 @@ function baseSettings(): AppSettingsData {
     timezone: "Asia/Shanghai",
     cost_basis: "actual",
     weekly_quota_model: "time_varying",
-    fast_correction_enabled: false,
+    fast_correction_enabled: true,
+    fast_correction_rules: [
+      {
+        model_pattern: "*",
+        source_multiplier: "2",
+        target_multiplier: "2.5",
+      },
+    ],
     fast_correction_rebuild_recommended: false,
     fast_correction_missing_intervals: 0,
     initial_usd_per_percent: 30,
@@ -826,7 +833,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 7,
+    version: 8,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextSystemUserId: 3,
@@ -886,7 +893,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 7) return parsed;
+      if (parsed.version === 8) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }

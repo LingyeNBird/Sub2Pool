@@ -163,7 +163,7 @@ async function handleRevokeReadOnlyAPIKey() {
     <FastCorrectionCard
       v-model:settings="settings"
       :saving="saving === 'fast-correction'"
-      @save="saveFastCorrection"
+      :save="saveFastCorrection"
     />
     <SamplingStrategyCard
       v-model:settings="settings"

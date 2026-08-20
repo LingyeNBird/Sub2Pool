@@ -361,9 +361,6 @@ export interface FastCorrectionDetail {
   fast_billed_cost_usd: number;
   correction_usd: number;
   corrected_fast_cost_usd: number;
-  sub2api_fast_multiplier: number;
-  upstream_fast_multiplier: number;
-  correction_ratio: number;
   collection_error: string;
   users: FastCorrectionUserDetail[];
 }
@@ -633,8 +630,14 @@ export interface OpenAIAccountOption {
   schedulable: boolean;
 }
 
+export interface FastCorrectionRule {
+  model_pattern: string;
+  source_multiplier: string | number;
+  target_multiplier: string | number;
+}
+
 export interface AppSettingsData {
-  [key: string]: string | number | boolean | null;
+  [key: string]: string | number | boolean | null | FastCorrectionRule[];
   monitoring_enabled: boolean;
   sub2api_base_url: string;
   request_timeout_seconds: number;
@@ -643,6 +646,7 @@ export interface AppSettingsData {
   cost_basis: string;
   weekly_quota_model: "time_varying" | "constant_average";
   fast_correction_enabled: boolean;
+  fast_correction_rules: FastCorrectionRule[];
   fast_correction_rebuild_recommended: boolean;
   fast_correction_missing_intervals: number;
   initial_usd_per_percent: number;

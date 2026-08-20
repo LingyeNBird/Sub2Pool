@@ -10,11 +10,6 @@ from ..access import visible_participant_ids
 from ..reporting import iso, snapshot_data
 from .query_params import monitored_account_query
 from .record_helpers import paginated_rows, query_datetime
-from ..fast_correction.constants import (
-    FAST_EXTRA_FACTOR,
-    SUB2API_FAST_MULTIPLIER,
-    UPSTREAM_FAST_MULTIPLIER,
-)
 from ..models import (
     AppSettings,
     Observation,
@@ -348,11 +343,6 @@ class ObservationFastCorrectionDetailView(PageAccessAPIView):
                 "corrected_fast_cost_usd": float(
                     fast_billed_cost + correction
                 ),
-                "sub2api_fast_multiplier": float(SUB2API_FAST_MULTIPLIER),
-                "upstream_fast_multiplier": float(
-                    UPSTREAM_FAST_MULTIPLIER
-                ),
-                "correction_ratio": float(FAST_EXTRA_FACTOR),
                 "collection_error": str(
                     observation.raw_window.get("fast_correction_error") or ""
                 ),

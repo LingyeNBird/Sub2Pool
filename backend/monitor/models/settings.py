@@ -4,6 +4,10 @@ from decimal import Decimal
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
+from ..fast_correction.rules import (
+    default_fast_correction_rules,
+    validate_fast_correction_rules,
+)
 from .validators import validate_service_url
 
 
@@ -75,8 +79,12 @@ class AppSettings(models.Model):
         ),
         default="time_varying",
     )
-    # 兼容修正只控制新采样；已落库的历史修正事实永久保留并参与重放。
-    fast_correction_enabled = models.BooleanField(default=False)
+    # 开关和规则只控制新采样；已落库的历史修正事实永久保留并参与重放。
+    fast_correction_enabled = models.BooleanField(default=True)
+    fast_correction_rules = models.JSONField(
+        default=default_fast_correction_rules,
+        validators=[validate_fast_correction_rules],
+    )
     initial_usd_per_percent = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("16"))
     safety_factor = models.DecimalField(
         max_digits=6, decimal_places=4, default=Decimal("0.95"),

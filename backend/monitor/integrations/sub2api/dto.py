@@ -51,6 +51,7 @@ class Sub2APIUsageLog:
     actual_cost: Decimal
     api_key_id: int = 0
     api_key_name: str = ""
+    model: str = ""
 
     def selected(self, basis: str) -> Decimal:
         return self.actual_cost if basis == "actual" else self.total_cost

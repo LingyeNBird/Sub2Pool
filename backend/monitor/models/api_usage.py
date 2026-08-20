@@ -24,6 +24,7 @@ class ParticipantAPIUsageSnapshot(models.Model):
     observed_at = models.DateTimeField()
     cost_basis = models.CharField(max_length=16)
     fast_correction_enabled = models.BooleanField(default=False)
+    fast_correction_rules_hash = models.CharField(max_length=64, blank=True)
     participant_total_usd = models.DecimalField(max_digits=18, decimal_places=6)
     weekly_total_estimate_usd = models.DecimalField(
         max_digits=18,

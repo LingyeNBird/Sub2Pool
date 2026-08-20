@@ -146,6 +146,7 @@ def fetch_fast_correction(
                 started_at=started_at,
                 ended_at=ended_at,
                 timezone_name=config.timezone,
+                correction_rules=config.fast_correction_rules,
             ),
             "",
         )

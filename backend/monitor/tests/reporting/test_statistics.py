@@ -474,6 +474,7 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
                     actual_cost=Decimal("60"),
                     api_key_id=1,
                     api_key_name="主密钥",
+                    model="gpt-5.6-codex",
                 ),
                 Sub2APIUsageLog(
                     id=2,
@@ -528,6 +529,27 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
     assert cached == data
     assert calls == {"keys": 1, "logs": 1}
     assert ParticipantAPIUsageSnapshot.objects.count() == 1
+    config.fast_correction_rules = [
+        {
+            "model_pattern": "gpt-5.6*",
+            "source_multiplier": "2.5",
+            "target_multiplier": "2.5",
+        },
+        {
+            "model_pattern": "*",
+            "source_multiplier": "2",
+            "target_multiplier": "2.5",
+        },
+    ]
+    config.save(update_fields=["fast_correction_rules"])
+    model_specific = client.get(
+        f"/api/statistics/participants/{participant.id}/api-usage",
+        **headers,
+    ).json()["data"]
+    assert model_specific["participant_total_usd"] == 100.0
+    assert calls == {"keys": 2, "logs": 2}
+    assert ParticipantAPIUsageSnapshot.objects.count() == 2
+
     config.fast_correction_enabled = False
     config.save(update_fields=["fast_correction_enabled"])
     uncorrected = client.get(
@@ -536,8 +558,8 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
     ).json()["data"]
     assert uncorrected["fast_correction_enabled"] is False
     assert uncorrected["participant_total_usd"] == 100.0
-    assert calls == {"keys": 2, "logs": 2}
-    assert ParticipantAPIUsageSnapshot.objects.count() == 2
+    assert calls == {"keys": 3, "logs": 3}
+    assert ParticipantAPIUsageSnapshot.objects.count() == 3
     assert (
         client.get(
             f"/api/statistics/participants/{hidden.id}/api-usage",

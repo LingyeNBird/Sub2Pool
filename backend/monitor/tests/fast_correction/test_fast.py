@@ -52,7 +52,7 @@ from monitor.tests.helpers import (
 )
 
 @pytest.mark.django_db
-def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
+def test_sampling_applies_ordered_model_fast_correction_rules(monkeypatch):
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
@@ -62,6 +62,18 @@ def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
     create_monitored_account(7)
     config.cost_basis = "actual"
     config.fast_correction_enabled = True
+    config.fast_correction_rules = [
+        {
+            "model_pattern": "gpt-5.6*",
+            "source_multiplier": "2.5",
+            "target_multiplier": "2.5",
+        },
+        {
+            "model_pattern": "*",
+            "source_multiplier": "2",
+            "target_multiplier": "2.5",
+        },
+    ]
     config.save()
     participant = create_participant(name="已配置参与者",
     sub2api_user_id=51,
@@ -114,6 +126,7 @@ def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
                     "priority",
                     Decimal("80"),
                     Decimal("80"),
+                    model="gpt-5.6-codex",
                 ),
                 Sub2APIUsageLog(
                     2,
@@ -123,6 +136,7 @@ def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
                     "priority",
                     Decimal("20"),
                     Decimal("20"),
+                    model="gpt-5.4",
                 ),
                 Sub2APIUsageLog(
                     3,
@@ -140,15 +154,15 @@ def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
 
     assert result["status"] == "calibrated"
     observation = Observation.objects.get()
-    assert observation.fast_correction_standard_cost == Decimal("25")
-    assert observation.fast_correction_actual_cost == Decimal("25")
-    assert observation.selected_total_cost == Decimal("225")
+    assert observation.fast_correction_standard_cost == Decimal("5")
+    assert observation.fast_correction_actual_cost == Decimal("5")
+    assert observation.selected_total_cost == Decimal("205")
     corrections = list(
         ObservationFastCorrection.objects.order_by("sub2api_user_id")
     )
     assert [row.sub2api_user_id for row in corrections] == [51, 52]
     assert [row.actual_correction_cost for row in corrections] == [
-        Decimal("20"),
+        Decimal("0"),
         Decimal("5"),
     ]
     assert observation.fast_correction_request_count == 3
@@ -166,10 +180,8 @@ def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
     assert detail["fast_request_count"] == 2
     assert detail["non_fast_request_count"] == 1
     assert detail["fast_billed_cost_usd"] == 100.0
-    assert detail["correction_usd"] == 25.0
-    assert detail["corrected_fast_cost_usd"] == 125.0
-    assert detail["sub2api_fast_multiplier"] == 2.0
-    assert detail["upstream_fast_multiplier"] == 2.5
+    assert detail["correction_usd"] == 5.0
+    assert detail["corrected_fast_cost_usd"] == 105.0
     assert detail["users"] == [
         {
             "sub2api_user_id": 51,
@@ -180,8 +192,8 @@ def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
             "fast_request_count": 1,
             "non_fast_request_count": 1,
             "fast_billed_cost_usd": 80.0,
-            "correction_usd": 20.0,
-            "corrected_fast_cost_usd": 100.0,
+            "correction_usd": 0.0,
+            "corrected_fast_cost_usd": 80.0,
         },
         {
             "sub2api_user_id": 52,
@@ -197,7 +209,7 @@ def test_sampling_applies_fast_correction_for_all_sub2api_users(monkeypatch):
         },
     ]
     snapshot = ParticipantSnapshot.objects.get(participant=participant)
-    assert snapshot.selected_cost == Decimal("170")
+    assert snapshot.selected_cost == Decimal("150")
 
 @pytest.mark.django_db
 def test_disabled_fast_correction_skips_log_reads_and_preserves_null_interval(

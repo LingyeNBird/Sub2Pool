@@ -483,6 +483,18 @@ def test_settings_round_trip_accepts_internal_docker_url_and_decimal_values():
     headers, _ = jwt_login(client)
     payload = client.get("/api/settings", **headers).json()["data"]
     payload["local_poll_minutes"] = 11
+    payload["fast_correction_rules"] = [
+        {
+            "model_pattern": " GPT-5.6* ",
+            "source_multiplier": "2.50",
+            "target_multiplier": "2.500",
+        },
+        {
+            "model_pattern": "*",
+            "source_multiplier": "2",
+            "target_multiplier": "2.5",
+        },
+    ]
     response = client.patch(
         "/api/settings",
         data=json.dumps(payload),
@@ -495,3 +507,35 @@ def test_settings_round_trip_accepts_internal_docker_url_and_decimal_values():
     assert config.sub2api_base_url == "http://host.docker.internal:8080"
     assert config.safety_factor == Decimal("0.95")
     assert config.local_poll_minutes == 11
+    assert config.fast_correction_enabled is True
+    assert config.fast_correction_rules == [
+        {
+            "model_pattern": "gpt-5.6*",
+            "source_multiplier": "2.5",
+            "target_multiplier": "2.5",
+        },
+        {
+            "model_pattern": "*",
+            "source_multiplier": "2",
+            "target_multiplier": "2.5",
+        },
+    ]
+
+    invalid = client.patch(
+        "/api/settings",
+        data=json.dumps(
+            {
+                "fast_correction_rules": [
+                    {
+                        "model_pattern": "*",
+                        "source_multiplier": "2.5",
+                        "target_multiplier": "2",
+                    }
+                ]
+            }
+        ),
+        content_type="application/json",
+        **headers,
+    )
+    assert invalid.status_code == 400
+    assert "不能小于源倍率" in str(invalid.json())

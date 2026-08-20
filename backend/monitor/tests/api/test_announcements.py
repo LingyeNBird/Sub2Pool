@@ -35,11 +35,12 @@ def test_admin_announcements_have_persistent_per_user_read_state():
     assert data["unread_count"] == 1
     assert len(data["items"]) == 1
     announcement = data["items"][0]
-    assert announcement["code"] == "sub2api-fast-pricing-0-1-179"
+    assert announcement["code"] == "sub2api-fast-model-correction-0-1-179"
     assert announcement["read"] is False
     assert announcement["read_at"] is None
     assert "Sub2API 0.1.179" in announcement["title"]
-    assert any("2.5" in paragraph for paragraph in announcement["paragraphs"])
+    assert any("建议优先在 Sub2API" in paragraph for paragraph in announcement["paragraphs"])
+    assert any("更详细的 FAST 模型修正" in paragraph for paragraph in announcement["paragraphs"])
     assert regular_client.get(
         "/api/announcements",
         **regular_headers,
