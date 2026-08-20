@@ -90,12 +90,7 @@ onMounted(() => {
           <header
             class="flex shrink-0 items-start justify-between gap-4 border-b border-base-300 px-5 py-4 sm:px-6"
           >
-            <div>
-              <h2 class="text-lg font-bold">系统公告</h2>
-              <p class="mt-1 text-sm opacity-60">
-                产品升级和需要管理员处理的事项。
-              </p>
-            </div>
+            <h2 class="text-lg font-bold">系统公告</h2>
             <form method="dialog">
               <button
                 class="btn btn-circle btn-ghost btn-sm"
