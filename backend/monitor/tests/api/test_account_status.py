@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
+from django.utils import timezone
 
 from monitor.integrations.sub2api import Sub2APIError, WeeklyWindow
-from monitor.models import AppSettings, PagePermission, SystemUserPageAccess
+from monitor.models import AppSettings, MonitoredAccount, Observation, PagePermission, SystemUserPageAccess
 from monitor.secrets import encrypt_secret
 from monitor.tests.helpers import create_monitored_account, jwt_login
 from monitor.views.account_status import _fallback_usage
@@ -49,6 +51,32 @@ def test_account_status_returns_each_account_and_isolates_upstream_failures(
     config.save()
     first = create_monitored_account(7, name="A 主账号")
     second = create_monitored_account(8, name="B 备用账号", enabled=False)
+    now = timezone.now()
+    for account_id, age_days, actual, standard in (
+        (7, 5, "3.25", "4.50"),
+        (7, 12, "1.75", "2.50"),
+        (7, 31, "99", "99"),
+        (8, 3, "9", "12"),
+    ):
+        observed_at = now - timedelta(days=age_days)
+        Observation.objects.create(
+            account_id=account_id,
+            observed_at=observed_at,
+            window_seconds=604800,
+            upstream_resets_at=observed_at + timedelta(days=7),
+            attribution_started_at=observed_at - timedelta(days=1),
+            upstream_used_percent=Decimal("20"),
+            raw_selected_total_cost=Decimal("100"),
+            selected_total_cost=Decimal("100"),
+            total_standard_cost=Decimal("100"),
+            total_actual_cost=Decimal("100"),
+            fast_correction_started_at=observed_at,
+            fast_correction_request_count=1,
+            fast_correction_actual_cost=Decimal(actual),
+            fast_correction_standard_cost=Decimal(standard),
+            effective_usd_per_percent=Decimal("20"),
+        )
+
 
     class FakeClient:
         calls: list[tuple[str, int, object]] = []
@@ -159,6 +187,11 @@ def test_account_status_returns_each_account_and_isolates_upstream_failures(
     assert first_row["usage"]["seven_day"]["used_percent"] == 41.25
     assert first_row["usage"]["seven_day"]["account_cost_usd"] == 18.75
     assert first_row["stats"]["token_count"] == 3456789
+    assert first_row["stats"]["fast_correction_usd"] == 5.0
+    assert first_row["stats"]["account_cost_with_fast_correction_usd"] == 86.25
+    assert second_row["stats"]["fast_correction_usd"] == 9.0
+    assert second_row["stats"]["account_cost_with_fast_correction_usd"] == 90.25
+
     assert first_row["warnings"] == []
     assert FakeClient.calls == [
         ("runtime", 7, None),

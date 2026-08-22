@@ -1,19 +1,44 @@
 """Direct, read-only Sub2API account status endpoint."""
-from __future__ import annotations
-
-from datetime import UTC, datetime
-
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
+from django.db.models import Sum
 from django.utils import timezone
 
 from .base import PageAccessAPIView, ok
 from ..api_auth import ReadOnlyAPIKeyAuthentication
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError, WeeklyWindow
-from ..models import AppSettings, MonitoredAccount, PagePermission
+from ..models import AppSettings, MonitoredAccount, Observation, PagePermission
 
 
 STATS_DAYS = 30
+
+
+def _fast_correction_totals(
+    account_ids: list[int],
+    *,
+    cost_basis: str,
+    observed_after: datetime,
+    observed_before: datetime,
+) -> dict[int, Decimal]:
+    field = (
+        "fast_correction_actual_cost"
+        if cost_basis == "actual"
+        else "fast_correction_standard_cost"
+    )
+    totals = (
+        Observation.objects.filter(
+            account_id__in=account_ids,
+            observed_at__range=(observed_after, observed_before),
+        )
+        .values("account_id")
+        .annotate(total=Sum(field))
+    )
+    return {
+        int(row["account_id"]): row["total"] or Decimal("0")
+        for row in totals
+    }
 
 
 def _base_account_row(account: MonitoredAccount) -> dict[str, Any]:
@@ -71,9 +96,16 @@ class AccountStatusView(PageAccessAPIView):
         config = AppSettings.load()
         accounts = list(MonitoredAccount.objects.order_by("name", "external_account_id"))
         rows = [_base_account_row(account) for account in accounts]
+        sampled_at = timezone.now()
+        correction_totals = _fast_correction_totals(
+            [account.external_account_id for account in accounts],
+            cost_basis=config.cost_basis,
+            observed_after=sampled_at - timedelta(days=STATS_DAYS),
+            observed_before=sampled_at,
+        )
         data = {
             "configured": bool(config.sub2api_admin_token_encrypted and accounts),
-            "sampled_at": timezone.now().isoformat(),
+            "sampled_at": sampled_at.isoformat(),
             "stats_days": STATS_DAYS,
             "connection_error": None,
             "accounts": rows,
@@ -121,10 +153,19 @@ class AccountStatusView(PageAccessAPIView):
                     row["warnings"].append(f"额度状态：{row['usage']['error']}")
 
                 try:
-                    row["stats"] = client.account_usage_stats(
+                    stats = client.account_usage_stats(
                         upstream_id,
                         days=STATS_DAYS,
                     )
+                    correction = correction_totals.get(upstream_id, Decimal("0"))
+                    stats["fast_correction_usd"] = float(correction)
+                    account_cost = stats.get("account_cost_usd")
+                    stats["account_cost_with_fast_correction_usd"] = (
+                        float(Decimal(str(account_cost)) + correction)
+                        if account_cost is not None
+                        else None
+                    )
+                    row["stats"] = stats
                 except Sub2APIError as exc:
                     row["warnings"].append(f"{STATS_DAYS} 天统计：{exc}")
 

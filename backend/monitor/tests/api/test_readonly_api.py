@@ -196,6 +196,16 @@ def test_readonly_api_key_lifecycle_and_scope():
     assert schemas["AccountStatus"]["properties"]["accounts"]["items"][
         "$ref"
     ].endswith("/AccountStatusAccount")
+    assert (
+        schemas["AccountUsageStats"]["properties"]["fast_correction_usd"]
+        == {"type": ["number", "null"]}
+    )
+    assert (
+        schemas["AccountUsageStats"]["properties"][
+            "account_cost_with_fast_correction_usd"
+        ]
+        == {"type": ["number", "null"]}
+    )
     assert schemas["NotificationList"]["properties"]["items"]["items"][
         "$ref"
     ].endswith("/Notification")

@@ -145,8 +145,8 @@ onMounted(load);
     <AppIcon name="information-circle" class="size-5" />
     <span>
       额度窗口使用 Sub2API 被动快照，不会因打开或刷新本页而请求 OpenAI
-      官方额度接口；近
-      {{ data?.stats_days ?? 30 }} 天统计来自 Sub2API 本地请求日志。
+      官方额度接口；近 {{ data?.stats_days ?? 30 }} 天统计来自 Sub2API
+      本地请求日志， FAST 修正来自本地已持久化事实。
     </span>
   </div>
 
@@ -330,10 +330,32 @@ onMounted(load);
         <div class="grid gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
           <div v-if="account.stats.account_cost_usd != null">
             <div class="text-xs opacity-55">账号成本</div>
-            <div class="mt-1 text-xl font-semibold tabular-nums">
-              {{ formatCurrency(account.stats.account_cost_usd) }}
+            <div class="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span class="text-xl font-semibold tabular-nums">
+                {{ formatCurrency(account.stats.account_cost_usd) }}
+              </span>
+              <span
+                v-if="account.stats.fast_correction_usd != null"
+                class="text-xs font-normal opacity-60"
+              >
+                （FAST 修正 +{{
+                  formatCurrency(account.stats.fast_correction_usd)
+                }}）
+              </span>
+            </div>
+            <div
+              v-if="account.stats.account_cost_with_fast_correction_usd != null"
+              class="mt-1 text-sm font-medium"
+            >
+              含 FAST 修正
+              {{
+                formatCurrency(
+                  account.stats.account_cost_with_fast_correction_usd,
+                )
+              }}
             </div>
           </div>
+
           <div v-if="account.stats.request_count != null">
             <div class="text-xs opacity-55">请求数</div>
             <div class="mt-1 text-xl font-semibold tabular-nums">

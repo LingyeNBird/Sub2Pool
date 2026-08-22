@@ -964,11 +964,12 @@ def _openapi_document() -> dict:
                 "AccountUsageStats": {
                     "type": "object",
                     "properties": {
-                        "days": _nullable("integer"),
-                        "actual_days_used": _nullable("integer"),
                         "account_cost_usd": nullable_number,
+                        "fast_correction_usd": nullable_number,
+                        "account_cost_with_fast_correction_usd": nullable_number,
                         "standard_cost_usd": nullable_number,
                         "user_cost_usd": nullable_number,
+
                         "request_count": _nullable("integer"),
                         "token_count": _nullable("integer"),
                         "avg_daily_cost_usd": nullable_number,

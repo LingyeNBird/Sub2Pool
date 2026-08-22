@@ -83,8 +83,11 @@ export interface AccountUsageStats {
   days: number | null;
   actual_days_used: number | null;
   account_cost_usd: number | null;
+  fast_correction_usd: number | null;
+  account_cost_with_fast_correction_usd: number | null;
   standard_cost_usd: number | null;
   user_cost_usd: number | null;
+
   request_count: number | null;
   token_count: number | null;
   avg_daily_cost_usd: number | null;

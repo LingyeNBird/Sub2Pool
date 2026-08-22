@@ -549,6 +549,7 @@ function accountStatusData(state: DemoState): AccountStatusData {
       requests: 1842,
       tokens: 8_745_120,
       accountCost: 142.68,
+      fastCorrection: 12.48,
       concurrency: 3,
     },
     {
@@ -556,6 +557,7 @@ function accountStatusData(state: DemoState): AccountStatusData {
       requests: 694,
       tokens: 3_126_480,
       accountCost: 54.32,
+      fastCorrection: 6.32,
       concurrency: 1,
     },
   ];
@@ -569,6 +571,7 @@ function accountStatusData(state: DemoState): AccountStatusData {
       const resetAt = new Date(
         sampledAt + (index === 0 ? 52 : 91) * 3_600_000,
       ).toISOString();
+      const statsAccountCost = Number((fixture.accountCost * 3.6).toFixed(2));
       return {
         id: account.id,
         external_account_id: account.external_account_id,
@@ -626,14 +629,17 @@ function accountStatusData(state: DemoState): AccountStatusData {
         stats: {
           days: 30,
           actual_days_used: 26,
-          account_cost_usd: Number((fixture.accountCost * 3.6).toFixed(2)),
+          account_cost_usd: statsAccountCost,
+          fast_correction_usd: fixture.fastCorrection,
+          account_cost_with_fast_correction_usd: Number(
+            (statsAccountCost + fixture.fastCorrection).toFixed(2),
+          ),
           standard_cost_usd: Number((fixture.accountCost * 3.2).toFixed(2)),
           user_cost_usd: Number((fixture.accountCost * 3.9).toFixed(2)),
           request_count: fixture.requests * 4,
           token_count: fixture.tokens * 4,
-          avg_daily_cost_usd: Number(
-            ((fixture.accountCost * 3.6) / 26).toFixed(2),
-          ),
+          avg_daily_cost_usd: Number((statsAccountCost / 26).toFixed(2)),
+
           avg_daily_request_count: Number(
             ((fixture.requests * 4) / 26).toFixed(1),
           ),
