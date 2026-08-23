@@ -345,6 +345,7 @@ function edit() {
             <EntitlementProgress
               class="mt-3"
               :usage-percent="group.usagePercent"
+              :total-percent="group.allocation.share_percent"
               :progress-label="`${group.title}的权益进度`"
             />
           </section>

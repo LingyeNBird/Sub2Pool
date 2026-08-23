@@ -6,18 +6,30 @@ import { formatCompactPercent } from "@/utils/formatters";
 const props = defineProps<{
   usagePercent: number | null | undefined;
   progressLabel: string;
+  totalPercent?: number;
 }>();
 
 const complete = computed(
   () => props.usagePercent != null && Number.isFinite(props.usagePercent),
 );
-const consumedPercent = computed(() => Math.max(0, props.usagePercent ?? 0));
-const overusedPercent = computed(() =>
-  Math.max(0, consumedPercent.value - 100),
+const normalizedUsagePercent = computed(() =>
+  Math.max(0, props.usagePercent ?? 0),
 );
-const consumedWidth = computed(() => Math.min(100, consumedPercent.value));
+const totalPercent = computed(() => Math.max(0, props.totalPercent ?? 100));
+const consumedPercent = computed(
+  () => (normalizedUsagePercent.value * totalPercent.value) / 100,
+);
+const overusedPercent = computed(() =>
+  Math.max(0, consumedPercent.value - totalPercent.value),
+);
+const consumedWidth = computed(() =>
+  Math.min(100, normalizedUsagePercent.value),
+);
+const remainingWidth = computed(() =>
+  Math.max(0, 100 - normalizedUsagePercent.value),
+);
 const remainingPercent = computed(() =>
-  Math.max(0, 100 - consumedPercent.value),
+  Math.max(0, totalPercent.value - consumedPercent.value),
 );
 </script>
 
@@ -42,7 +54,7 @@ const remainingPercent = computed(() =>
         <div
           v-if="remainingPercent > 0"
           class="h-full shrink-0 bg-primary"
-          :style="{ width: `${remainingPercent}%` }"
+          :style="{ width: `${remainingWidth}%` }"
         ></div>
       </div>
       <span
@@ -63,7 +75,7 @@ const remainingPercent = computed(() =>
         <span
           v-if="remainingPercent > 0"
           class="pointer-events-none absolute inset-y-0 right-0 z-10 flex max-w-full min-w-fit items-center justify-center px-1 text-[10px] whitespace-nowrap text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.8)] sm:text-xs"
-          :style="{ width: `${remainingPercent}%` }"
+          :style="{ width: `${remainingWidth}%` }"
         >
           剩余 {{ formatCompactPercent(remainingPercent) }}
         </span>
