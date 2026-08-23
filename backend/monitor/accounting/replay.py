@@ -15,7 +15,6 @@ from django.db.models import OuterRef, Q, Subquery
 
 from .boundaries import (
     infer_segments as _infer_segments,
-    mark_deferred_zero_observations,
     official_start as _official_start,
     same_official_reset as _same_official_reset,
 )
@@ -233,6 +232,29 @@ def _previous_included(observation: Observation) -> Observation | None:
     )
 
 
+def _previous_segment_included(
+    observation: Observation,
+) -> Observation | None:
+    queryset = (
+        Observation.objects.filter(
+            account_id=observation.account_id,
+            excluded_at__isnull=True,
+        )
+        .filter(
+            Q(observed_at__lt=observation.observed_at)
+            | Q(
+                observed_at=observation.observed_at,
+                id__lt=observation.id,
+            )
+        )
+    )
+    if observation.attribution_started_at is not None:
+        queryset = queryset.exclude(
+            attribution_started_at=observation.attribution_started_at,
+        )
+    return queryset.order_by("-observed_at", "-id").first()
+
+
 def _replay_anchor(
     observation: Observation,
     *,
@@ -261,6 +283,20 @@ def _replay_anchor(
         and previous.upstream_used_percent == ZERO
         and not observation.is_manual_start
     ):
+        if not _same_official_reset(
+            previous.upstream_resets_at,
+            observation.upstream_resets_at,
+        ):
+            previous_segment = _previous_segment_included(previous)
+            if previous_segment is not None:
+                return (
+                    previous_segment.attribution_started_at
+                    or (
+                        previous_segment.observed_at
+                        if previous_segment.is_manual_start
+                        else _official_start(previous_segment)
+                    )
+                )
         return previous.attribution_started_at or previous.observed_at
     if previous is not None and _same_official_reset(
         previous.upstream_resets_at,
@@ -356,7 +392,7 @@ def rebuild_account(
         for observation in observations
         if observation.exclusion_source != "manual"
     ]
-    segments, automatic, deferred = _infer_segments(
+    segments, automatic = _infer_segments(
         candidates,
         config.cost_basis,
     )
@@ -367,26 +403,6 @@ def rebuild_account(
                 "excluded_at",
                 "exclusion_source",
                 "exclusion_reason",
-                "attribution_started_at",
-                "selected_total_cost",
-                "interval_used_percent",
-                "delta_percent",
-                "delta_cost",
-                "sample_usd_per_percent",
-                "estimated_used_percent",
-                "capacity_lower_usd",
-                "capacity_upper_usd",
-                "model_diagnostics",
-                "valid_sample",
-                "sample_note",
-                "raw_window",
-            ],
-        )
-    if deferred:
-        mark_deferred_zero_observations(deferred)
-        Observation.objects.bulk_update(
-            deferred,
-            [
                 "attribution_started_at",
                 "selected_total_cost",
                 "interval_used_percent",

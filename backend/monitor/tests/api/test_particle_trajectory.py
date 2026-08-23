@@ -73,7 +73,7 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["available"] is True
-    assert data["algorithm"] == "particle_filter_v6"
+    assert data["algorithm"] == "particle_filter_v7"
     assert data["particle_count"] == 480
     assert data["representative_particle_count"] == 96
     assert data["segment"]["observation_count"] == 2
@@ -262,7 +262,7 @@ def test_trajectory_periods_use_actual_observation_order_for_current():
 
 
 @pytest.mark.django_db
-def test_particle_trajectory_defers_continuous_zero_plateau_until_usage():
+def test_particle_trajectory_keeps_first_zero_baseline_until_usage():
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
@@ -326,15 +326,20 @@ def test_particle_trajectory_defers_continuous_zero_plateau_until_usage():
     first.refresh_from_db()
     second.refresh_from_db()
     baseline.refresh_from_db()
-    assert first.attribution_started_at is None
-    assert second.attribution_started_at is None
-    assert first.raw_window["replay_decision"] == "deferred_zero_plateau"
-    assert second.raw_window["replay_decision"] == "deferred_zero_plateau"
+    assert all(
+        observation.attribution_started_at == first.observed_at
+        for observation in (first, second, baseline, positive)
+    )
+    assert all(
+        observation.raw_window["replay_decision"] == "included"
+        for observation in (first, second, baseline, positive)
+    )
     assert first.excluded_at is None
     assert second.excluded_at is None
-    assert baseline.attribution_started_at == baseline.observed_at
-    assert positive.attribution_started_at == baseline.observed_at
-    assert positive.selected_total_cost == Decimal("40")
+    assert first.selected_total_cost == Decimal("0")
+    assert second.selected_total_cost == Decimal("100")
+    assert baseline.selected_total_cost == Decimal("200")
+    assert positive.selected_total_cost == Decimal("240")
 
     client = Client()
     headers, _ = jwt_login(client)
@@ -344,14 +349,14 @@ def test_particle_trajectory_defers_continuous_zero_plateau_until_usage():
     periods = response.json()["data"]["periods"]
     assert periods == [
         {
-            "id": baseline.id,
+            "id": first.id,
             "sequence": 1,
-            "started_at": baseline.observed_at.isoformat(),
-            "first_observed_at": baseline.observed_at.isoformat(),
+            "started_at": first.observed_at.isoformat(),
+            "first_observed_at": first.observed_at.isoformat(),
             "last_observed_at": positive.observed_at.isoformat(),
             "resets_at": positive_reset.isoformat(),
             "ended_at": positive_reset.isoformat(),
-            "observation_count": 2,
+            "observation_count": 4,
             "is_current": True,
         }
     ]

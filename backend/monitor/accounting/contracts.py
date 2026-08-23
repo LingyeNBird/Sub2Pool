@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from ..models import Observation
 
-ALGORITHM_VERSION = "particle_filter_v6"
+ALGORITHM_VERSION = "particle_filter_v7"
 
 
 @dataclass

@@ -245,6 +245,43 @@ def test_passive_reset_timestamp_drift_keeps_the_same_cycle(monkeypatch):
         == observations[1].attribution_started_at
     )
 
+
+@pytest.mark.django_db
+def test_backward_reset_timestamp_does_not_start_new_cycle():
+    config = AppSettings.load()
+    create_monitored_account(7)
+    config.save()
+    observed_at = timezone.now().replace(microsecond=0)
+    current_reset_at = observed_at + timedelta(days=7)
+    stale_reset_at = current_reset_at - timedelta(days=7)
+
+    def raw_observation(index, used_percent, reset_at, cost):
+        observation = Observation.objects.create(
+            account_id=7,
+            source="manual",
+            observed_at=observed_at + timedelta(minutes=10 * index),
+            window_seconds=604800,
+            upstream_resets_at=reset_at,
+            upstream_used_percent=Decimal(used_percent),
+            raw_selected_total_cost=Decimal(cost),
+            selected_total_cost=Decimal(cost),
+            total_standard_cost=Decimal(cost),
+            total_actual_cost=Decimal(cost),
+            effective_usd_per_percent=Decimal("16"),
+        )
+        rebuild_observation_suffix(observation, config)
+        observation.refresh_from_db()
+        return observation
+
+    first = raw_observation(0, "40", current_reset_at, "400")
+    stale = raw_observation(1, "41", stale_reset_at, "420")
+
+    assert stale.exclusion_source == ""
+    assert stale.attribution_started_at == first.attribution_started_at
+    assert stale.delta_percent == Decimal("1")
+    assert stale.delta_cost == Decimal("20")
+
+
 @pytest.mark.django_db
 def test_official_zero_observation_rebases_natural_day_usage_costs():
     """自然日累计成本必须在官方窗口首个 0% 观测处扣除跨周期结转。"""
@@ -314,6 +351,13 @@ def test_official_zero_observation_rebases_natural_day_usage_costs():
         Decimal("175.310566"),
         Decimal("100"),
     )
+    continued_zero = raw_observation(
+        zero_observed_at + timedelta(minutes=30),
+        new_reset_at,
+        Decimal("0"),
+        Decimal("185.310566"),
+        Decimal("110"),
+    )
     raw_observation(
         zero_observed_at + timedelta(hours=1),
         new_reset_at,
@@ -332,6 +376,7 @@ def test_official_zero_observation_rebases_natural_day_usage_costs():
     rebuild_account(7, config)
     zero.refresh_from_db()
     latest.refresh_from_db()
+    continued_zero.refresh_from_db()
     latest_snapshot = ParticipantSnapshot.objects.get(
         observation=latest,
         participant=participant,
@@ -341,6 +386,8 @@ def test_official_zero_observation_rebases_natural_day_usage_costs():
     assert zero.raw_window["replay_segment_reason"] == (
         "official_zero_observation"
     )
+    assert continued_zero.attribution_started_at == zero.observed_at
+    assert continued_zero.selected_total_cost == Decimal("10.000000")
     assert latest.attribution_started_at == zero.observed_at
     assert latest.selected_total_cost == Decimal("85.562033")
     assert latest_snapshot.selected_cost == Decimal("50")
@@ -357,7 +404,7 @@ def test_official_zero_observation_rebases_natural_day_usage_costs():
     )
     result = rebuild_observation_suffix(appended, config)
     appended.refresh_from_db()
-    assert result.rebuilt_observations == 4
+    assert result.rebuilt_observations == 5
     assert appended.attribution_started_at == zero.observed_at
     assert appended.selected_total_cost == Decimal("124.689434")
     assert appended.raw_window["replay_segment_reason"] == (
@@ -715,6 +762,67 @@ def test_same_official_reset_rollbacks_wait_for_explicit_manual_start(
     assert all(item.attribution_started_at is None for item in excluded)
     assert all("官方重置时间未变化" in item.exclusion_reason for item in excluded)
 
+
+@pytest.mark.django_db
+def test_reset_and_percent_reversion_follows_later_window_evidence():
+    config = AppSettings.load()
+    create_monitored_account(7)
+    config.save()
+    window_seconds = 604800
+    observed_at = timezone.now().replace(microsecond=0)
+    original_reset_at = observed_at + timedelta(minutes=5)
+    changed_reset_at = original_reset_at + timedelta(days=7)
+
+    def raw_observation(index, used_percent, reset_at, cost):
+        return Observation.objects.create(
+            account_id=7,
+            source="manual",
+            observed_at=observed_at + timedelta(minutes=10 * index),
+            window_seconds=window_seconds,
+            upstream_resets_at=reset_at,
+            upstream_used_percent=Decimal(used_percent),
+            raw_selected_total_cost=Decimal(cost),
+            selected_total_cost=Decimal(cost),
+            total_standard_cost=Decimal(cost),
+            total_actual_cost=Decimal(cost),
+            effective_usd_per_percent=Decimal("16"),
+        )
+
+    first = raw_observation(0, "40", original_reset_at, "400")
+    rebuild_observation_suffix(first, config)
+    false_reset = raw_observation(1, "0", changed_reset_at, "420")
+    rebuild_observation_suffix(false_reset, config)
+    recovered = raw_observation(2, "40", original_reset_at, "440")
+    rebuild_observation_suffix(recovered, config)
+    for observation in (first, false_reset, recovered):
+        observation.refresh_from_db()
+
+    expected_started_at = original_reset_at - timedelta(
+        seconds=window_seconds,
+    )
+    assert false_reset.exclusion_source == "automatic"
+    assert false_reset.attribution_started_at is None
+    assert "重置时间和百分比恢复" in false_reset.exclusion_reason
+    assert first.attribution_started_at == expected_started_at
+    assert recovered.attribution_started_at == expected_started_at
+    assert recovered.delta_percent == Decimal("0")
+    assert recovered.delta_cost == Decimal("40")
+
+    confirmed = raw_observation(3, "1", changed_reset_at, "460")
+    rebuild_observation_suffix(confirmed, config)
+    for observation in (false_reset, recovered, confirmed):
+        observation.refresh_from_db()
+
+    assert false_reset.exclusion_source == ""
+    assert false_reset.attribution_started_at == false_reset.observed_at
+    assert false_reset.selected_total_cost == Decimal("0")
+    assert recovered.exclusion_source == "automatic"
+    assert recovered.attribution_started_at is None
+    assert "再次确认候选窗口" in recovered.exclusion_reason
+    assert confirmed.attribution_started_at == false_reset.observed_at
+    assert confirmed.selected_total_cost == Decimal("40")
+
+
 @pytest.mark.django_db
 def test_single_false_rollback_is_excluded_without_rewriting_prior_points(
     monkeypatch,
@@ -922,6 +1030,62 @@ def test_startup_replay_command_skips_current_algorithm_records():
     observation.refresh_from_db()
     assert observation.sample_note == "稳定结果哨兵"
     assert "派生结果已是最新版" in output.getvalue()
+
+
+@pytest.mark.django_db
+def test_startup_replay_command_upgrades_v6_zero_plateau():
+    config = AppSettings.load()
+    create_monitored_account(7)
+    config.save()
+    first_observed_at = timezone.now().replace(microsecond=0)
+    reset_at = first_observed_at + timedelta(days=7)
+    observations = []
+    for index, cost in enumerate(("100", "200", "300")):
+        observed_at = first_observed_at + timedelta(minutes=10 * index)
+        observations.append(
+            Observation.objects.create(
+                account_id=7,
+                source="manual",
+                observed_at=observed_at,
+                window_seconds=604800,
+                upstream_resets_at=reset_at,
+                attribution_started_at=(
+                    observed_at if index == 2 else None
+                ),
+                upstream_used_percent=Decimal("0"),
+                raw_selected_total_cost=Decimal(cost),
+                selected_total_cost=Decimal("0"),
+                total_standard_cost=Decimal(cost),
+                total_actual_cost=Decimal(cost),
+                effective_usd_per_percent=Decimal("16"),
+                raw_window={
+                    "rate_method": "particle_filter_v6",
+                    "replay_decision": (
+                        "included"
+                        if index == 2
+                        else "deferred_zero_plateau"
+                    ),
+                },
+            )
+        )
+
+    output = StringIO()
+    call_command("replayobservations", stdout=output)
+
+    for observation in observations:
+        observation.refresh_from_db()
+    assert all(
+        observation.attribution_started_at == first_observed_at
+        for observation in observations
+    )
+    assert [
+        observation.selected_total_cost for observation in observations
+    ] == [Decimal("0"), Decimal("100"), Decimal("200")]
+    assert all(
+        observation.raw_window["rate_method"] == RATE_METHOD
+        for observation in observations
+    )
+    assert "重放 3 条观测" in output.getvalue()
 
 @pytest.mark.django_db(transaction=True)
 def test_manual_replay_writers_and_management_replay_respect_active_fence():
@@ -1564,8 +1728,11 @@ def test_replay_handles_more_than_sqlite_expression_depth_sample_points():
 
     result = rebuild_account(7, config)
 
-    assert result.rebuilt_observations == 1
+    assert result.rebuilt_observations == 1001
     assert result.latest_observation_id == observations[-1].id
+    assert Observation.objects.filter(
+        attribution_started_at=observations[0].observed_at,
+    ).count() == 1001
 
 
 @pytest.mark.django_db
