@@ -1,0 +1,401 @@
+"""OpenAPI schemas for observations, FAST details, and trajectories."""
+
+from __future__ import annotations
+
+from .common import _nullable
+
+
+def observation_schemas(nullable_number: dict, nullable_string: dict) -> dict:
+    return {
+        "ObservationList": {
+            "type": "object",
+            "required": [
+                "account",
+                "items",
+                "fast_correction_enabled",
+                "pagination",
+                "summary",
+            ],
+            "properties": {
+                "account": {
+                    "oneOf": [
+                        {
+                            "$ref": "#/components/schemas/MonitoredAccountSummary"
+                        },
+                        {"type": "null"},
+                    ]
+                },
+                "items": {
+                    "type": "array",
+                    "items": {"$ref": "#/components/schemas/Observation"},
+                },
+                "fast_correction_enabled": {"type": "boolean"},
+                "pagination": {
+                    "$ref": "#/components/schemas/Pagination"
+                },
+                "summary": {
+                    "type": "object",
+                    "required": [
+                        "total",
+                        "valid_count",
+                        "passive_count",
+                        "excluded_count",
+                    ],
+                    "properties": {
+                        "total": {"type": "integer"},
+                        "valid_count": {"type": "integer"},
+                        "passive_count": {"type": "integer"},
+                        "excluded_count": {"type": "integer"},
+                    },
+                },
+            },
+        },
+        "Observation": {
+            "type": "object",
+            "required": [
+                "id",
+                "observed_at",
+                "source",
+                "account_id",
+                "attribution_started_at",
+                "upstream_resets_at",
+                "upstream_used_percent",
+                "interval_used_percent",
+                "raw_selected_total_cost",
+                "selected_total_cost",
+                "cost_window_started_at",
+                "cost_window_ended_at",
+                "interval_cost_started_at",
+                "interval_cost",
+                "interval_cost_source",
+                "normalized_total_cost",
+                "delta_percent",
+                "delta_cost",
+                "sample_usd_per_percent",
+                "effective_usd_per_percent",
+                "estimated_used_percent",
+                "capacity_lower_usd",
+                "capacity_upper_usd",
+                "model_diagnostics",
+                "fast_correction_usd",
+                "fast_correction_calculated",
+                "valid_sample",
+                "sample_note",
+                "rate_method",
+                "query_mode",
+                "snapshot_sampled_at",
+                "excluded",
+                "excluded_at",
+                "exclusion_reason",
+                "exclusion_source",
+                "is_manual_start",
+                "manual_start_reason",
+                "manual_start_set_at",
+                "manual_start_end_id",
+                "manual_start_end_observed_at",
+                "participants",
+            ],
+            "properties": {
+                "id": {"type": "integer"},
+                "observed_at": {"type": "string", "format": "date-time"},
+                "source": {
+                    "type": "string",
+                    "enum": [
+                        "scheduled",
+                        "manual",
+                        "exhausted",
+                        "reset",
+                    ],
+                },
+                "account_id": {
+                    "type": "integer",
+                    "description": "Sub2API 上游账号 ID。",
+                },
+                "attribution_started_at": nullable_string,
+                "upstream_resets_at": {
+                    "type": "string",
+                    "format": "date-time",
+                },
+                "upstream_used_percent": {"type": "number"},
+                "interval_used_percent": {"type": "number"},
+                "raw_selected_total_cost": {"type": "number"},
+                "selected_total_cost": {"type": "number"},
+                "cost_window_started_at": nullable_string,
+                "cost_window_ended_at": nullable_string,
+                "interval_cost_started_at": nullable_string,
+                "interval_cost": nullable_number,
+                "interval_cost_source": {"type": "string"},
+                "normalized_total_cost": {"type": "number"},
+                "delta_percent": nullable_number,
+                "delta_cost": nullable_number,
+                "sample_usd_per_percent": nullable_number,
+                "effective_usd_per_percent": {"type": "number"},
+                "estimated_used_percent": {"type": "number"},
+                "capacity_lower_usd": nullable_number,
+                "capacity_upper_usd": nullable_number,
+                "model_diagnostics": {"type": "object"},
+                "fast_correction_usd": nullable_number,
+                "fast_correction_calculated": {"type": "boolean"},
+                "valid_sample": {"type": "boolean"},
+                "sample_note": {"type": "string"},
+                "rate_method": {"type": "string"},
+                "query_mode": {
+                    "type": "string",
+                    "enum": ["passive", "direct"],
+                },
+                "snapshot_sampled_at": nullable_string,
+                "excluded": {"type": "boolean"},
+                "excluded_at": nullable_string,
+                "exclusion_reason": {"type": "string"},
+                "exclusion_source": {
+                    "type": "string",
+                    "enum": ["", "manual", "automatic"],
+                },
+                "is_manual_start": {"type": "boolean"},
+                "manual_start_reason": {"type": "string"},
+                "manual_start_set_at": nullable_string,
+                "manual_start_end_id": _nullable("integer"),
+                "manual_start_end_observed_at": nullable_string,
+                "participants": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/components/schemas/ParticipantSnapshot"
+                    },
+                },
+            },
+        },
+        "FastCorrectionDetail": {
+            "type": "object",
+            "required": [
+                "observation_id",
+                "started_at",
+                "ended_at",
+                "calculated",
+                "cost_basis",
+                "cost_basis_label",
+                "request_count",
+                "fast_request_count",
+                "non_fast_request_count",
+                "fast_billed_cost_usd",
+                "correction_usd",
+                "corrected_fast_cost_usd",
+                "collection_error",
+                "users",
+            ],
+            "properties": {
+                "observation_id": {"type": "integer"},
+                "started_at": nullable_string,
+                "ended_at": {"type": "string", "format": "date-time"},
+                "calculated": {"type": "boolean"},
+                "cost_basis": {
+                    "type": "string",
+                    "enum": ["actual", "standard"],
+                },
+                "cost_basis_label": {"type": "string"},
+                "request_count": _nullable("integer"),
+                "fast_request_count": {"type": "integer"},
+                "non_fast_request_count": _nullable("integer"),
+                "fast_billed_cost_usd": {"type": "number"},
+                "correction_usd": {"type": "number"},
+                "corrected_fast_cost_usd": {"type": "number"},
+                "collection_error": {"type": "string"},
+                "users": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/components/schemas/FastCorrectionUser"
+                    },
+                },
+            },
+        },
+        "FastCorrectionUser": {
+            "type": "object",
+            "required": [
+                "sub2api_user_id",
+                "username",
+                "email",
+                "display_name",
+                "request_count",
+                "fast_request_count",
+                "non_fast_request_count",
+                "fast_billed_cost_usd",
+                "correction_usd",
+                "corrected_fast_cost_usd",
+            ],
+            "properties": {
+                "sub2api_user_id": {"type": "integer"},
+                "username": {"type": "string"},
+                "email": {"type": "string"},
+                "display_name": {"type": "string"},
+                "request_count": _nullable("integer"),
+                "fast_request_count": {"type": "integer"},
+                "non_fast_request_count": _nullable("integer"),
+                "fast_billed_cost_usd": {"type": "number"},
+                "correction_usd": {"type": "number"},
+                "corrected_fast_cost_usd": {"type": "number"},
+            },
+        },
+        "ParticleTrajectory": {
+            "type": "object",
+            "required": ["available", "message"],
+            "properties": {
+                "account": {
+                    "$ref": "#/components/schemas/MonitoredAccountSummary"
+                },
+                "available": {"type": "boolean"},
+                "message": {"type": "string"},
+                "algorithm": {"type": "string"},
+                "seed": {"type": "integer"},
+                "particle_count": {"type": "integer"},
+                "representative_particle_count": {"type": "integer"},
+                "credible_mass_percent": {"type": "number"},
+                "selected_period_id": {"type": "integer"},
+                "periods": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/components/schemas/TrajectoryPeriod"
+                    },
+                },
+                "segment": {"type": "object"},
+                "latest": {"type": "object"},
+                "points": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/components/schemas/TrajectoryPoint"
+                    },
+                },
+                "promotions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/components/schemas/RangePromotion"
+                    },
+                },
+            },
+        },
+        "TrajectoryPeriod": {
+            "type": "object",
+            "required": [
+                "id",
+                "sequence",
+                "started_at",
+                "first_observed_at",
+                "last_observed_at",
+                "resets_at",
+                "ended_at",
+                "observation_count",
+                "is_current",
+            ],
+            "properties": {
+                "id": {"type": "integer"},
+                "sequence": {"type": "integer"},
+                "started_at": {"type": "string", "format": "date-time"},
+                "first_observed_at": {
+                    "type": "string",
+                    "format": "date-time",
+                },
+                "last_observed_at": {
+                    "type": "string",
+                    "format": "date-time",
+                },
+                "resets_at": {"type": "string", "format": "date-time"},
+                "ended_at": {"type": "string", "format": "date-time"},
+                "observation_count": {"type": "integer"},
+                "is_current": {"type": "boolean"},
+            },
+        },
+        "TrajectoryPoint": {
+            "type": "object",
+            "required": [
+                "observation_id",
+                "observed_at",
+                "source",
+                "displayed_percent",
+                "estimated_percent",
+                "estimated_percent_lower",
+                "estimated_percent_upper",
+                "capacity_usd",
+                "capacity_lower_usd",
+                "capacity_upper_usd",
+                "range_min_usd",
+                "range_max_usd",
+                "range_stage",
+                "range_direction",
+                "ess_fraction",
+                "resampled",
+                "boundary_mass",
+                "particles_usd",
+            ],
+            "properties": {
+                "observation_id": {"type": "integer"},
+                "observed_at": {"type": "string", "format": "date-time"},
+                "source": {"type": "string"},
+                "displayed_percent": {"type": "number"},
+                "estimated_percent": {"type": "number"},
+                "estimated_percent_lower": {"type": "number"},
+                "estimated_percent_upper": {"type": "number"},
+                "capacity_usd": {"type": "number"},
+                "capacity_lower_usd": {"type": "number"},
+                "capacity_upper_usd": {"type": "number"},
+                "range_min_usd": {"type": "number"},
+                "range_max_usd": {"type": "number"},
+                "range_stage": {"type": "integer"},
+                "range_direction": {
+                    "type": ["string", "null"],
+                    "enum": ["upper", "lower", None],
+                },
+                "ess_fraction": {"type": "number"},
+                "resampled": {"type": "boolean"},
+                "boundary_mass": {
+                    "type": "object",
+                    "required": ["lower", "upper"],
+                    "properties": {
+                        "lower": {"type": "number"},
+                        "upper": {"type": "number"},
+                    },
+                },
+                "particles_usd": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                },
+            },
+        },
+        "RangePromotion": {
+            "type": "object",
+            "required": [
+                "stage",
+                "direction",
+                "occurred_at",
+                "from_range_usd",
+                "to_range_usd",
+                "boundary_mass",
+                "display_residual_pp",
+            ],
+            "properties": {
+                "stage": {"type": "integer"},
+                "direction": {
+                    "type": "string",
+                    "enum": ["upper", "lower"],
+                },
+                "occurred_at": {"type": "string", "format": "date-time"},
+                "from_range_usd": {
+                    "type": "array",
+                    "prefixItems": [
+                        {"type": "number"},
+                        {"type": "number"},
+                    ],
+                    "minItems": 2,
+                    "maxItems": 2,
+                },
+                "to_range_usd": {
+                    "type": "array",
+                    "prefixItems": [
+                        {"type": "number"},
+                        {"type": "number"},
+                    ],
+                    "minItems": 2,
+                    "maxItems": 2,
+                },
+                "boundary_mass": {"type": "number"},
+                "display_residual_pp": {"type": "number"},
+            },
+        },
+    }
