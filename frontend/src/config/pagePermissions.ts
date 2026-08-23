@@ -37,7 +37,7 @@ export const pagePermissionGroups: PagePermissionGroup[] = [
       {
         code: "account_status",
         label: "账号状态",
-        description: "查看上游账号运行和额度状态",
+        description: "查看授权账号的运行和额度状态",
       },
       {
         code: "observations",

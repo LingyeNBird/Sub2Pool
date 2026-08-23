@@ -79,6 +79,8 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
         sub2api_username="unbound-rider",
         share_percent=0,
     )
+    visible_account = create_monitored_account(7, name="授权账号")
+    hidden_account = create_monitored_account(8, name="隐藏账号")
     client = Client()
     admin_headers, _ = jwt_login(client)
 
@@ -98,6 +100,8 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
     assert created.status_code == 201
     assert created.json()["data"]["page_permissions"] == []
     assert created.json()["data"]["participant_ids"] == []
+    assert created.json()["data"]["account_ids"] == []
+    assert created.json()["data"]["account_names"] == []
     user_id = created.json()["data"]["id"]
 
     missing_scope = client.patch(
@@ -106,6 +110,7 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
             {
                 "page_permissions": ["participants"],
                 "participant_ids": [],
+                "account_ids": [],
             }
         ),
         content_type="application/json",
@@ -114,8 +119,24 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
     assert missing_scope.status_code == 400
     assert missing_scope.json()["details"]["participant_ids"]
 
+    missing_account_scope = client.patch(
+        f"/api/system-users/{user_id}/permissions",
+        data=json.dumps(
+            {
+                "page_permissions": ["account_status"],
+                "participant_ids": [],
+                "account_ids": [],
+            }
+        ),
+        content_type="application/json",
+        **admin_headers,
+    )
+    assert missing_account_scope.status_code == 400
+    assert missing_account_scope.json()["details"]["account_ids"]
+
     granted_pages = [
         "dashboard",
+        "account_status",
         "participants",
         "system_users",
         "observations",
@@ -128,6 +149,7 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
             {
                 "page_permissions": granted_pages,
                 "participant_ids": [first.id, second.id],
+                "account_ids": [visible_account.id],
             }
         ),
         content_type="application/json",
@@ -136,30 +158,44 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
     assert permissions.status_code == 200
     assert permissions.json()["data"]["page_permissions"] == granted_pages
     assert permissions.json()["data"]["participant_ids"] == [first.id, second.id]
+    assert permissions.json()["data"]["account_ids"] == [visible_account.id]
+    assert permissions.json()["data"]["account_names"] == [visible_account.name]
 
     identity_scope_attempt = client.patch(
         f"/api/system-users/{user_id}",
-        data=json.dumps({"participant_ids": [third.id]}),
+        data=json.dumps(
+            {
+                "participant_ids": [third.id],
+                "account_ids": [hidden_account.id],
+            }
+        ),
         content_type="application/json",
         **admin_headers,
     )
     assert identity_scope_attempt.status_code == 400
     assert identity_scope_attempt.json()["details"]["participant_ids"]
+    assert identity_scope_attempt.json()["details"]["account_ids"]
 
     regular = User.objects.get(pk=user_id)
     assert regular.is_staff is False
     assert list(
         regular.quota_participants.order_by("id").values_list("id", flat=True)
     ) == [first.id, second.id]
+    assert list(
+        regular.visible_monitored_accounts.order_by("id").values_list(
+            "id",
+            flat=True,
+        )
+    ) == [visible_account.id]
 
     hidden_user = User.objects.create_user(
         username="hidden-rider",
         password="hidden-rider-password",
     )
     third.authorized_users.add(hidden_user)
+    hidden_account.authorized_users.add(hidden_user)
 
     config = AppSettings.load()
-    create_monitored_account(7)
     config.save()
     now = timezone.now()
     attribution_started_at = now - timedelta(days=2)
@@ -252,6 +288,12 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
         item["id"] for item in dashboard.json()["data"]["participants"]
     } == {first.id, second.id}
 
+    account_status = regular_client.get("/api/account-status", **regular_headers)
+    assert account_status.status_code == 200
+    assert [
+        item["id"] for item in account_status.json()["data"]["accounts"]
+    ] == [visible_account.id]
+
     observations = regular_client.get("/api/observations", **regular_headers)
     assert observations.status_code == 200
     observed_participant_ids = {
@@ -275,9 +317,13 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
         for user in system_users.json()["data"]
         for name in user["participant_names"]
     }
+    assert hidden_account.name not in {
+        name
+        for user in system_users.json()["data"]
+        for name in user["account_names"]
+    }
 
     for denied_path in (
-        "/api/account-status",
         "/api/login-events",
         "/api/settings",
         "/api/particle-trajectory",
@@ -315,6 +361,7 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
                 {
                     "page_permissions": ["dashboard"],
                     "participant_ids": [first.id],
+                    "account_ids": [visible_account.id],
                 }
             ),
             content_type="application/json",
@@ -329,6 +376,7 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
             {
                 "page_permissions": ["statistics"],
                 "participant_ids": [second.id],
+                "account_ids": [],
             }
         ),
         content_type="application/json",
@@ -407,6 +455,7 @@ def test_non_participant_page_grants_allow_read_dependencies():
                     "settings",
                 ],
                 "participant_ids": [],
+                "account_ids": [],
             }
         ),
         content_type="application/json",

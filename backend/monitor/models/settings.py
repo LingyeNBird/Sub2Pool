@@ -1,6 +1,7 @@
 """Singleton application settings model."""
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 
@@ -22,6 +23,11 @@ class MonitoredAccount(models.Model):
         "QuotaPool",
         on_delete=models.PROTECT,
         related_name="accounts",
+    )
+    authorized_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name="visible_monitored_accounts",
+        blank=True,
     )
 
     external_account_id = models.BigIntegerField(unique=True)

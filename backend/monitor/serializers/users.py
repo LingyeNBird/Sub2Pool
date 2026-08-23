@@ -8,6 +8,7 @@ from rest_framework import serializers
 
 from ..models import (
     PARTICIPANT_SCOPED_PAGE_PERMISSIONS,
+    MonitoredAccount,
     PagePermission,
     Participant,
     SystemUserPageAccess,
@@ -48,7 +49,7 @@ class SystemUserWriteSerializer(serializers.Serializer):
                 {
                     field: (
                         "请通过系统用户权限接口修改该字段"
-                        if field == "participant_ids"
+                        if field in {"account_ids", "participant_ids"}
                         else "不支持该字段"
                     )
                     for field in sorted(unexpected_fields)
@@ -110,6 +111,12 @@ class SystemUserPermissionSerializer(serializers.Serializer):
         allow_empty=True,
         queryset=Participant.objects.all(),
     )
+    account_ids = serializers.PrimaryKeyRelatedField(
+        source="accounts",
+        many=True,
+        allow_empty=True,
+        queryset=MonitoredAccount.objects.all(),
+    )
 
     def validate_page_permissions(self, value):
         if len(value) != len(set(value)):
@@ -137,12 +144,24 @@ class SystemUserPermissionSerializer(serializers.Serializer):
                     )
                 }
             )
+        if (
+            PagePermission.ACCOUNT_STATUS in page_permissions
+            and not attrs["accounts"]
+        ):
+            raise serializers.ValidationError(
+                {
+                    "account_ids": (
+                        "已开放账号状态页面，请至少选择一个可查看的账号"
+                    )
+                }
+            )
         return attrs
 
     @transaction.atomic
     def update(self, instance, validated_data):
         page_permissions = validated_data["page_permissions"]
         participants = validated_data["participants"]
+        accounts = validated_data["accounts"]
         SystemUserPageAccess.objects.filter(user=instance).delete()
         SystemUserPageAccess.objects.bulk_create(
             [
@@ -151,7 +170,9 @@ class SystemUserPermissionSerializer(serializers.Serializer):
             ]
         )
         instance.quota_participants.set(participants)
+        instance.visible_monitored_accounts.set(accounts)
         prefetch_cache = getattr(instance, "_prefetched_objects_cache", {})
         prefetch_cache.pop("page_accesses", None)
         prefetch_cache.pop("quota_participants", None)
+        prefetch_cache.pop("visible_monitored_accounts", None)
         return instance

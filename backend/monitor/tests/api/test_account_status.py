@@ -211,6 +211,8 @@ def test_account_status_requires_page_permission():
         username="viewer",
         password="viewer-password",
     )
+    first = create_monitored_account(7, name="授权账号")
+    create_monitored_account(8, name="未授权账号")
     anonymous = Client()
     assert anonymous.get("/api/account-status").status_code == 401
 
@@ -226,4 +228,9 @@ def test_account_status_requires_page_permission():
         user=user,
         page_code=PagePermission.ACCOUNT_STATUS,
     )
-    assert client.get("/api/account-status", **headers).status_code == 200
+    user.visible_monitored_accounts.add(first)
+    response = client.get("/api/account-status", **headers)
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["data"]["accounts"]] == [
+        first.id
+    ]

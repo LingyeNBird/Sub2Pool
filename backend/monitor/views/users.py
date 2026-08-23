@@ -1,10 +1,14 @@
-"""System-user identity and page/participant permission management."""
+"""System-user identity and page/data-scope permission management."""
 
 from django.contrib.auth import get_user_model
 from rest_framework import status
 
 from .base import AdminAPIView, PageAccessAPIView, error, ok
-from ..access import page_permissions_for, visible_participant_ids
+from ..access import (
+    page_permissions_for,
+    visible_account_ids,
+    visible_participant_ids,
+)
 from ..models import PagePermission
 from ..reporting import iso
 from ..serializers import (
@@ -19,12 +23,19 @@ User = get_user_model()
 def system_user_data(
     user,
     allowed_participant_ids: set[int] | None = None,
+    allowed_account_ids: set[int] | None = None,
 ) -> dict:
     participants = sorted(user.quota_participants.all(), key=lambda item: item.id)
     if allowed_participant_ids is not None:
         participants = [
             item for item in participants if item.id in allowed_participant_ids
         ]
+    accounts = sorted(
+        user.visible_monitored_accounts.all(),
+        key=lambda item: (item.name, item.external_account_id),
+    )
+    if allowed_account_ids is not None:
+        accounts = [item for item in accounts if item.id in allowed_account_ids]
     return {
         "id": user.id,
         "username": user.get_username(),
@@ -33,6 +44,8 @@ def system_user_data(
         "page_permissions": page_permissions_for(user),
         "participant_ids": [item.id for item in participants],
         "participant_names": [item.name for item in participants],
+        "account_ids": [item.id for item in accounts],
+        "account_names": [item.name for item in accounts],
         "last_login": iso(user.last_login),
         "date_joined": iso(user.date_joined),
     }
@@ -44,13 +57,22 @@ class SystemUserListView(PageAccessAPIView):
     def get(self, request):
         users = (
             User.objects.filter(is_staff=False, is_superuser=False)
-            .prefetch_related("quota_participants", "page_accesses")
+            .prefetch_related(
+                "quota_participants",
+                "page_accesses",
+                "visible_monitored_accounts",
+            )
             .order_by("username")
         )
         allowed_ids = visible_participant_ids(request.user)
+        allowed_account_ids = visible_account_ids(request.user)
         return ok(
             [
-                system_user_data(user, allowed_participant_ids=allowed_ids)
+                system_user_data(
+                    user,
+                    allowed_participant_ids=allowed_ids,
+                    allowed_account_ids=allowed_account_ids,
+                )
                 for user in users
             ]
         )
@@ -71,7 +93,11 @@ class SystemUserDetailView(AdminAPIView):
                 is_staff=False,
                 is_superuser=False,
             )
-            .prefetch_related("quota_participants", "page_accesses")
+            .prefetch_related(
+                "quota_participants",
+                "page_accesses",
+                "visible_monitored_accounts",
+            )
             .first()
         )
 
@@ -104,7 +130,11 @@ class SystemUserPermissionView(AdminAPIView):
                 is_staff=False,
                 is_superuser=False,
             )
-            .prefetch_related("quota_participants", "page_accesses")
+            .prefetch_related(
+                "quota_participants",
+                "page_accesses",
+                "visible_monitored_accounts",
+            )
             .first()
         )
         if user is None:

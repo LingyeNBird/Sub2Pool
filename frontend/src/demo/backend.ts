@@ -136,6 +136,13 @@ function participantNames(state: DemoState, ids: number[]): string[] {
     return participant ? [participant.name] : [];
   });
 }
+
+function accountNames(state: DemoState, ids: number[]): string[] {
+  return ids.flatMap((id) => {
+    const account = state.monitoredAccounts.find((item) => item.id === id);
+    return account ? [account.name] : [];
+  });
+}
 function participantBreakdowns(
   state: DemoState,
   participantId: number,
@@ -1129,6 +1136,8 @@ export async function demoRequest(
       page_permissions: [],
       participant_ids: participantIds,
       participant_names: participantNames(state, participantIds),
+      account_ids: [],
+      account_names: [],
       last_login: null,
       date_joined: state.clock,
     };
@@ -1187,6 +1196,18 @@ export async function demoRequest(
         participant_ids: ["包含不存在的参与者"],
       });
     }
+    const accountIds = Array.isArray(payload.account_ids)
+      ? payload.account_ids.map(Number)
+      : [];
+    if (
+      accountIds.some(
+        (id) => !state.monitoredAccounts.some((account) => account.id === id),
+      )
+    ) {
+      return failure("系统用户权限校验失败", 400, {
+        account_ids: ["包含不存在的账号"],
+      });
+    }
     if (
       requestedPages.some((page) =>
         participantScopedPagePermissions.has(page as PagePermission),
@@ -1199,9 +1220,16 @@ export async function demoRequest(
         ],
       });
     }
+    if (requestedPages.includes("account_status") && !accountIds.length) {
+      return failure("系统用户权限校验失败", 400, {
+        account_ids: ["已开放账号状态页面，请至少选择一个可查看的账号"],
+      });
+    }
     item.page_permissions = requestedPages as PagePermission[];
     item.participant_ids = participantIds;
     item.participant_names = participantNames(state, participantIds);
+    item.account_ids = accountIds;
+    item.account_names = accountNames(state, accountIds);
     saveDemoState(state);
     return envelope(item);
   }
@@ -1492,6 +1520,10 @@ export async function demoRequest(
     state.monitoredAccounts = state.monitoredAccounts.filter(
       (item) => item.id !== accountId,
     );
+    for (const user of state.systemUsers) {
+      user.account_ids = user.account_ids.filter((item) => item !== accountId);
+      user.account_names = accountNames(state, user.account_ids);
+    }
     state.quotaPools = state.quotaPools.flatMap((pool) => {
       const remainingAccountIds = pool.account_ids.filter(
         (item) => item !== accountId,

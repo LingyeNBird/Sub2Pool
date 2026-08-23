@@ -24,7 +24,7 @@ import type {
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 
-const DEMO_STATE_KEY = "sub2pool:demo:v7:state";
+const DEMO_STATE_KEY = "sub2pool:demo:v8:state";
 const DEMO_AUTH_KEY = "sub2pool:demo:v2:auth";
 const DEMO_ANCHOR = Date.UTC(2026, 7, 12, 4, 0, 0);
 const HOUR = 3_600_000;
@@ -49,7 +49,7 @@ interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 13;
+  version: 14;
   clock: string;
   nextParticipantId: number;
   nextPoolId: number;
@@ -931,7 +931,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 13,
+    version: 14,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextPoolId: 2,
@@ -958,6 +958,8 @@ function initializeState(): DemoState {
         page_permissions: ["participants", "particle_filter", "statistics"],
         participant_ids: [2],
         participant_names: ["远星"],
+        account_ids: [],
+        account_names: [],
         last_login: iso(DEMO_ANCHOR - 8 * HOUR),
         date_joined: iso(DEMO_ANCHOR - 70 * DAY),
       },
@@ -969,6 +971,8 @@ function initializeState(): DemoState {
         page_permissions: ["participants", "particle_filter", "statistics"],
         participant_ids: [3],
         participant_names: ["林舟"],
+        account_ids: [],
+        account_names: [],
         last_login: iso(DEMO_ANCHOR - 19 * HOUR),
         date_joined: iso(DEMO_ANCHOR - 54 * DAY),
       },
@@ -993,7 +997,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 13) return parsed;
+      if (parsed.version === 14) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }

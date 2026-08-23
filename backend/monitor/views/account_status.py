@@ -7,6 +7,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from .base import PageAccessAPIView, ok
+from ..access import visible_accounts_for
 from ..api_auth import ReadOnlyAPIKeyAuthentication
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError, WeeklyWindow
 from ..models import AppSettings, MonitoredAccount, Observation, PagePermission
@@ -88,13 +89,18 @@ def _fallback_usage(
 
 
 class AccountStatusView(PageAccessAPIView):
-    """Fetch every configured upstream account directly from Sub2API."""
+    """Fetch each upstream account visible to the current principal."""
 
     required_page_permissions = (PagePermission.ACCOUNT_STATUS,)
 
     def get(self, request):
         config = AppSettings.load()
-        accounts = list(MonitoredAccount.objects.order_by("name", "external_account_id"))
+        accounts = list(
+            visible_accounts_for(
+                request.user,
+                MonitoredAccount.objects.order_by("name", "external_account_id"),
+            )
+        )
         rows = [_base_account_row(account) for account in accounts]
         sampled_at = timezone.now()
         correction_totals = _fast_correction_totals(

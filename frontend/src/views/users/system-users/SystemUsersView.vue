@@ -5,7 +5,12 @@ import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
-import type { ConfirmDialogHandle, Participant, SystemUser } from "@/types";
+import type {
+  ConfirmDialogHandle,
+  MonitoredAccount,
+  Participant,
+  SystemUser,
+} from "@/types";
 
 import SystemUserEditorDialog from "./components/SystemUserEditorDialog.vue";
 import SystemUserPermissionDialog from "./components/SystemUserPermissionDialog.vue";
@@ -21,6 +26,7 @@ import type {
 const auth = useAuthStore();
 const users = ref<SystemUser[]>([]);
 const participants = ref<Participant[]>([]);
+const accounts = ref<MonitoredAccount[]>([]);
 const loading = ref(true);
 const saving = ref(false);
 const message = ref("");
@@ -40,15 +46,18 @@ async function load() {
   message.value = "";
   try {
     if (auth.isStaff) {
-      const [userRows, participantRows] = await Promise.all([
+      const [userRows, participantRows, accountRows] = await Promise.all([
         api<SystemUser[]>("system-users"),
         api<Participant[]>("participants"),
+        api<MonitoredAccount[]>("settings/monitored-accounts"),
       ]);
       users.value = userRows;
       participants.value = participantRows;
+      accounts.value = accountRows;
     } else {
       users.value = await api<SystemUser[]>("system-users");
       participants.value = [];
+      accounts.value = [];
     }
   } catch (error) {
     message.value =
@@ -173,6 +182,7 @@ onMounted(load);
     v-if="auth.isStaff"
     ref="permissionEditor"
     :participants="participants"
+    :accounts="accounts"
     :saving="saving"
     @save="savePermissions"
   />

@@ -4,6 +4,7 @@ import { onMounted, ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
+import { useAuthStore } from "@/stores/auth";
 import type { AccountStatusAccount, AccountStatusData } from "@/types";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
@@ -11,6 +12,7 @@ const data = ref<AccountStatusData | null>(null);
 const loading = ref(true);
 const message = ref("");
 const dateTime = useDateTime();
+const auth = useAuthStore();
 
 async function load() {
   loading.value = true;
@@ -175,11 +177,15 @@ onMounted(load);
   >
     <div class="card-body items-center py-16 text-center">
       <AppIcon name="server" class="size-10 opacity-30" />
-      <h2 class="card-title">尚未添加监控账号</h2>
+      <h2 class="card-title">暂无可查看的监控账号</h2>
       <p class="text-sm opacity-60">
-        请先在系统设置中连接 Sub2API，并添加要查看的 OpenAI 上游账号。
+        管理员尚未添加监控账号，或当前用户尚未获得账号查看权限。
       </p>
-      <RouterLink to="/settings" class="btn mt-2 btn-primary btn-sm">
+      <RouterLink
+        v-if="auth.isStaff"
+        to="/settings"
+        class="btn mt-2 btn-primary btn-sm"
+      >
         前往系统设置
       </RouterLink>
     </div>

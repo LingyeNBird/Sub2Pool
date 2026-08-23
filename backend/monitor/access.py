@@ -1,11 +1,16 @@
-"""Central page and participant visibility rules."""
+"""Central page, participant, and account visibility rules."""
 
 from collections.abc import Iterable
 
 from django.db.models import QuerySet
 from rest_framework.permissions import BasePermission
 
-from .models import PagePermission, Participant, SystemUserPageAccess
+from .models import (
+    MonitoredAccount,
+    PagePermission,
+    Participant,
+    SystemUserPageAccess,
+)
 
 
 ALL_PAGE_PERMISSIONS = tuple(PagePermission.values)
@@ -53,6 +58,19 @@ def visible_participant_ids(user) -> set[int] | None:
     if user.is_staff:
         return None
     return set(user.quota_participants.values_list("id", flat=True))
+
+
+def visible_accounts_for(user, queryset: QuerySet | None = None) -> QuerySet:
+    accounts = queryset if queryset is not None else MonitoredAccount.objects.all()
+    if user.is_staff:
+        return accounts
+    return accounts.filter(authorized_users=user)
+
+
+def visible_account_ids(user) -> set[int] | None:
+    if user.is_staff:
+        return None
+    return set(user.visible_monitored_accounts.values_list("id", flat=True))
 
 
 class HasPageAccess(BasePermission):

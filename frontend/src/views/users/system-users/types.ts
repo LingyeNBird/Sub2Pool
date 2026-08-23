@@ -11,6 +11,7 @@ export interface SystemUserFormData {
 export interface SystemUserPermissionFormData {
   page_permissions: PagePermission[];
   participant_ids: number[];
+  account_ids: number[];
 }
 
 export interface SystemUserEditorHandle {

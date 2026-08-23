@@ -288,6 +288,8 @@ export interface SystemUser {
   page_permissions: PagePermission[];
   participant_ids: number[];
   participant_names: string[];
+  account_ids: number[];
+  account_names: string[];
   last_login: string | null;
   date_joined: string;
 }
