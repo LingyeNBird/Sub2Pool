@@ -1,11 +1,10 @@
+import type { CostBreakdown } from "@/types/common";
+import type { DashboardData } from "@/types/dashboard";
 import type {
-  APIUsageBreakdown,
-  CostBreakdown,
-  DashboardData,
   ParticleTrajectoryData,
   ParticleTrajectoryPeriod,
-  UsagePoint,
-} from "@/types";
+} from "@/types/particleTrajectory";
+import type { APIUsageBreakdown, UsagePoint } from "@/types/statistics";
 
 import type { DemoPeriod, DemoState } from "./state";
 import { rounded } from "./participantProjection";

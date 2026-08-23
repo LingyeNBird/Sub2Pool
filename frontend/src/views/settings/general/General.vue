@@ -3,7 +3,7 @@ import { ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { useAuthStore } from "@/stores/auth";
-import type { ConfirmDialogHandle, ConfirmDialogOptions } from "@/types";
+import type { ConfirmDialogHandle, ConfirmDialogOptions } from "@/types/common";
 
 import AllocationModelCard from "./components/AllocationModelCard.vue";
 import DatabaseTransferCard from "./components/DatabaseTransferCard.vue";

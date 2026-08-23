@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useDateTime } from "@/composables/useDateTime";
-import type { SystemUser } from "@/types";
+import type { SystemUser } from "@/types/security";
 
 defineProps<{
   users: SystemUser[];

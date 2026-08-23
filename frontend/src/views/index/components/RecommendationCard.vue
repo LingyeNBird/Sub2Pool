@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Participant } from "@/types";
+import type { Participant } from "@/types/participants";
 import { formatCurrency, formatCurrencyRange } from "@/utils/formatters";
 
 defineProps<{

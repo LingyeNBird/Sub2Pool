@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useDateTime } from "@/composables/useDateTime";
-import type { MonitorSchedule } from "@/types";
+import type { MonitorSchedule } from "@/types/observations";
 
 import type { ObservationSummary } from "../types";
 

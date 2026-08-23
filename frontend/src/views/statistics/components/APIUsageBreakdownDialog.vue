@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 
 import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
-import type { APIUsageBreakdown } from "@/types";
+import type { APIUsageBreakdown } from "@/types/statistics";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 import APIUsageDonut from "./APIUsageDonut.vue";

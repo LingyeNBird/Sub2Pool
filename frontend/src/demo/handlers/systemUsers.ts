@@ -1,4 +1,4 @@
-import type { SystemUser } from "@/types";
+import type { SystemUser } from "@/types/security";
 import {
   pagePermissionCodes,
   participantScopedPagePermissions,

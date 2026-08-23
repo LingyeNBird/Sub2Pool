@@ -5,13 +5,13 @@ import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
+import type { MonitoredAccount } from "@/types/accounts";
 import type {
   ParticleRangePromotion,
-  MonitoredAccount,
   ParticleTrajectoryData,
   ParticleTrajectoryPeriod,
   ParticleTrajectoryPoint,
-} from "@/types";
+} from "@/types/particleTrajectory";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 import ParticleTrajectoryChart from "./components/ParticleTrajectoryChart.vue";

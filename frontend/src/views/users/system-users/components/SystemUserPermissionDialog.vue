@@ -8,7 +8,9 @@ import {
   type PagePermission,
 } from "@/config/pagePermissions";
 import { ApiError } from "@/services/api";
-import type { MonitoredAccount, Participant, SystemUser } from "@/types";
+import type { MonitoredAccount } from "@/types/accounts";
+import type { Participant } from "@/types/participants";
+import type { SystemUser } from "@/types/security";
 
 import type { SystemUserPermissionFormData } from "../types";
 

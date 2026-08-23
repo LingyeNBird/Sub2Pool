@@ -5,12 +5,12 @@ import AppIcon from "@/components/common/AppIcon.vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
+import type { MonitoredAccount } from "@/types/accounts";
 import type {
-  MonitoredAccount,
   QuotaAllocationData,
   QuotaAllocationParticipant,
   QuotaAllocationWrite,
-} from "@/types";
+} from "@/types/participants";
 
 interface DraftPool {
   key: string;

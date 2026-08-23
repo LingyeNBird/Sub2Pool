@@ -6,16 +6,15 @@ import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { useZonedDateTimeIso } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
+import type { MonitoredAccount } from "@/types/accounts";
+import type { ConfirmDialogHandle, PaginationMeta } from "@/types/common";
 import type {
-  ConfirmDialogHandle,
   FastCorrectionCalculateResult,
   MonitorSchedule,
-  MonitoredAccount,
   Observation,
   ObservationRebuildResult,
   ObservationListData,
-  PaginationMeta,
-} from "@/types";
+} from "@/types/observations";
 
 import CostDeltaDetailDialog from "./components/CostDeltaDetailDialog.vue";
 import FastCorrectionDetailDialog from "./components/FastCorrectionDetailDialog.vue";

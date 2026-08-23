@@ -1,11 +1,7 @@
-import type {
-  AppSettingsData,
-  LoginEventRecord,
-  MonitoredAccount,
-  NotificationRecord,
-  Participant,
-  QuotaPoolAllocation,
-} from "@/types";
+import type { MonitoredAccount } from "@/types/accounts";
+import type { Participant, QuotaPoolAllocation } from "@/types/participants";
+import type { LoginEventRecord, NotificationRecord } from "@/types/security";
+import type { AppSettingsData } from "@/types/settings";
 
 import type { DemoState } from "./state";
 import { aggregateParticipant, snapshot } from "./participantProjection";

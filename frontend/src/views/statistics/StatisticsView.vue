@@ -3,7 +3,8 @@ import { onMounted, ref, watch } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api } from "@/services/api";
-import type { CapacityPoint, MonitoredAccount, StatisticsData } from "@/types";
+import type { MonitoredAccount } from "@/types/accounts";
+import type { CapacityPoint, StatisticsData } from "@/types/statistics";
 
 import CapacityBasisDialog from "./components/CapacityBasisDialog.vue";
 import APIUsageBreakdownDialog from "./components/APIUsageBreakdownDialog.vue";

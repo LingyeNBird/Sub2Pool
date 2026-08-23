@@ -1,4 +1,4 @@
-import type { CostBreakdown } from "@/types";
+import type { CostBreakdown } from "@/types/common";
 
 export function formatCurrency(value: number | null | undefined): string {
   return value == null ? "—" : `$${value.toFixed(2)}`;

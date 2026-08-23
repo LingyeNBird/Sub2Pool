@@ -9,7 +9,7 @@ import { SVGRenderer } from "echarts/renderers";
 import { computed } from "vue";
 import VChart from "vue-echarts";
 
-import type { APIKeyUsageItem } from "@/types";
+import type { APIKeyUsageItem } from "@/types/statistics";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 use([SVGRenderer, PieChart, TooltipComponent]);

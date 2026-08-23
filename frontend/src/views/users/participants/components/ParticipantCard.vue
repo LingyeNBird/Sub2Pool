@@ -7,7 +7,7 @@ import type {
   AggregateRecommendationSource,
   Participant,
   ParticipantPoolAllocation,
-} from "@/types";
+} from "@/types/participants";
 import {
   formatCompactPercent,
   formatCurrency,

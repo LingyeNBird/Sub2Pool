@@ -5,7 +5,7 @@ import type {
   ConfirmDialogHandle,
   ConfirmDialogOptions,
   ConfirmDialogTone,
-} from "@/types";
+} from "@/types/common";
 
 const dialog = ref<HTMLDialogElement | null>(null);
 const options = ref<Required<ConfirmDialogOptions>>({

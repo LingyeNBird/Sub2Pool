@@ -1,4 +1,5 @@
-import type { NotificationRecord, SelectOption } from "@/types";
+import type { SelectOption } from "@/types/common";
+import type { NotificationRecord } from "@/types/security";
 
 export type NotificationFilterKind =
   | "time"

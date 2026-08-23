@@ -9,14 +9,13 @@ import {
   setAccessToken,
 } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
+import type { OpenAIAccountOption, MonitoredAccount } from "@/types/accounts";
+import type { ConfirmDialogOptions } from "@/types/common";
 import type {
   AppSettingsData,
-  ConfirmDialogOptions,
   HistoricalRebuildPlan,
   ReadOnlyAPIKeyGenerated,
-  OpenAIAccountOption,
-  MonitoredAccount,
-} from "@/types";
+} from "@/types/settings";
 
 export interface PasswordForm {
   old_password: string;

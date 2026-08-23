@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref } from "vue";
 
-import type { Participant, Sub2APIUserOption } from "@/types";
+import type { Participant, Sub2APIUserOption } from "@/types/participants";
 
 import type { ParticipantFormData } from "../types";
 

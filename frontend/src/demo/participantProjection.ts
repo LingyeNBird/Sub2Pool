@@ -1,4 +1,4 @@
-import type { Participant, Snapshot } from "@/types";
+import type { Participant, Snapshot } from "@/types/participants";
 
 export function rounded(value: number, digits = 3): number {
   return Number(value.toFixed(digits));

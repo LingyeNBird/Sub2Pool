@@ -4,11 +4,11 @@ import { onMounted, reactive, ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { useZonedDateTimeIso } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
+import type { PaginationMeta } from "@/types/common";
 import type {
   NotificationListData,
   NotificationRecord,
-  PaginationMeta,
-} from "@/types";
+} from "@/types/security";
 
 import NotificationDetailDialog from "./components/NotificationDetailDialog.vue";
 import NotificationFilterDialog from "./components/NotificationFilterDialog.vue";

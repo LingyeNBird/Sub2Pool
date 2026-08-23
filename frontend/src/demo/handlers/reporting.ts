@@ -1,11 +1,8 @@
-import type {
-  APIUsageBreakdown,
-  AccountStatusData,
-  NotificationListData,
-  Observation,
-  ParticleTrajectoryData,
-  StatisticsData,
-} from "@/types";
+import type { AccountStatusData } from "@/types/accounts";
+import type { Observation } from "@/types/observations";
+import type { ParticleTrajectoryData } from "@/types/particleTrajectory";
+import type { NotificationListData } from "@/types/security";
+import type { APIUsageBreakdown, StatisticsData } from "@/types/statistics";
 
 import type { DemoRequestContext } from "../backend";
 import {

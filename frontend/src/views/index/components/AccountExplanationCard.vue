@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DashboardData } from "@/types";
+import type { DashboardData } from "@/types/dashboard";
 import { formatPercent } from "@/utils/formatters";
 
 defineProps<{

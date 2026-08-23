@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 
 import { useDateTime } from "@/composables/useDateTime";
-import type { CapacityPoint, StatisticsData } from "@/types";
+import type { CapacityPoint, StatisticsData } from "@/types/statistics";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 import StatisticsChart from "./StatisticsChart.vue";

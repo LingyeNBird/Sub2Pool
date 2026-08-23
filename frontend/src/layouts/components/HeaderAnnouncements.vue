@@ -2,7 +2,10 @@
 import { onMounted, ref } from "vue";
 
 import { api } from "@/services/api";
-import type { AnnouncementListData, AnnouncementRecord } from "@/types";
+import type {
+  AnnouncementListData,
+  AnnouncementRecord,
+} from "@/types/security";
 
 const dialog = ref<HTMLDialogElement | null>(null);
 const announcements = ref<AnnouncementRecord[]>([]);

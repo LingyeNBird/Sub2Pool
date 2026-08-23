@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-import type { StatisticsData, UsagePoint } from "@/types";
+import type { StatisticsData, UsagePoint } from "@/types/statistics";
 import { formatCurrency } from "@/utils/formatters";
 
 import StatisticsChart from "./StatisticsChart.vue";

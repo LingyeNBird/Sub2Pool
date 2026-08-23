@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
-import type { BlockedIPAddress, BlockedIPSource } from "@/types";
+import type { BlockedIPAddress, BlockedIPSource } from "@/types/security";
 
 import type { PendingBlockAction } from "../types";
 

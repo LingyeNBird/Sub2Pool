@@ -1,19 +1,22 @@
 import type { PagePermission } from "@/config/pagePermissions";
+import type { MonitoredAccount } from "@/types/accounts";
+import type { Observation } from "@/types/observations";
 import type {
-  AppSettingsData,
-  BlockedIPAddress,
-  HistoricalRebuildPlan,
-  LoginEventRecord,
-  MonitoredAccount,
-  NotificationRecord,
-  Observation,
   Participant,
-  ParticleTrajectoryData,
-  ParticleTrajectoryPoint,
   QuotaPoolAllocation,
   Sub2APIUserOption,
+} from "@/types/participants";
+import type {
+  ParticleTrajectoryData,
+  ParticleTrajectoryPoint,
+} from "@/types/particleTrajectory";
+import type {
+  BlockedIPAddress,
+  LoginEventRecord,
+  NotificationRecord,
   SystemUser,
-} from "@/types";
+} from "@/types/security";
+import type { AppSettingsData, HistoricalRebuildPlan } from "@/types/settings";
 
 import { initializeState } from "./fixtures";
 

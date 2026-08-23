@@ -1,9 +1,9 @@
+import type { MonitoredAccount } from "@/types/accounts";
 import type {
   AppSettingsData,
   FastCorrectionRule,
   HistoricalRebuildPlan,
-  MonitoredAccount,
-} from "@/types";
+} from "@/types/settings";
 
 import type { DemoRequestContext } from "../backend";
 import {

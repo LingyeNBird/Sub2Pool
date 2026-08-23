@@ -5,12 +5,10 @@ import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
-import type {
-  ConfirmDialogHandle,
-  MonitoredAccount,
-  Participant,
-  SystemUser,
-} from "@/types";
+import type { MonitoredAccount } from "@/types/accounts";
+import type { ConfirmDialogHandle } from "@/types/common";
+import type { Participant } from "@/types/participants";
+import type { SystemUser } from "@/types/security";
 
 import SystemUserEditorDialog from "./components/SystemUserEditorDialog.vue";
 import SystemUserPermissionDialog from "./components/SystemUserPermissionDialog.vue";

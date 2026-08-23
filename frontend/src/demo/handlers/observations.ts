@@ -4,7 +4,7 @@ import type {
   Observation,
   ObservationListData,
   ObservationRebuildResult,
-} from "@/types";
+} from "@/types/observations";
 
 import type { DemoRequestContext } from "../backend";
 import { demoIdentity, saveDemoState, type DemoState } from "../state";

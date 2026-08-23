@@ -3,7 +3,7 @@ import type {
   AnnouncementRecord,
   BlockedIPAddress,
   LoginEventData,
-} from "@/types";
+} from "@/types/security";
 
 import type { DemoRequestContext } from "../backend";
 import { demoIdentity, saveDemoState, type DemoState } from "../state";

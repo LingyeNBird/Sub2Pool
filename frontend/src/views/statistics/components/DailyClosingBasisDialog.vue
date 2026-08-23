@@ -4,7 +4,7 @@ import { computed, ref } from "vue";
 import CalculationBasisHeader from "@/components/common/CalculationBasisHeader.vue";
 import CalculationBasisTimeline from "@/components/common/CalculationBasisTimeline.vue";
 import { useDateTime } from "@/composables/useDateTime";
-import type { CapacityPoint } from "@/types";
+import type { CapacityPoint } from "@/types/statistics";
 import {
   formatCostBreakdown,
   formatCostTerms,

@@ -1,4 +1,4 @@
-import type { Participant } from "@/types";
+import type { Participant } from "@/types/participants";
 
 import type { DemoRequestContext } from "../backend";
 import { aggregateParticipant, saveDemoState, type DemoState } from "../state";

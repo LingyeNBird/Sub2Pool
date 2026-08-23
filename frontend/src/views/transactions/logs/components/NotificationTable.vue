@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import PaginationControls from "@/components/common/PaginationControls.vue";
 import { useDateTime } from "@/composables/useDateTime";
-import type { NotificationRecord, PaginationMeta } from "@/types";
+import type { PaginationMeta } from "@/types/common";
+import type { NotificationRecord } from "@/types/security";
 
 import type { NotificationFilterKind, NotificationFilters } from "../types";
 

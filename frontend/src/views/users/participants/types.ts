@@ -1,4 +1,4 @@
-import type { Participant } from "@/types";
+import type { Participant } from "@/types/participants";
 
 export type ParticipantViewMode = "cards" | "table";
 

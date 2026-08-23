@@ -1,4 +1,4 @@
-import type { ParticleTrajectoryPoint } from "@/types";
+import type { ParticleTrajectoryPoint } from "@/types/particleTrajectory";
 
 export interface TrajectoryFrame {
   point: ParticleTrajectoryPoint;

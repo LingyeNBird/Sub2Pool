@@ -1,7 +1,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import { api } from "@/services/api";
-import type { MonitorSchedule } from "@/types";
+import type { MonitorSchedule } from "@/types/observations";
 
 export function useMonitorScheduleCountdown(
   onRunCompleted: () => Promise<void> | void,

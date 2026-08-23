@@ -2,11 +2,8 @@
 import { computed, ref } from "vue";
 
 import SettingLabel from "@/components/common/SettingLabel.vue";
-import type {
-  AppSettingsData,
-  MonitoredAccount,
-  OpenAIAccountOption,
-} from "@/types";
+import type { MonitoredAccount, OpenAIAccountOption } from "@/types/accounts";
+import type { AppSettingsData } from "@/types/settings";
 
 const settings = defineModel<AppSettingsData>("settings", { required: true });
 const adminToken = defineModel<string>("adminToken", { required: true });

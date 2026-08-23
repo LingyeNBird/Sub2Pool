@@ -5,7 +5,7 @@ import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
-import type { AccountStatusAccount, AccountStatusData } from "@/types";
+import type { AccountStatusAccount, AccountStatusData } from "@/types/accounts";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 const data = ref<AccountStatusData | null>(null);

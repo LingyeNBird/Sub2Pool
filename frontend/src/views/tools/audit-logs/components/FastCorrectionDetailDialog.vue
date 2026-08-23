@@ -3,7 +3,7 @@ import { ref } from "vue";
 
 import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
-import type { FastCorrectionDetail, Observation } from "@/types";
+import type { FastCorrectionDetail, Observation } from "@/types/observations";
 import { formatCurrency } from "@/utils/formatters";
 
 import type { DialogController } from "../types";

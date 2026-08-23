@@ -4,7 +4,8 @@ import { onMounted, ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
-import type { DashboardData, Participant } from "@/types";
+import type { DashboardData } from "@/types/dashboard";
+import type { Participant } from "@/types/participants";
 
 import AccountExplanationCard from "./components/AccountExplanationCard.vue";
 import CollectionStatusCard from "./components/CollectionStatusCard.vue";

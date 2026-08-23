@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import type { HistoricalRebuildPlan, MonitoredAccount } from "@/types";
+import type { MonitoredAccount } from "@/types/accounts";
+import type { HistoricalRebuildPlan } from "@/types/settings";
 const accountId = defineModel<number | null>("accountId", { required: true });
 
 const { plan, planning, applying, accounts } = defineProps<{

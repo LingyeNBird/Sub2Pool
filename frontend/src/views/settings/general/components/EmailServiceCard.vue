@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import SettingLabel from "@/components/common/SettingLabel.vue";
-import type { AppSettingsData } from "@/types";
+import type { AppSettingsData } from "@/types/settings";
 
 const settings = defineModel<AppSettingsData>("settings", { required: true });
 const smtpPassword = defineModel<string>("smtpPassword", { required: true });

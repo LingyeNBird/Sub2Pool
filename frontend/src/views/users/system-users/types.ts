@@ -1,5 +1,5 @@
 import type { PagePermission } from "@/config/pagePermissions";
-import type { SystemUser } from "@/types";
+import type { SystemUser } from "@/types/security";
 
 export interface SystemUserFormData {
   username: string;

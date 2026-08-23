@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useDateTime } from "@/composables/useDateTime";
-import type { DashboardData } from "@/types";
+import type { DashboardData } from "@/types/dashboard";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 defineProps<{

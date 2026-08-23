@@ -3,7 +3,7 @@ import { ref } from "vue";
 
 import { useDateTime } from "@/composables/useDateTime";
 
-import type { Observation } from "@/types";
+import type { Observation } from "@/types/observations";
 import {
   formatCurrency,
   formatCurrencyRange,

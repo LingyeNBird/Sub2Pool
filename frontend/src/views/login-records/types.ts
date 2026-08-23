@@ -1,4 +1,4 @@
-import type { BlockedIPAddress, BlockedIPSource } from "@/types";
+import type { BlockedIPAddress, BlockedIPSource } from "@/types/security";
 
 export interface PendingBlockAction {
   mode: "block" | "unblock";

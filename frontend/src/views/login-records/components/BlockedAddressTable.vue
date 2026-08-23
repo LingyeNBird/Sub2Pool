@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useDateTime } from "@/composables/useDateTime";
-import type { BlockedIPAddress } from "@/types";
+import type { BlockedIPAddress } from "@/types/security";
 
 defineProps<{
   blockedAddresses: BlockedIPAddress[];

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
-import type { NotificationRecord } from "@/types";
+import type { NotificationRecord } from "@/types/security";
 
 const dialog = ref<HTMLDialogElement | null>(null);
 const selected = ref<NotificationRecord | null>(null);

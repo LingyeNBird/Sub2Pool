@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import PaginationControls from "@/components/common/PaginationControls.vue";
 import { useDateTime } from "@/composables/useDateTime";
-import type { Observation, PaginationMeta } from "@/types";
+import type { PaginationMeta } from "@/types/common";
+import type { Observation } from "@/types/observations";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 import type { ObservationFilterKind, ObservationFilters } from "../types";

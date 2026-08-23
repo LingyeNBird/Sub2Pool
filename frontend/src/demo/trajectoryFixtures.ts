@@ -1,10 +1,7 @@
-import type {
-  ModelDiagnostics,
-  Observation,
-  Participant,
-  ParticleTrajectoryPoint,
-  Snapshot,
-} from "@/types";
+import type { ModelDiagnostics } from "@/types/dashboard";
+import type { Observation } from "@/types/observations";
+import type { Participant, Snapshot } from "@/types/participants";
+import type { ParticleTrajectoryPoint } from "@/types/particleTrajectory";
 
 import type { DemoPeriod } from "./state";
 import { rounded, snapshot } from "./participantProjection";

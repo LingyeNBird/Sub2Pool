@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import { useDateTime } from "@/composables/useDateTime";
-import type { ParticleTrajectoryPoint } from "@/types";
+import type { ParticleTrajectoryPoint } from "@/types/particleTrajectory";
 import { formatCurrency } from "@/utils/formatters";
 import {
   pointTime,

@@ -5,11 +5,8 @@ import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
-import type {
-  ConfirmDialogHandle,
-  Participant,
-  Sub2APIUserOption,
-} from "@/types";
+import type { ConfirmDialogHandle } from "@/types/common";
+import type { Participant, Sub2APIUserOption } from "@/types/participants";
 
 import ParticipantCard from "./components/ParticipantCard.vue";
 import ParticipantEditorDialog from "./components/ParticipantEditorDialog.vue";

@@ -2,7 +2,7 @@ import type {
   QuotaAllocationData,
   QuotaAllocationWritePool,
   QuotaPoolAllocation,
-} from "@/types";
+} from "@/types/participants";
 
 import type { DemoRequestContext } from "../backend";
 import {

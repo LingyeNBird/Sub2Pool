@@ -4,12 +4,12 @@ import { onMounted, ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
+import type { PaginationMeta } from "@/types/common";
 import type {
   BlockedIPAddress,
   BlockedIPSource,
   LoginEventData,
-  PaginationMeta,
-} from "@/types";
+} from "@/types/security";
 
 import BlockedAddressTable from "./components/BlockedAddressTable.vue";
 import IPBlockDialog from "./components/IPBlockDialog.vue";

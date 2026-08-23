@@ -2,7 +2,7 @@
 import { reactive, ref } from "vue";
 
 import { ApiError } from "@/services/api";
-import type { SystemUser } from "@/types";
+import type { SystemUser } from "@/types/security";
 
 import type { SystemUserFormData } from "../types";
 

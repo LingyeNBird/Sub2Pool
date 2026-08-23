@@ -2,7 +2,7 @@
 import { ref } from "vue";
 
 import SettingLabel from "@/components/common/SettingLabel.vue";
-import type { AppSettingsData, FastCorrectionRule } from "@/types";
+import type { AppSettingsData, FastCorrectionRule } from "@/types/settings";
 
 const settings = defineModel<AppSettingsData>("settings", { required: true });
 const props = defineProps<{
