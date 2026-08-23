@@ -49,7 +49,7 @@ interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 12;
+  version: 13;
   clock: string;
   nextParticipantId: number;
   nextPoolId: number;
@@ -323,6 +323,16 @@ export function aggregateParticipant(participant: Participant): void {
     const selected = sourceSnapshot?.selected_cost ?? 0;
     const capacity = charged > 0 ? (selected * 100) / charged : 440;
     const contractShare = breakdown.contract_share_percent;
+    const expectedEntitlement = sourceSnapshot
+      ? (contractShare * capacity) / 100
+      : null;
+    const consumedEntitlement = sourceSnapshot
+      ? (charged * capacity) / 100
+      : null;
+    const remainingEntitlement =
+      expectedEntitlement != null && consumedEntitlement != null
+        ? expectedEntitlement - consumedEntitlement
+        : null;
     return {
       account_id: breakdown.account_id,
       external_account_id: breakdown.external_account_id,
@@ -341,6 +351,18 @@ export function aggregateParticipant(participant: Participant): void {
       net_position_max_usd: sourceSnapshot
         ? ((contractShare - chargedLower) * capacity) / 100
         : null,
+      estimated_capacity_usd: sourceSnapshot ? capacity : null,
+      expected_entitlement_usd: expectedEntitlement,
+      consumed_entitlement_usd: consumedEntitlement,
+      remaining_entitlement_usd: remainingEntitlement,
+      entitlement_usage_percent:
+        expectedEntitlement != null &&
+        expectedEntitlement > 0 &&
+        consumedEntitlement != null
+          ? (consumedEntitlement * 100) / expectedEntitlement
+          : sourceSnapshot
+            ? 0
+            : null,
       contribution_usd: null as number | null,
       contribution_min_usd: null as number | null,
       contribution_max_usd: null as number | null,
@@ -410,6 +432,19 @@ export function aggregateParticipant(participant: Participant): void {
           4,
         )
       : 0;
+  const expectedEntitlement = sources.reduce(
+    (total, item) => total + (item.expected_entitlement_usd ?? 0),
+    0,
+  );
+  const consumedEntitlement = sources.reduce(
+    (total, item) => total + (item.consumed_entitlement_usd ?? 0),
+    0,
+  );
+  const remainingEntitlement = expectedEntitlement - consumedEntitlement;
+  const entitlementUsagePercent =
+    expectedEntitlement > 0
+      ? (consumedEntitlement * 100) / expectedEntitlement
+      : 0;
   const balance = participant.latest_balance_usd;
   const difference =
     complete && balance != null
@@ -427,6 +462,14 @@ export function aggregateParticipant(participant: Participant): void {
     pool_allocations: participant.pool_allocations,
     selected_cost: selectedCost,
     charged_cycle_percent: charged,
+    expected_entitlement_usd: complete ? rounded(expectedEntitlement, 6) : null,
+    consumed_entitlement_usd: complete ? rounded(consumedEntitlement, 6) : null,
+    remaining_entitlement_usd: complete
+      ? rounded(remainingEntitlement, 6)
+      : null,
+    entitlement_usage_percent: complete
+      ? rounded(entitlementUsagePercent, 4)
+      : null,
     current_balance_usd: balance,
     recommended_balance_usd: complete ? recommended : null,
     recommended_balance_min_usd: complete ? minimum : null,
@@ -888,7 +931,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 12,
+    version: 13,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextPoolId: 2,
@@ -950,7 +993,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 12) return parsed;
+      if (parsed.version === 13) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }

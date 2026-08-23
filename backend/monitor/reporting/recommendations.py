@@ -531,9 +531,16 @@ def _pool_source_values(
         charged_lower,
         charged_upper,
     ) = _capacity_values(snapshot, config)
-    remaining_point = share_percent - charged
     remaining_lower = share_percent - charged_upper
     remaining_upper = share_percent - charged_lower
+    expected_entitlement = share_percent * capacity_point / HUNDRED
+    consumed_entitlement = charged * capacity_point / HUNDRED
+    remaining_entitlement = expected_entitlement - consumed_entitlement
+    entitlement_usage_percent = (
+        consumed_entitlement * HUNDRED / expected_entitlement
+        if expected_entitlement > ZERO
+        else ZERO
+    )
     interval_products = (
         remaining_lower * capacity_min / HUNDRED,
         remaining_lower * capacity_max / HUNDRED,
@@ -543,9 +550,13 @@ def _pool_source_values(
     return {
         "capacity_point": capacity_point,
         "charged": charged,
-        "point": remaining_point * capacity_point / HUNDRED,
+        "point": remaining_entitlement,
         "lower": min(interval_products),
         "upper": max(interval_products),
+        "expected_entitlement": expected_entitlement,
+        "consumed_entitlement": consumed_entitlement,
+        "remaining_entitlement": remaining_entitlement,
+        "entitlement_usage_percent": entitlement_usage_percent,
     }
 
 
@@ -733,6 +744,9 @@ def aggregate_recommendation(
     net_lower = ZERO
     net_upper = ZERO
     selected_cost = ZERO
+    expected_entitlement = ZERO
+    consumed_entitlement = ZERO
+    remaining_entitlement = ZERO
     weighted_charged = ZERO
     total_capacity = ZERO
     for account in accounts:
@@ -758,6 +772,11 @@ def aggregate_recommendation(
             "contribution_usd": None,
             "contribution_min_usd": None,
             "contribution_max_usd": None,
+            "estimated_capacity_usd": None,
+            "expected_entitlement_usd": None,
+            "consumed_entitlement_usd": None,
+            "remaining_entitlement_usd": None,
+            "entitlement_usage_percent": None,
         }
         if snapshot is None or displayed is None:
             complete = False
@@ -772,12 +791,22 @@ def aggregate_recommendation(
         source["net_position_usd"] = values["point"]
         source["net_position_min_usd"] = values["lower"]
         source["net_position_max_usd"] = values["upper"]
+        source["estimated_capacity_usd"] = values["capacity_point"]
+        source["expected_entitlement_usd"] = values["expected_entitlement"]
+        source["consumed_entitlement_usd"] = values["consumed_entitlement"]
+        source["remaining_entitlement_usd"] = values["remaining_entitlement"]
+        source["entitlement_usage_percent"] = values[
+            "entitlement_usage_percent"
+        ]
         net_point += values["point"]
         net_lower += values["lower"]
         net_upper += values["upper"]
         selected_cost += Decimal(str(displayed["selected_cost"]))
         weighted_charged += values["charged"] * values["capacity_point"]
         total_capacity += values["capacity_point"]
+        expected_entitlement += values["expected_entitlement"]
+        consumed_entitlement += values["consumed_entitlement"]
+        remaining_entitlement += values["remaining_entitlement"]
         sources.append(source)
 
     safety_factor = _pooled_safety_factor(participant, accounts, config)
@@ -854,6 +883,11 @@ def aggregate_recommendation(
         if complete and total_capacity > ZERO
         else ZERO
     )
+    entitlement_usage_percent = (
+        consumed_entitlement * HUNDRED / expected_entitlement
+        if complete and expected_entitlement > ZERO
+        else ZERO
+    )
     if not complete:
         reason = "至少一个已分配账号尚无当前用户的可用观测，已阻止全局余额调整"
     elif applied:
@@ -873,6 +907,11 @@ def aggregate_recommendation(
             "contribution_usd",
             "contribution_min_usd",
             "contribution_max_usd",
+            "estimated_capacity_usd",
+            "expected_entitlement_usd",
+            "consumed_entitlement_usd",
+            "remaining_entitlement_usd",
+            "entitlement_usage_percent",
         ):
             if source[key] is not None:
                 source[key] = float(source[key])
@@ -883,6 +922,18 @@ def aggregate_recommendation(
             "pool_allocations": pool_contracts,
             "selected_cost": float(selected_cost),
             "charged_cycle_percent": float(charged_percent),
+            "expected_entitlement_usd": (
+                float(expected_entitlement) if complete else None
+            ),
+            "consumed_entitlement_usd": (
+                float(consumed_entitlement) if complete else None
+            ),
+            "remaining_entitlement_usd": (
+                float(remaining_entitlement) if complete else None
+            ),
+            "entitlement_usage_percent": (
+                float(entitlement_usage_percent) if complete else None
+            ),
             "current_balance_usd": float(balance) if balance is not None else None,
             "recommended_balance_usd": (
                 float(recommended) if complete else None

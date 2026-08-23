@@ -298,6 +298,10 @@ def test_aggregate_recommendation_nets_accounts_before_global_zero_clamp():
     assert aggregate["is_overused"] is False
     assert aggregate["needs_manual_update"] is True
     assert {item.observation.account_id for item in snapshots} == {71, 72}
+    assert aggregate["expected_entitlement_usd"] == 2000.0
+    assert aggregate["consumed_entitlement_usd"] == 1600.0
+    assert aggregate["remaining_entitlement_usd"] == 400.0
+    assert aggregate["entitlement_usage_percent"] == 80.0
     source_by_account = {
         item["external_account_id"]: item for item in aggregate["sources"]
     }
@@ -305,6 +309,15 @@ def test_aggregate_recommendation_nets_accounts_before_global_zero_clamp():
     assert source_by_account[72]["net_position_usd"] == 600.0
     assert source_by_account[71]["contribution_usd"] == 0.0
     assert source_by_account[72]["contribution_usd"] == 380.0
+    assert source_by_account[71]["estimated_capacity_usd"] == 2000.0
+    assert source_by_account[71]["expected_entitlement_usd"] == 1000.0
+    assert source_by_account[71]["consumed_entitlement_usd"] == 1200.0
+    assert source_by_account[71]["remaining_entitlement_usd"] == -200.0
+    assert source_by_account[71]["entitlement_usage_percent"] == 120.0
+    assert source_by_account[72]["expected_entitlement_usd"] == 1000.0
+    assert source_by_account[72]["consumed_entitlement_usd"] == 400.0
+    assert source_by_account[72]["remaining_entitlement_usd"] == 600.0
+    assert source_by_account[72]["entitlement_usage_percent"] == 40.0
 
     first_snapshot.charged_cycle_percent = Decimal("90")
     first_snapshot.charged_percent_lower = Decimal("89")
@@ -322,6 +335,10 @@ def test_aggregate_recommendation_nets_accounts_before_global_zero_clamp():
     assert aggregate["recommended_balance_min_usd"] == 0.0
     assert aggregate["recommended_balance_max_usd"] == 0.0
     assert aggregate["is_overused"] is True
+    assert aggregate["expected_entitlement_usd"] == 2000.0
+    assert aggregate["consumed_entitlement_usd"] == 2200.0
+    assert aggregate["remaining_entitlement_usd"] == -200.0
+    assert aggregate["entitlement_usage_percent"] == 110.0
 
 
 

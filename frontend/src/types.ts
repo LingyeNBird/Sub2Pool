@@ -159,6 +159,11 @@ export interface AggregateRecommendationSource {
   contribution_usd: number | null;
   contribution_min_usd: number | null;
   contribution_max_usd: number | null;
+  estimated_capacity_usd: number | null;
+  expected_entitlement_usd: number | null;
+  consumed_entitlement_usd: number | null;
+  remaining_entitlement_usd: number | null;
+  entitlement_usage_percent: number | null;
 }
 
 export interface ParticipantPoolAllocation {
@@ -175,6 +180,10 @@ export interface AggregateRecommendation {
   pool_allocations: ParticipantPoolAllocation[];
   selected_cost: number;
   charged_cycle_percent: number;
+  expected_entitlement_usd: number | null;
+  consumed_entitlement_usd: number | null;
+  remaining_entitlement_usd: number | null;
+  entitlement_usage_percent: number | null;
   current_balance_usd: number | null;
   recommended_balance_usd: number | null;
   recommended_balance_min_usd: number | null;

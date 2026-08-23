@@ -131,6 +131,11 @@ function poolTotal(pool: DraftPool) {
     0,
   );
 }
+function formattedPoolTotal(pool: DraftPool) {
+  return poolTotal(pool)
+    .toFixed(3)
+    .replace(/\.?0+$/, "");
+}
 
 function updateAllocation(
   pool: DraftPool,
@@ -436,7 +441,7 @@ onUnmounted(() => {
 
     <div
       v-else
-      class="overflow-x-auto rounded-box border border-base-300 bg-base-100 shadow-xs"
+      class="overflow-x-auto rounded-box border border-base-content/25 bg-base-100 shadow-xs"
     >
       <table class="allocation-table table min-w-max">
         <thead>
@@ -512,12 +517,23 @@ onUnmounted(() => {
               <div
                 class="relative flex min-h-24 items-center gap-3 px-5 py-4 text-left"
               >
-                <span
+                <div
                   v-if="pool.accountIds.length > 1 && accountIndex === 0"
-                  class="absolute top-2 left-3 badge badge-sm badge-success"
+                  class="absolute top-2 left-3 flex items-center gap-2"
                 >
-                  {{ pool.name }}
-                </span>
+                  <span class="badge badge-sm badge-success">
+                    {{ pool.name }}
+                  </span>
+                  <span
+                    class="badge shrink-0 badge-sm"
+                    :class="
+                      poolTotal(pool) > 100 ? 'badge-error' : 'badge-ghost'
+                    "
+                  >
+                    {{ auth.isStaff ? "合计" : "当前可见合计" }}
+                    {{ formattedPoolTotal(pool) }}%
+                  </span>
+                </div>
                 <span
                   class="flex size-5 shrink-0 items-center justify-center rounded-full border border-base-300"
                   :class="{
@@ -537,8 +553,20 @@ onUnmounted(() => {
                     'pt-4': pool.accountIds.length > 1 && accountIndex === 0,
                   }"
                 >
-                  <div class="truncate font-semibold">
-                    {{ accountName(accountId) }}
+                  <div class="flex min-w-0 items-center gap-2">
+                    <span class="min-w-0 truncate font-semibold">
+                      {{ accountName(accountId) }}
+                    </span>
+                    <span
+                      v-if="pool.accountIds.length === 1"
+                      class="badge shrink-0 badge-sm"
+                      :class="
+                        poolTotal(pool) > 100 ? 'badge-error' : 'badge-ghost'
+                      "
+                    >
+                      {{ auth.isStaff ? "合计" : "当前可见合计" }}
+                      {{ formattedPoolTotal(pool) }}%
+                    </span>
                   </div>
                   <div class="mt-1 text-xs font-normal opacity-50">
                     上游 ID
@@ -592,25 +620,6 @@ onUnmounted(() => {
               </td>
             </template>
           </tr>
-          <tr class="pool-summary" @click.stop>
-            <td class="sticky left-0 z-20 bg-base-100 p-0"></td>
-            <td
-              :colspan="participants.length"
-              class="bg-base-200/60 py-2 text-right text-xs"
-            >
-              <span
-                class="badge badge-sm"
-                :class="poolTotal(pool) > 100 ? 'badge-error' : 'badge-ghost'"
-              >
-                {{ auth.isStaff ? "合计" : "当前可见合计" }}
-                {{
-                  poolTotal(pool)
-                    .toFixed(3)
-                    .replace(/\.?0+$/, "")
-                }}%
-              </span>
-            </td>
-          </tr>
         </tbody>
       </table>
     </div>
@@ -660,12 +669,35 @@ onUnmounted(() => {
   inset: 0;
   background: linear-gradient(
     to top right,
-    transparent calc(50% - 0.5px),
-    color-mix(in oklab, currentColor 35%, transparent) 50%,
-    transparent calc(50% + 0.5px)
+    transparent calc(50% - 0.75px),
+    color-mix(in oklab, currentColor 55%, transparent) 50%,
+    transparent calc(50% + 0.75px)
   );
   content: "";
   pointer-events: none;
+}
+
+.allocation-table thead th {
+  border-bottom: 2px solid
+    color-mix(in oklab, var(--color-base-content) 32%, transparent);
+}
+
+.allocation-table .allocation-cell {
+  border-left: 1px solid
+    color-mix(in oklab, var(--color-base-content) 22%, transparent);
+}
+
+.allocation-table tbody > tr > * {
+  border-bottom-color: color-mix(
+    in oklab,
+    var(--color-base-content) 22%,
+    transparent
+  );
+}
+
+.allocation-table tbody + tbody > tr:first-child > * {
+  border-top: 2px solid
+    color-mix(in oklab, var(--color-base-content) 32%, transparent);
 }
 
 .allocation-table tbody.mixed-pool .pool-first {
@@ -701,7 +733,7 @@ onUnmounted(() => {
   );
 }
 
-.pool-summary td {
-  border-top: 0;
+.allocation-table tbody:last-child > tr:last-child > * {
+  border-bottom: 0;
 }
 </style>
