@@ -8,7 +8,7 @@ from .access import (
 )
 
 from .settings import AppSettings, MonitoredAccount
-from .participants import AccountParticipant, Participant
+from .participants import AccountParticipant, Participant, PoolParticipant, QuotaPool
 from .observations import (
     Observation,
     ParticipantSnapshot,
@@ -29,6 +29,8 @@ from .history_maintenance import (
 
 __all__ = [
     "AccountParticipant",
+    "PoolParticipant",
+    "QuotaPool",
     "AnnouncementRead",
     "AppSettings",
     "BlockedIPAddress",

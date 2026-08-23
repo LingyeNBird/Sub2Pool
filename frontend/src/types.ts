@@ -3,6 +3,11 @@ import type { PagePermission } from "@/config/pagePermissions";
 export interface Snapshot {
   participant_id: number;
   participant_name: string;
+  source_sub2api_user_id?: number;
+  quota_pool_id?: number | null;
+  quota_pool_name?: string;
+  pool_contract_revision?: number | null;
+  share_percent?: number;
   selected_cost: number;
   delta_cost: number | null;
   charged_delta_percent: number;
@@ -29,6 +34,7 @@ export interface Snapshot {
 
 export interface MonitoredAccount {
   id: number;
+  pool_id: number;
   external_account_id: number;
   name: string;
   enabled: boolean;
@@ -129,6 +135,10 @@ export interface AccountBreakdown {
   external_account_id: number;
   account_name: string;
   account_enabled: boolean;
+  pool_id: number;
+  pool_name: string;
+  contract_share_percent: number;
+  allocated: boolean;
   latest_selected_cost: number | null;
   last_checked_at: string | null;
   snapshot: Snapshot | null;
@@ -138,6 +148,9 @@ export interface AggregateRecommendationSource {
   account_id: number;
   external_account_id: number;
   account_name: string;
+  pool_id: number;
+  pool_name: string;
+  pool_contract_revision: number;
   contract_share_percent: number;
   snapshot: Snapshot | null;
   net_position_usd: number | null;
@@ -148,10 +161,18 @@ export interface AggregateRecommendationSource {
   contribution_max_usd: number | null;
 }
 
+export interface ParticipantPoolAllocation {
+  pool_id: number;
+  pool_name: string;
+  share_percent: number;
+  account_ids?: number[];
+  account_count?: number;
+}
+
 export interface AggregateRecommendation {
   participant_id: number;
-  share_percent: number;
   participant_name: string;
+  pool_allocations: ParticipantPoolAllocation[];
   selected_cost: number;
   charged_cycle_percent: number;
   current_balance_usd: number | null;
@@ -164,8 +185,9 @@ export interface AggregateRecommendation {
   recommendation_applied: boolean;
   recommendation_complete: boolean;
   account_count: number;
+  pool_count: number;
   reason: string;
-  allocation_model: "pooled_account_sum";
+  allocation_model: "partitioned_pool_sum";
   sources: AggregateRecommendationSource[];
 }
 
@@ -177,7 +199,7 @@ export interface Participant {
   sub2api_username: string;
   sub2api_email: string;
   sub2api_identity: string;
-  share_percent: number;
+  pool_allocations: ParticipantPoolAllocation[];
   is_owner: boolean;
   enabled: boolean;
   notes: string;
@@ -185,6 +207,48 @@ export interface Participant {
   last_checked_at: string | null;
   account_breakdowns: AccountBreakdown[];
   snapshot: AggregateRecommendation | null;
+}
+
+export interface QuotaAllocationParticipant {
+  id: number;
+  name: string;
+  sub2api_user_id: number;
+  sub2api_username: string;
+  sub2api_email: string;
+  sub2api_identity: string;
+  is_owner: boolean;
+  enabled: boolean;
+}
+
+export interface QuotaPoolAllocationEntry {
+  participant_id: number;
+  share_percent: number;
+}
+
+export interface QuotaPoolAllocation {
+  id: number;
+  name: string;
+  contract_revision: number;
+  account_ids: number[];
+  allocations: QuotaPoolAllocationEntry[];
+  total_share_percent: number;
+}
+
+export interface QuotaAllocationData {
+  accounts: MonitoredAccount[];
+  participants: QuotaAllocationParticipant[];
+  pools: QuotaPoolAllocation[];
+}
+
+export interface QuotaAllocationWritePool {
+  id?: number;
+  name: string;
+  account_ids: number[];
+  allocations: QuotaPoolAllocationEntry[];
+}
+
+export interface QuotaAllocationWrite {
+  pools: QuotaAllocationWritePool[];
 }
 
 export interface Sub2APIUserOption {

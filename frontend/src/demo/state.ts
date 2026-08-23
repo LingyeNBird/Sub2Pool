@@ -8,13 +8,14 @@ import type {
   HistoricalRebuildPlan,
   LoginEventRecord,
   ModelDiagnostics,
+  MonitoredAccount,
   NotificationRecord,
   Observation,
-  MonitoredAccount,
   Participant,
   ParticleTrajectoryData,
   ParticleTrajectoryPeriod,
   ParticleTrajectoryPoint,
+  QuotaPoolAllocation,
   Snapshot,
   Sub2APIUserOption,
   SystemUser,
@@ -48,15 +49,17 @@ interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 10;
+  version: 12;
   clock: string;
   nextParticipantId: number;
+  nextPoolId: number;
   nextSystemUserId: number;
   nextObservationId: number;
   nextBlockedId: number;
   revision: number;
   participants: Participant[];
   monitoredAccounts: MonitoredAccount[];
+  quotaPools: QuotaPoolAllocation[];
   sub2apiUsers: Sub2APIUserOption[];
   systemUsers: SystemUser[];
   observations: Observation[];
@@ -198,6 +201,7 @@ function baseMonitoredAccounts(): MonitoredAccount[] {
   return [
     {
       id: 1,
+      pool_id: 1,
       external_account_id: 8801,
       name: "主力账号",
       enabled: true,
@@ -210,6 +214,7 @@ function baseMonitoredAccounts(): MonitoredAccount[] {
     },
     {
       id: 2,
+      pool_id: 1,
       external_account_id: 8802,
       name: "备用账号",
       enabled: true,
@@ -224,6 +229,7 @@ function baseMonitoredAccounts(): MonitoredAccount[] {
 }
 
 function baseParticipants(accounts: MonitoredAccount[]): Participant[] {
+  const poolName = "默认混池";
   const rows = [
     {
       id: 1,
@@ -232,7 +238,7 @@ function baseParticipants(accounts: MonitoredAccount[]): Participant[] {
       sub2api_user_id: 101,
       sub2api_username: "demo-owner",
       sub2api_email: "owner@example.test",
-      share_percent: 40,
+      sharePercent: 40,
       is_owner: true,
       notes: "演示车主，由 admin 管理员账号直接查看。",
     },
@@ -243,7 +249,7 @@ function baseParticipants(accounts: MonitoredAccount[]): Participant[] {
       sub2api_user_id: 102,
       sub2api_username: "demo-starlight",
       sub2api_email: "starlight@example.test",
-      share_percent: 35,
+      sharePercent: 35,
       is_owner: false,
       notes: "演示参与者，对应系统用户 starlight。",
     },
@@ -254,7 +260,7 @@ function baseParticipants(accounts: MonitoredAccount[]): Participant[] {
       sub2api_user_id: 103,
       sub2api_username: "demo-forest",
       sub2api_email: "forest@example.test",
-      share_percent: 25,
+      sharePercent: 25,
       is_owner: false,
       notes: "演示参与者，对应系统用户 forest。",
     },
@@ -267,7 +273,15 @@ function baseParticipants(accounts: MonitoredAccount[]): Participant[] {
     sub2api_username: row.sub2api_username,
     sub2api_email: row.sub2api_email,
     sub2api_identity: row.sub2api_username,
-    share_percent: row.share_percent,
+    pool_allocations: [
+      {
+        pool_id: 1,
+        pool_name: poolName,
+        share_percent: row.sharePercent,
+        account_ids: accounts.map((account) => account.id),
+        account_count: accounts.length,
+      },
+    ],
     is_owner: row.is_owner,
     enabled: true,
     notes: row.notes,
@@ -279,6 +293,10 @@ function baseParticipants(accounts: MonitoredAccount[]): Participant[] {
       external_account_id: account.external_account_id,
       account_name: account.name,
       account_enabled: account.enabled,
+      pool_id: 1,
+      pool_name: poolName,
+      contract_share_percent: row.sharePercent,
+      allocated: true,
       latest_selected_cost: null,
       last_checked_at: null,
       snapshot: null,
@@ -289,10 +307,14 @@ function baseParticipants(accounts: MonitoredAccount[]): Participant[] {
 
 export function aggregateParticipant(participant: Participant): void {
   const breakdowns = participant.account_breakdowns.filter(
-    (item) => item.account_enabled,
+    (item) =>
+      item.account_enabled && item.allocated && item.contract_share_percent > 0,
   );
-  const complete =
-    breakdowns.length > 0 && breakdowns.every((item) => item.snapshot !== null);
+  if (!breakdowns.length) {
+    participant.snapshot = null;
+    return;
+  }
+  const complete = breakdowns.every((item) => item.snapshot !== null);
   const sources = breakdowns.map((breakdown) => {
     const sourceSnapshot = breakdown.snapshot;
     const charged = sourceSnapshot?.charged_cycle_percent ?? 0;
@@ -300,20 +322,24 @@ export function aggregateParticipant(participant: Participant): void {
     const chargedUpper = sourceSnapshot?.charged_percent_upper ?? charged;
     const selected = sourceSnapshot?.selected_cost ?? 0;
     const capacity = charged > 0 ? (selected * 100) / charged : 440;
+    const contractShare = breakdown.contract_share_percent;
     return {
       account_id: breakdown.account_id,
       external_account_id: breakdown.external_account_id,
       account_name: breakdown.account_name,
-      contract_share_percent: participant.share_percent,
+      pool_id: breakdown.pool_id,
+      pool_name: breakdown.pool_name,
+      pool_contract_revision: sourceSnapshot?.pool_contract_revision ?? 1,
+      contract_share_percent: contractShare,
       snapshot: sourceSnapshot,
       net_position_usd: sourceSnapshot
-        ? ((participant.share_percent - charged) * capacity) / 100
+        ? ((contractShare - charged) * capacity) / 100
         : null,
       net_position_min_usd: sourceSnapshot
-        ? ((participant.share_percent - chargedUpper) * capacity) / 100
+        ? ((contractShare - chargedUpper) * capacity) / 100
         : null,
       net_position_max_usd: sourceSnapshot
-        ? ((participant.share_percent - chargedLower) * capacity) / 100
+        ? ((contractShare - chargedLower) * capacity) / 100
         : null,
       contribution_usd: null as number | null,
       contribution_min_usd: null as number | null,
@@ -398,7 +424,7 @@ export function aggregateParticipant(participant: Participant): void {
   participant.snapshot = {
     participant_id: participant.id,
     participant_name: participant.name,
-    share_percent: participant.share_percent,
+    pool_allocations: participant.pool_allocations,
     selected_cost: selectedCost,
     charged_cycle_percent: charged,
     current_balance_usd: balance,
@@ -416,10 +442,13 @@ export function aggregateParticipant(participant: Participant): void {
     recommendation_applied: false,
     recommendation_complete: complete,
     account_count: breakdowns.length,
-    reason: needsUpdate
-      ? "全局余额与混池剩余权益区间差异较大"
-      : "全局余额处于混池建议区间",
-    allocation_model: "pooled_account_sum",
+    pool_count: new Set(breakdowns.map((item) => item.pool_id)).size,
+    reason: !complete
+      ? "等待所有已分配账号产生当前用户的可用观测"
+      : needsUpdate
+        ? "全局余额与各额度池剩余权益区间差异较大"
+        : "全局余额处于各额度池建议区间",
+    allocation_model: "partitioned_pool_sum",
     sources: sources.map(({ capacity: _capacity, ...source }) => source),
   };
 }
@@ -429,15 +458,16 @@ function participantSnapshots(
   cycleCost: number,
   usedPercent: number,
 ): Snapshot[] {
-  return participants.map((participant, index) =>
-    snapshot(
+  return participants.map((participant, index) => {
+    const allocation = participant.pool_allocations[0];
+    return snapshot(
       participant,
-      participant.share_percent,
+      allocation?.share_percent ?? 0,
       cycleCost,
       usedPercent,
       index,
-    ),
-  );
+    );
+  });
 }
 
 function buildPeriods(participants: Participant[]): {
@@ -806,6 +836,19 @@ function baseSettings(): AppSettingsData {
 function initializeState(): DemoState {
   const monitoredAccounts = baseMonitoredAccounts();
   const participants = baseParticipants(monitoredAccounts);
+  const quotaPools: QuotaPoolAllocation[] = [
+    {
+      id: 1,
+      name: "默认混池",
+      contract_revision: 1,
+      account_ids: monitoredAccounts.map((account) => account.id),
+      allocations: participants.map((participant) => ({
+        participant_id: participant.id,
+        share_percent: participant.pool_allocations[0]?.share_percent ?? 0,
+      })),
+      total_share_percent: 100,
+    },
+  ];
   const { periods, observations } = buildPeriods(participants);
   const latest = observations[observations.length - 1];
   const latestSnapshots = latest.participants;
@@ -813,6 +856,9 @@ function initializeState(): DemoState {
     const primaryBreakdown = participant.account_breakdowns[0];
     const secondaryBreakdown = participant.account_breakdowns[1];
     const primarySnapshot = latestSnapshots[index] ?? null;
+    if (primarySnapshot) {
+      primarySnapshot.source_sub2api_user_id = participant.sub2api_user_id;
+    }
     participant.latest_balance_usd =
       primarySnapshot?.current_balance_usd ?? null;
     participant.last_checked_at = latest.observed_at;
@@ -823,14 +869,18 @@ function initializeState(): DemoState {
       primaryBreakdown.last_checked_at = latest.observed_at;
     }
     if (secondaryBreakdown) {
+      const allocation = participant.pool_allocations.find(
+        (item) => item.pool_id === secondaryBreakdown.pool_id,
+      );
       const secondarySnapshot = snapshot(
         participant,
-        participant.share_percent,
+        allocation?.share_percent ?? 0,
         latest.selected_total_cost * 0.62,
         latest.interval_used_percent * 0.72,
         index,
         participant.latest_balance_usd ?? undefined,
       );
+      secondarySnapshot.source_sub2api_user_id = participant.sub2api_user_id;
       secondaryBreakdown.snapshot = secondarySnapshot;
       secondaryBreakdown.latest_selected_cost = secondarySnapshot.selected_cost;
       secondaryBreakdown.last_checked_at = latest.observed_at;
@@ -838,15 +888,17 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 10,
+    version: 12,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
+    nextPoolId: 2,
     nextSystemUserId: 3,
     nextObservationId: observations.length + 1,
     nextBlockedId: 1,
     revision: 24,
     participants,
     monitoredAccounts,
+    quotaPools,
     sub2apiUsers: participants.map((participant) => ({
       id: participant.sub2api_user_id,
       email: participant.sub2api_email,
@@ -898,7 +950,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 10) return parsed;
+      if (parsed.version === 12) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }

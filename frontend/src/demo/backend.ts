@@ -17,6 +17,9 @@ import type {
   MonitoredAccount,
   Participant,
   ParticleTrajectoryData,
+  QuotaAllocationData,
+  QuotaAllocationWritePool,
+  QuotaPoolAllocation,
   StatisticsData,
   SystemUser,
 } from "@/types";
@@ -135,21 +138,232 @@ function participantNames(state: DemoState, ids: number[]): string[] {
 }
 function participantBreakdowns(
   state: DemoState,
+  participantId: number,
   existing: Participant["account_breakdowns"] = [],
 ): Participant["account_breakdowns"] {
   return state.monitoredAccounts.map((account) => {
     const previous = existing.find((item) => item.account_id === account.id);
+    const pool = state.quotaPools.find((item) => item.id === account.pool_id);
+    const allocation = pool?.allocations.find(
+      (item) => item.participant_id === participantId,
+    );
+    const contractShare = allocation?.share_percent ?? 0;
+    const sourceUserId = state.participants.find(
+      (item) => item.id === participantId,
+    )?.sub2api_user_id;
+    const snapshotCurrent =
+      previous?.snapshot?.source_sub2api_user_id === sourceUserId;
     return {
       id: previous?.id ?? null,
       account_id: account.id,
       external_account_id: account.external_account_id,
       account_name: account.name,
       account_enabled: account.enabled,
+      pool_id: account.pool_id,
+      pool_name: pool?.name ?? `额度池 ${account.pool_id}`,
+      contract_share_percent: contractShare,
+      allocated: contractShare > 0,
       latest_selected_cost: previous?.latest_selected_cost ?? null,
       last_checked_at: previous?.last_checked_at ?? null,
-      snapshot: previous?.snapshot ?? null,
+      snapshot: snapshotCurrent ? (previous?.snapshot ?? null) : null,
     };
   });
+}
+function quotaAllocationData(state: DemoState): QuotaAllocationData {
+  return {
+    accounts: state.monitoredAccounts,
+    participants: state.participants.map((participant) => ({
+      id: participant.id,
+      name: participant.name,
+      sub2api_user_id: participant.sub2api_user_id,
+      sub2api_username: participant.sub2api_username,
+      sub2api_email: participant.sub2api_email,
+      sub2api_identity: participant.sub2api_identity,
+      is_owner: participant.is_owner,
+      enabled: participant.enabled,
+    })),
+    pools: state.quotaPools,
+  };
+}
+
+function quotaPoolSignature(pool: {
+  name: string;
+  account_ids: number[];
+  allocations: Array<{ participant_id: number; share_percent: number }>;
+}) {
+  const accountIds = [...pool.account_ids].sort((left, right) => left - right);
+  const allocations = [...pool.allocations].sort(
+    (left, right) => left.participant_id - right.participant_id,
+  );
+  return JSON.stringify([pool.name, accountIds, allocations]);
+}
+
+function applyQuotaAllocation(state: DemoState, value: unknown): string | null {
+  if (!Array.isArray(value)) return "额度池列表格式无效";
+
+  const accountIds = new Set(state.monitoredAccounts.map((item) => item.id));
+  const participantIds = new Set(state.participants.map((item) => item.id));
+  const existingPools = new Map(
+    state.quotaPools.map((pool) => [pool.id, pool]),
+  );
+  const seenAccountIds = new Set<number>();
+  const seenPoolIds = new Set<number>();
+  const specs: QuotaAllocationWritePool[] = [];
+
+  for (const [index, rawPool] of value.entries()) {
+    if (!rawPool || typeof rawPool !== "object" || Array.isArray(rawPool)) {
+      return `第 ${index + 1} 个额度池格式无效`;
+    }
+    const raw = rawPool as Record<string, unknown>;
+    const rawAccountIds = raw.account_ids;
+    const rawAllocations = raw.allocations ?? [];
+    if (!Array.isArray(rawAccountIds) || !rawAccountIds.length) {
+      return `第 ${index + 1} 个额度池必须包含账号`;
+    }
+    if (!Array.isArray(rawAllocations)) {
+      return `第 ${index + 1} 个额度池份额格式无效`;
+    }
+    const poolAccountIds = rawAccountIds.map(Number);
+    if (
+      poolAccountIds.some(
+        (accountId) =>
+          !Number.isInteger(accountId) || !accountIds.has(accountId),
+      )
+    ) {
+      return `第 ${index + 1} 个额度池包含未知账号`;
+    }
+    if (new Set(poolAccountIds).size !== poolAccountIds.length) {
+      return `第 ${index + 1} 个额度池包含重复账号`;
+    }
+    for (const accountId of poolAccountIds) {
+      if (seenAccountIds.has(accountId)) return "同一账号不能属于多个额度池";
+      seenAccountIds.add(accountId);
+    }
+
+    const poolId = raw.id === undefined ? undefined : Number(raw.id);
+    if (
+      poolId !== undefined &&
+      (!Number.isInteger(poolId) ||
+        !existingPools.has(poolId) ||
+        seenPoolIds.has(poolId))
+    ) {
+      return `第 ${index + 1} 个额度池 ID 无效`;
+    }
+    if (poolId !== undefined) seenPoolIds.add(poolId);
+
+    const allocations: QuotaAllocationWritePool["allocations"] = [];
+    const allocatedParticipantIds = new Set<number>();
+    let total = 0;
+    for (const rawAllocation of rawAllocations) {
+      if (
+        !rawAllocation ||
+        typeof rawAllocation !== "object" ||
+        Array.isArray(rawAllocation)
+      ) {
+        return `第 ${index + 1} 个额度池包含无效份额`;
+      }
+      const row = rawAllocation as Record<string, unknown>;
+      const participantId = Number(row.participant_id);
+      const sharePercent = Number(row.share_percent);
+      if (
+        !Number.isInteger(participantId) ||
+        !participantIds.has(participantId) ||
+        allocatedParticipantIds.has(participantId)
+      ) {
+        return `第 ${index + 1} 个额度池包含无效参与者`;
+      }
+      if (
+        !Number.isFinite(sharePercent) ||
+        sharePercent < 0 ||
+        sharePercent > 100
+      ) {
+        return `第 ${index + 1} 个额度池包含无效百分比`;
+      }
+      allocatedParticipantIds.add(participantId);
+      total += sharePercent;
+      if (sharePercent > 0) {
+        allocations.push({
+          participant_id: participantId,
+          share_percent: sharePercent,
+        });
+      }
+    }
+    if (total > 100) return `第 ${index + 1} 个额度池份额不能超过 100%`;
+    specs.push({
+      ...(poolId === undefined ? {} : { id: poolId }),
+      name:
+        typeof raw.name === "string" && raw.name.trim()
+          ? raw.name.trim()
+          : poolAccountIds.length === 1
+            ? `${state.monitoredAccounts.find((item) => item.id === poolAccountIds[0])?.name ?? "账号"} 独立池`
+            : `混池 ${index + 1}`,
+      account_ids: poolAccountIds,
+      allocations,
+    });
+  }
+
+  if (
+    seenAccountIds.size !== accountIds.size ||
+    [...accountIds].some((accountId) => !seenAccountIds.has(accountId))
+  ) {
+    return "每个账号必须且只能属于一个额度池";
+  }
+
+  const nextPools: QuotaPoolAllocation[] = specs.map((spec) => {
+    const previous =
+      spec.id === undefined ? undefined : existingPools.get(spec.id);
+    const id = spec.id ?? state.nextPoolId++;
+    const contractRevision =
+      previous && quotaPoolSignature(previous) === quotaPoolSignature(spec)
+        ? previous.contract_revision
+        : (previous?.contract_revision ?? 0) + 1;
+    return {
+      id,
+      name: spec.name,
+      contract_revision: contractRevision,
+      account_ids: spec.account_ids,
+      allocations: spec.allocations,
+      total_share_percent: spec.allocations.reduce(
+        (sum, allocation) => sum + allocation.share_percent,
+        0,
+      ),
+    };
+  });
+
+  state.quotaPools = nextPools;
+  for (const pool of nextPools) {
+    for (const accountId of pool.account_ids) {
+      const account = state.monitoredAccounts.find(
+        (item) => item.id === accountId,
+      );
+      if (account) account.pool_id = pool.id;
+    }
+  }
+  for (const participant of state.participants) {
+    participant.pool_allocations = nextPools.flatMap((pool) => {
+      const allocation = pool.allocations.find(
+        (item) => item.participant_id === participant.id,
+      );
+      return allocation
+        ? [
+            {
+              pool_id: pool.id,
+              pool_name: pool.name,
+              share_percent: allocation.share_percent,
+              account_ids: [...pool.account_ids],
+              account_count: pool.account_ids.length,
+            },
+          ]
+        : [];
+    });
+    participant.account_breakdowns = participantBreakdowns(
+      state,
+      participant.id,
+      participant.account_breakdowns,
+    );
+    aggregateParticipant(participant);
+  }
+  return null;
 }
 
 function observationsData(state: DemoState, url: URL): ObservationListData {
@@ -813,13 +1027,22 @@ export async function demoRequest(
     saveDemoState(state);
     return envelope({ applied: true });
   }
+  if (method === "GET" && pathname === "quota-allocation") {
+    return envelope(quotaAllocationData(state));
+  }
+  if (method === "PUT" && pathname === "quota-allocation") {
+    const validationError = applyQuotaAllocation(state, payload.pools);
+    if (validationError) return failure(validationError);
+    saveDemoState(state);
+    return envelope(quotaAllocationData(state));
+  }
   if (method === "GET" && pathname === "participants")
     return envelope(state.participants);
   if (method === "GET" && pathname === "participants/sub2api-users")
     return envelope(state.sub2apiUsers);
   if (method === "POST" && pathname === "participants") {
     const id = state.nextParticipantId++;
-    const participant = {
+    const participant: Participant = {
       id,
       name: String(payload.name ?? `演示参与者 ${id}`),
       email: String(payload.email ?? `participant-${id}@example.test`),
@@ -829,15 +1052,16 @@ export async function demoRequest(
         payload.sub2api_email ?? `participant-${id}@example.test`,
       ),
       sub2api_identity: String(payload.sub2api_username ?? `demo-user-${id}`),
-      share_percent: Number(payload.share_percent ?? 0),
+      pool_allocations: [],
       is_owner: Boolean(payload.is_owner),
       enabled: payload.enabled !== false,
       notes: String(payload.notes ?? ""),
       latest_balance_usd: null,
       last_checked_at: null,
-      account_breakdowns: participantBreakdowns(state),
+      account_breakdowns: [],
       snapshot: null,
-    } satisfies Participant;
+    };
+    participant.account_breakdowns = participantBreakdowns(state, id);
     aggregateParticipant(participant);
     state.participants.push(participant);
     saveDemoState(state);
@@ -849,17 +1073,28 @@ export async function demoRequest(
       (item) => item.id === Number(participantMatch[1]),
     );
     if (!participant) return failure("参与者不存在", 404);
-    Object.assign(participant, payload, {
+    Object.assign(participant, {
+      name: String(payload.name ?? participant.name),
+      email: String(payload.email ?? participant.email),
+      sub2api_user_id: Number(
+        payload.sub2api_user_id ?? participant.sub2api_user_id,
+      ),
+      sub2api_username: String(
+        payload.sub2api_username ?? participant.sub2api_username,
+      ),
+      sub2api_email: String(payload.sub2api_email ?? participant.sub2api_email),
       sub2api_identity: String(
         payload.sub2api_username ?? participant.sub2api_username,
       ),
-      share_percent: Number(payload.share_percent ?? participant.share_percent),
       is_owner: Boolean(payload.is_owner ?? participant.is_owner),
-      account_breakdowns: participantBreakdowns(
-        state,
-        participant.account_breakdowns,
-      ),
+      enabled: Boolean(payload.enabled ?? participant.enabled),
+      notes: String(payload.notes ?? participant.notes),
     });
+    participant.account_breakdowns = participantBreakdowns(
+      state,
+      participant.id,
+      participant.account_breakdowns,
+    );
     aggregateParticipant(participant);
     saveDemoState(state);
     return envelope(participant);
@@ -1183,10 +1418,17 @@ export async function demoRequest(
     ) {
       return failure("该上游账号已经在监控列表中", 400);
     }
+    const accountId =
+      Math.max(0, ...state.monitoredAccounts.map((item) => item.id)) + 1;
+    const poolId = state.nextPoolId++;
+    const accountName = String(
+      payload.name ?? `OpenAI 账号 ${externalAccountId}`,
+    );
     const account: MonitoredAccount = {
-      id: Math.max(0, ...state.monitoredAccounts.map((item) => item.id)) + 1,
+      id: accountId,
+      pool_id: poolId,
       external_account_id: externalAccountId,
-      name: String(payload.name ?? `OpenAI 账号 ${externalAccountId}`),
+      name: accountName,
       enabled: payload.enabled !== false,
       quota_query_mode:
         payload.quota_query_mode === "direct" ? "direct" : "passive",
@@ -1197,19 +1439,20 @@ export async function demoRequest(
       last_error: "",
     };
     state.monitoredAccounts.push(account);
+    state.quotaPools.push({
+      id: poolId,
+      name: `${accountName} 独立池`,
+      contract_revision: 1,
+      account_ids: [accountId],
+      allocations: [],
+      total_share_percent: 0,
+    });
     for (const participant of state.participants) {
-      participant.account_breakdowns.push({
-        id: null,
-        account_id: account.id,
-        external_account_id: account.external_account_id,
-        account_name: account.name,
-        account_enabled: account.enabled,
-        latest_selected_cost: null,
-        last_checked_at: null,
-        snapshot: null,
-      });
-    }
-    for (const participant of state.participants) {
+      participant.account_breakdowns = participantBreakdowns(
+        state,
+        participant.id,
+        participant.account_breakdowns,
+      );
       aggregateParticipant(participant);
     }
     saveDemoState(state);
@@ -1227,19 +1470,18 @@ export async function demoRequest(
       payload.external_account_id ?? account.external_account_id,
     );
     account.name = String(payload.name ?? account.name);
-    account.enabled = payload.enabled !== false;
+    account.enabled =
+      payload.enabled === undefined
+        ? account.enabled
+        : payload.enabled !== false;
     account.quota_query_mode =
       payload.quota_query_mode === "direct" ? "direct" : "passive";
     for (const participant of state.participants) {
-      const breakdown = participant.account_breakdowns.find(
-        (item) => item.account_id === account.id,
+      participant.account_breakdowns = participantBreakdowns(
+        state,
+        participant.id,
+        participant.account_breakdowns,
       );
-      if (!breakdown) continue;
-      breakdown.external_account_id = account.external_account_id;
-      breakdown.account_name = account.name;
-      breakdown.account_enabled = account.enabled;
-    }
-    for (const participant of state.participants) {
       aggregateParticipant(participant);
     }
     saveDemoState(state);
@@ -1250,12 +1492,44 @@ export async function demoRequest(
     state.monitoredAccounts = state.monitoredAccounts.filter(
       (item) => item.id !== accountId,
     );
-    for (const participant of state.participants) {
-      participant.account_breakdowns = participant.account_breakdowns.filter(
-        (item) => item.account_id !== accountId,
+    state.quotaPools = state.quotaPools.flatMap((pool) => {
+      const remainingAccountIds = pool.account_ids.filter(
+        (item) => item !== accountId,
       );
-    }
+      return remainingAccountIds.length
+        ? [
+            {
+              ...pool,
+              contract_revision: pool.contract_revision + 1,
+              account_ids: remainingAccountIds,
+            },
+          ]
+        : [];
+    });
     for (const participant of state.participants) {
+      participant.pool_allocations = participant.pool_allocations.flatMap(
+        (allocation) => {
+          const pool = state.quotaPools.find(
+            (item) => item.id === allocation.pool_id,
+          );
+          return pool
+            ? [
+                {
+                  ...allocation,
+                  account_ids: [...pool.account_ids],
+                  account_count: pool.account_ids.length,
+                },
+              ]
+            : [];
+        },
+      );
+      participant.account_breakdowns = participantBreakdowns(
+        state,
+        participant.id,
+        participant.account_breakdowns.filter(
+          (item) => item.account_id !== accountId,
+        ),
+      );
       aggregateParticipant(participant);
     }
     saveDemoState(state);

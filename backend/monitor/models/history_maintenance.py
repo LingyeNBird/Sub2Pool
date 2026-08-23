@@ -182,7 +182,7 @@ class ParticipantBalanceOperation(models.Model):
 
 
 class ParticipantBalanceOperationSource(models.Model):
-    """One account revision and snapshot contributing to a global operation."""
+    """One account fact and allocation share contributing to a global operation."""
 
     operation = models.ForeignKey(
         ParticipantBalanceOperation,
@@ -196,11 +196,12 @@ class ParticipantBalanceOperationSource(models.Model):
     )
     account_external_id = models.BigIntegerField(db_index=True)
     base_revision = models.PositiveBigIntegerField()
-    snapshot = models.OneToOneField(
+    snapshot = models.ForeignKey(
         "ParticipantSnapshot",
         on_delete=models.PROTECT,
-        related_name="balance_operation_source",
+        related_name="balance_operation_sources",
     )
+    share_percent = models.DecimalField(max_digits=7, decimal_places=3)
     contribution_usd = models.DecimalField(
         max_digits=18,
         decimal_places=6,

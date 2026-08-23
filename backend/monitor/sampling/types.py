@@ -10,7 +10,7 @@ from ..integrations.sub2api import (
     UserBalance,
     WeeklyWindow,
 )
-from ..models import AccountParticipant, Observation, Participant
+from ..models import AccountParticipant, Observation, Participant, PoolParticipant
 
 
 @dataclass
@@ -18,10 +18,21 @@ class LocalParticipantData:
     membership: AccountParticipant
     stats: UsageStats
     balance: UserBalance
+    allocation: PoolParticipant | None = None
 
     @property
     def participant(self) -> Participant:
         return self.membership.participant
+
+
+    @property
+    def contract(self) -> PoolParticipant:
+        if self.allocation is None:
+            self.allocation = PoolParticipant.objects.select_related("pool").get(
+                pool_id=self.membership.account.pool_id,
+                participant_id=self.membership.participant_id,
+            )
+        return self.allocation
 
     def selected_cost(self, basis: str) -> Decimal:
         return self.stats.selected(basis)

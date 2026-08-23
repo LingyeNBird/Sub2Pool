@@ -15,6 +15,7 @@ from monitor.models import (
     Observation,
     Participant,
     ParticipantSnapshot,
+    PoolParticipant,
     ParticipantUsageSample,
     Sub2APIUserUsageSample,
     UsageSamplePoint,
@@ -106,7 +107,6 @@ def test_participant_crud_never_invents_or_rewrites_historical_membership():
         data={
             "name": "current participant",
             "sub2api_user_id": 51,
-            "share_percent": "40",
             "is_owner": False,
             "enabled": True,
         },
@@ -120,6 +120,11 @@ def test_participant_crud_never_invents_or_rewrites_historical_membership():
         participant=participant
     ).exists()
     assert not ParticipantSnapshot.objects.filter(participant=participant).exists()
+    PoolParticipant.objects.create(
+        pool=account.pool,
+        participant=participant,
+        share_percent=Decimal("40"),
+    )
 
     historical_usage = ParticipantUsageSample.objects.create(
         participant=participant,
@@ -141,13 +146,16 @@ def test_participant_crud_never_invents_or_rewrites_historical_membership():
         f"/api/participants/{participant.id}",
         data={
             "sub2api_user_id": 52,
-            "share_percent": "60",
         },
         content_type="application/json",
         **headers,
     )
 
     assert updated.status_code == 200, updated.json()
+    account.pool.refresh_from_db()
+    assert account.pool.contract_revision == 1
+    assert updated.json()["data"]["snapshot"]["recommendation_complete"] is False
+    assert updated.json()["data"]["snapshot"]["sources"][0]["snapshot"] is None
     historical_usage.refresh_from_db()
     historical_snapshot.refresh_from_db()
     assert historical_usage.selected_cost == Decimal("20")
@@ -186,7 +194,27 @@ def test_participant_create_update_delete_respect_active_account_fence():
         updated = client.put(
             f"/api/participants/{participant.id}",
             data={
-                "share_percent": "40",
+                "notes": "blocked",
+            },
+            content_type="application/json",
+            **headers,
+        )
+        allocation = client.put(
+            "/api/quota-allocation",
+            data={
+                "pools": [
+                    {
+                        "id": account.pool_id,
+                        "name": account.pool.name,
+                        "account_ids": [account.id],
+                        "allocations": [
+                            {
+                                "participant_id": participant.id,
+                                "share_percent": "40",
+                            }
+                        ],
+                    }
+                ]
             },
             content_type="application/json",
             **headers,
@@ -198,58 +226,114 @@ def test_participant_create_update_delete_respect_active_account_fence():
     finally:
         guard.release()
 
-    assert [created.status_code, updated.status_code, deleted.status_code] == [
-        409,
-        409,
-        409,
-    ]
+    assert [
+        created.status_code,
+        updated.status_code,
+        allocation.status_code,
+        deleted.status_code,
+    ] == [409, 409, 409, 409]
     participant.refresh_from_db()
-    assert participant.share_percent == Decimal("50")
+    assert participant.notes == ""
+    assert participant.pool_allocations.get().share_percent == Decimal("50")
     assert Participant.objects.count() == 1
     assert HistoryMaintenanceState.objects.get(account_id=7).fact_revision == 0
 
 
 @pytest.mark.django_db(transaction=True)
-def test_concurrent_participant_creates_revalidate_share_inside_fence():
-    config = AppSettings.load()
+def test_pool_allocation_serializer_rejects_more_than_one_hundred_percent():
     account = create_monitored_account(7)
-    config.save()
-    create_participant(name="既有车友",
-    sub2api_user_id=50,
-    share_percent=20,)
-    first = ParticipantWriteSerializer(
-        data={
-            "name": "并发甲",
-            "sub2api_user_id": 51,
-            "share_percent": "45",
-        }
+    first = create_participant(
+        name="车友甲",
+        sub2api_user_id=51,
+        share_percent=60,
+        account=account,
     )
-    second = ParticipantWriteSerializer(
+    second = create_participant(
+        name="车友乙",
+        sub2api_user_id=52,
+    )
+    from monitor.serializers import QuotaAllocationWriteSerializer
+
+    serializer = QuotaAllocationWriteSerializer(
         data={
-            "name": "并发乙",
-            "sub2api_user_id": 52,
-            "share_percent": "45",
+            "pools": [
+                {
+                    "id": account.pool_id,
+                    "account_ids": [account.id],
+                    "allocations": [
+                        {"participant_id": first.id, "share_percent": "60"},
+                        {"participant_id": second.id, "share_percent": "45"},
+                    ],
+                }
+            ]
         }
     )
 
-    # Both requests cross the DRF validation boundary before either saves.
-    assert first.is_valid(), first.errors
-    assert second.is_valid(), second.errors
-    first.save()
-    with pytest.raises(serializers.ValidationError, match="不能超过 100%"):
-        second.save()
+    assert not serializer.is_valid()
+    assert "不能超过 100%" in str(serializer.errors)
 
-    assert sum(
-        Participant.objects.filter(enabled=True).values_list(
-            "share_percent",
-            flat=True,
-        ),
-        Decimal("0"),
-    ) == Decimal("65")
-    assert (
-        HistoryMaintenanceState.objects.get(account_id=7).fact_revision
-        == 1
+
+@pytest.mark.django_db(transaction=True)
+def test_pool_allocation_apply_rejects_account_set_changed_after_validation():
+    account = create_monitored_account(7)
+    participant = create_participant(
+        name="车友",
+        sub2api_user_id=51,
+        share_percent=50,
+        account=account,
     )
+    from monitor.serializers import QuotaAllocationWriteSerializer
+
+    serializer = QuotaAllocationWriteSerializer(
+        data={
+            "pools": [
+                {
+                    "id": account.pool_id,
+                    "account_ids": [account.id],
+                    "allocations": [
+                        {
+                            "participant_id": participant.id,
+                            "share_percent": "50",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    assert serializer.is_valid(), serializer.errors
+    create_monitored_account(8)
+
+    with pytest.raises(serializers.ValidationError, match="监控账号集合已变化"):
+        serializer.apply()
+
+    assert account.pool.allocations.get(
+        participant=participant
+    ).share_percent == Decimal("50")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_participant_delete_bumps_affected_pool_contract_revision():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    account = create_monitored_account(7)
+    participant = create_participant(
+        name="可删除车友",
+        sub2api_user_id=51,
+        share_percent=50,
+        account=account,
+    )
+    client = Client()
+    headers, _ = jwt_login(client)
+
+    response = client.delete(f"/api/participants/{participant.id}", **headers)
+
+    assert response.status_code == 200, response.json()
+    account.pool.refresh_from_db()
+    assert account.pool.contract_revision == 2
+    assert not Participant.objects.filter(pk=participant.pk).exists()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -261,11 +345,11 @@ def test_concurrent_partial_updates_merge_against_locked_latest_instance():
     sub2api_user_id=51,
     share_percent=50,
     notes="old",)
-    stale_share = Participant.objects.get(pk=participant.pk)
+    stale_name = Participant.objects.get(pk=participant.pk)
     stale_notes = Participant.objects.get(pk=participant.pk)
-    share_update = ParticipantWriteSerializer(
-        stale_share,
-        data={"share_percent": "40"},
+    name_update = ParticipantWriteSerializer(
+        stale_name,
+        data={"name": "新名称"},
         partial=True,
     )
     notes_update = ParticipantWriteSerializer(
@@ -275,13 +359,13 @@ def test_concurrent_partial_updates_merge_against_locked_latest_instance():
     )
 
     # Both requests validate the same old row, then saves are serialized.
-    assert share_update.is_valid(), share_update.errors
+    assert name_update.is_valid(), name_update.errors
     assert notes_update.is_valid(), notes_update.errors
-    share_update.save()
+    name_update.save()
     notes_update.save()
 
     participant.refresh_from_db()
-    assert participant.share_percent == Decimal("40")
+    assert participant.name == "新名称"
     assert participant.notes == "new-note"
     assert (
         HistoryMaintenanceState.objects.get(account_id=7).fact_revision
@@ -290,36 +374,43 @@ def test_concurrent_partial_updates_merge_against_locked_latest_instance():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_participant_api_returns_400_for_locked_share_conflict():
+def test_allocation_api_returns_400_for_pool_share_conflict():
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
         email="owner@example.com",
     )
-    config = AppSettings.load()
     account = create_monitored_account(7)
-    config.save()
-    create_participant(name="既有车友",
-    sub2api_user_id=51,
-    share_percent=70,)
+    existing = create_participant(
+        name="既有车友",
+        sub2api_user_id=51,
+        share_percent=70,
+        account=account,
+    )
+    extra = create_participant(name="超额车友", sub2api_user_id=52)
     client = Client()
     headers, _ = jwt_login(client)
 
-    response = client.post(
-        "/api/participants",
+    response = client.put(
+        "/api/quota-allocation",
         data={
-            "name": "超额车友",
-            "sub2api_user_id": 52,
-            "share_percent": "40",
+            "pools": [
+                {
+                    "id": account.pool_id,
+                    "account_ids": [account.id],
+                    "allocations": [
+                        {"participant_id": existing.id, "share_percent": "70"},
+                        {"participant_id": extra.id, "share_percent": "40"},
+                    ],
+                }
+            ]
         },
         content_type="application/json",
         **headers,
     )
 
     assert response.status_code == 400
-    assert "不能超过 100%" in response.json()["message"]
-    assert Participant.objects.count() == 1
-    assert (
-        HistoryMaintenanceState.objects.get(account_id=7).fact_revision
-        == 0
-    )
+    assert "不能超过 100%" in str(response.json()["details"])
+    assert existing.pool_allocations.get().share_percent == Decimal("70")
+    assert not extra.pool_allocations.exists()
+    assert not HistoryMaintenanceState.objects.filter(account_id=7).exists()

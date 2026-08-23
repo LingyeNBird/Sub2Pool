@@ -16,6 +16,7 @@ from ..integrations.sub2api import (
 )
 from ..models import (
     AccountParticipant,
+    PoolParticipant,
     AppSettings,
     Observation,
     Participant,
@@ -33,6 +34,7 @@ def fetch_local(
     config: AppSettings,
     reference: WindowReference,
     memberships: list[AccountParticipant],
+    allocations_by_participant_id: dict[int, PoolParticipant],
     now: datetime,
 ) -> LocalBundle:
     """只读取 Sub2API；数据库写入在最终确认查询窗口后统一执行一次。"""
@@ -81,6 +83,7 @@ def fetch_local(
         rows.append(
             LocalParticipantData(
                 membership=membership,
+                allocation=allocations_by_participant_id[participant.id],
                 stats=user_usage.stats,
                 balance=client.user_balance(participant.sub2api_user_id),
             )

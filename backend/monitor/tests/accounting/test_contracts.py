@@ -270,8 +270,8 @@ def test_quota_model_switch_changes_projection_without_rewriting_snapshot():
     config.save(update_fields=["weekly_quota_model"])
     varying = client.get("/api/participants", **headers).json()["data"][0]
 
-    assert constant["snapshot"]["allocation_model"] == "pooled_account_sum"
-    assert varying["snapshot"]["allocation_model"] == "pooled_account_sum"
+    assert constant["snapshot"]["allocation_model"] == "partitioned_pool_sum"
+    assert varying["snapshot"]["allocation_model"] == "partitioned_pool_sum"
     constant_account = constant["account_breakdowns"][0]["snapshot"]
     varying_account = varying["account_breakdowns"][0]["snapshot"]
     assert constant_account["allocation_model"] == "constant_average"

@@ -2,11 +2,12 @@
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import serializers
 
 from ..fast_correction.rules import normalize_fast_correction_rules
 from ..fast_correction.status import missing_current_cycle_intervals
-from ..models import AppSettings, MonitoredAccount, validate_service_url
+from ..models import AppSettings, MonitoredAccount, QuotaPool, validate_service_url
 from ..secrets import encrypt_secret
 
 
@@ -84,6 +85,7 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "external_account_id",
+            "pool_id",
             "name",
             "enabled",
             "quota_query_mode",
@@ -95,6 +97,7 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "id",
+            "pool_id",
             "last_local_check_at",
             "last_upstream_check_at",
             "last_success_at",
@@ -108,6 +111,19 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
         if self.instance is not None and value != self.instance.external_account_id:
             raise serializers.ValidationError("已有监控账号不能修改上游账号 ID")
         return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        pool = QuotaPool.for_new_account(validated_data["name"])
+        return MonitoredAccount.objects.create(pool=pool, **validated_data)
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        current = MonitoredAccount.objects.select_for_update().get(pk=instance.pk)
+        for field, value in validated_data.items():
+            setattr(current, field, value)
+        current.save()
+        return current
 
 
 class AppSettingsSerializer(serializers.ModelSerializer):
@@ -142,8 +158,8 @@ class AppSettingsSerializer(serializers.ModelSerializer):
     resend_api_key_configured = serializers.SerializerMethodField()
     fast_correction_rebuild_recommended = serializers.SerializerMethodField()
     fast_correction_missing_intervals = serializers.SerializerMethodField()
-
     readonly_api_key_configured = serializers.SerializerMethodField()
+
     class Meta:
         model = AppSettings
         fields = (

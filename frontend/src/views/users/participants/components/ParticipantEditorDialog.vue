@@ -27,7 +27,6 @@ const form = reactive<ParticipantFormData>({
   sub2api_user_id: 0,
   sub2api_username: "",
   sub2api_email: "",
-  share_percent: 0,
   is_owner: false,
   enabled: true,
   notes: "",
@@ -73,7 +72,6 @@ function open(participant: Participant | null) {
     sub2api_user_id: participant?.sub2api_user_id ?? 0,
     sub2api_username: participant?.sub2api_username ?? "",
     sub2api_email: participant?.sub2api_email ?? "",
-    share_percent: participant?.share_percent ?? 0,
     is_owner: participant?.is_owner ?? false,
     enabled: participant?.enabled ?? true,
     notes: participant?.notes ?? "",
@@ -163,36 +161,21 @@ defineExpose({ open, close });
         <section class="rounded-box border border-base-300 bg-base-200 p-4">
           <div class="flex items-start gap-3">
             <AppIcon name="scale" class="mt-0.5 size-5 shrink-0 opacity-60" />
-            <div>
-              <h3 class="font-semibold">全局混池合同</h3>
+            <div class="min-w-0 grow">
+              <h3 class="font-semibold">参与者身份</h3>
               <p class="mt-1 text-xs leading-relaxed opacity-60">
-                Sub2API
-                用户只有一个全局余额，因此所有启用上游账号统一按这一份合同权益结算。各账号只分别记录用量，不再单独配置参与关系或份额。
+                各额度池的百分比分配统一在“额度分配”页面维护。这里仅管理 Sub2API
+                用户身份和全局车主标记。
               </p>
+              <label class="label mt-3 w-fit gap-2">
+                <input
+                  v-model="form.is_owner"
+                  type="checkbox"
+                  class="toggle toggle-sm"
+                />
+                设为车主
+              </label>
             </div>
-          </div>
-          <div class="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <fieldset class="fieldset">
-              <label class="label">混池合同权益（%）</label>
-              <input
-                v-model.number="form.share_percent"
-                type="number"
-                min="0"
-                max="100"
-                step="0.001"
-                class="input w-full"
-                required
-              />
-              <p class="label">所有启用参与者的混池权益合计不能超过 100%。</p>
-            </fieldset>
-            <label class="label gap-2 self-center sm:mt-5">
-              <input
-                v-model="form.is_owner"
-                type="checkbox"
-                class="toggle toggle-sm"
-              />
-              车主
-            </label>
           </div>
         </section>
 

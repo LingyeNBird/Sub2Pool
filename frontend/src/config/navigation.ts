@@ -40,6 +40,12 @@ export const navigation: NavigationGroup[] = [
     permission: "participants",
   },
   {
+    label: "额度分配",
+    icon: "scale",
+    to: "/allocation",
+    permission: "participants",
+  },
+  {
     label: "系统用户",
     icon: "user-plus",
     to: "/system-users",

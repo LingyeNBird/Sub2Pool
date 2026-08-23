@@ -195,12 +195,18 @@ class ParticipantSnapshot(models.Model):
 
     observation = models.ForeignKey(Observation, on_delete=models.CASCADE, related_name="participant_snapshots")
     participant = models.ForeignKey(Participant, on_delete=models.CASCADE, related_name="snapshots")
+    # Identity at collection time; participant bindings may change later.
+    source_sub2api_user_id = models.BigIntegerField(null=True, blank=True)
     share_percent = models.DecimalField(
         max_digits=7,
         decimal_places=3,
         validators=PERCENT_VALIDATORS,
     )
     is_owner = models.BooleanField(default=False)
+    # 历史快照保存当时的池合同身份；池合并或拆分不得改写旧观测。
+    quota_pool_id = models.BigIntegerField(null=True, blank=True)
+    quota_pool_name = models.CharField(max_length=160, blank=True)
+    pool_contract_revision = models.PositiveBigIntegerField(null=True, blank=True)
     selected_cost = models.DecimalField(max_digits=18, decimal_places=6)
     # 来源累计成本可由请求日志重建；selected_cost 是归属区间内的派生累计值。
     raw_selected_cost = models.DecimalField(max_digits=18, decimal_places=6)
@@ -254,7 +260,7 @@ class ParticipantSnapshot(models.Model):
         max_digits=18, decimal_places=4, null=True, blank=True
     )
     needs_manual_update = models.BooleanField(default=False)
-    # 一键应用成功后只隐藏当前观测的建议；下一次观测会生成新的快照并重新参与展示。
+    # 仅记录该账号事实曾参与过应用；当前聚合是否已应用还必须匹配操作来源和份额。
     recommendation_applied = models.BooleanField(default=False)
     reason = models.CharField(max_length=255, blank=True)
 

@@ -2,7 +2,7 @@
 from decimal import Decimal
 
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 
 from ..fast_correction.rules import (
     default_fast_correction_rules,
@@ -17,6 +17,11 @@ class MonitoredAccount(models.Model):
     QUERY_MODE_CHOICES = (
         ("passive", "仅读取 Sub2API 被动快照"),
         ("direct", "调用上游账号额度接口"),
+    )
+    pool = models.ForeignKey(
+        "QuotaPool",
+        on_delete=models.PROTECT,
+        related_name="accounts",
     )
 
     external_account_id = models.BigIntegerField(unique=True)
@@ -40,10 +45,17 @@ class MonitoredAccount(models.Model):
         verbose_name = "监控上游账号"
         verbose_name_plural = "监控上游账号"
 
+    def save(self, *args, **kwargs):
+        if self.pool_id is not None:
+            return super().save(*args, **kwargs)
+        from .participants import QuotaPool
+
+        with transaction.atomic():
+            self.pool = QuotaPool.for_new_account(self.name)
+            return super().save(*args, **kwargs)
+
     def __str__(self) -> str:
         return f"{self.name} ({self.external_account_id})"
-
-
 
 
 class AppSettings(models.Model):

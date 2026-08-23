@@ -1,18 +1,136 @@
 """参与者资源 API。"""
+from decimal import Decimal
 
-from rest_framework import status
-from ..api_auth import ReadOnlyAPIKeyAuthentication
+from rest_framework import serializers, status
 
-from .base import AdminAPIView, PageAccessAPIView, error, ok
 from ..access import visible_participants_for
-from ..reporting import participant_data
+from ..api_auth import ReadOnlyAPIKeyAuthentication
 from ..history_state import fenced_fact_write
-from ..models import AppSettings, MonitoredAccount, PagePermission, Participant
-from ..serializers import ParticipantWriteSerializer
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
+from ..models import (
+    AppSettings,
+    MonitoredAccount,
+    PagePermission,
+    Participant,
+    QuotaPool,
+)
+from ..reporting import participant_data
+from ..serializers import (
+    MonitoredAccountSerializer,
+    ParticipantWriteSerializer,
+    QuotaAllocationWriteSerializer,
+)
+from .base import AdminAPIView, PageAccessAPIView, error, ok
+
 
 class _ParticipantHasSnapshots(RuntimeError):
     pass
+
+
+def quota_allocation_data(user) -> dict:
+    accounts = list(
+        MonitoredAccount.objects.select_related("pool").order_by(
+            "pool__name",
+            "pool_id",
+            "name",
+            "external_account_id",
+        )
+    )
+    pools = list(
+        QuotaPool.objects.prefetch_related(
+            "accounts",
+            "allocations__participant",
+        ).order_by("name", "id")
+    )
+    participants = list(
+        visible_participants_for(
+            user,
+            Participant.objects.order_by("-is_owner", "id"),
+        )
+    )
+    visible_participant_ids = {
+        participant.id for participant in participants
+    }
+    return {
+        "accounts": MonitoredAccountSerializer(accounts, many=True).data,
+        "participants": [
+            {
+                "id": participant.id,
+                "name": participant.name,
+                "sub2api_user_id": participant.sub2api_user_id,
+                "sub2api_username": participant.sub2api_username,
+                "sub2api_email": participant.sub2api_email,
+                "sub2api_identity": (
+                    participant.sub2api_username
+                    or participant.sub2api_email
+                    or f"账号 {participant.sub2api_user_id}"
+                ),
+                "is_owner": participant.is_owner,
+                "enabled": participant.enabled,
+            }
+            for participant in participants
+        ],
+        "pools": [
+            {
+                "id": pool.id,
+                "name": pool.name,
+                "contract_revision": pool.contract_revision,
+                "account_ids": [
+                    account.id
+                    for account in sorted(
+                        pool.accounts.all(),
+                        key=lambda item: (item.name, item.external_account_id),
+                    )
+                ],
+                "allocations": [
+                    {
+                        "participant_id": allocation.participant_id,
+                        "share_percent": float(allocation.share_percent),
+                    }
+                    for allocation in pool.allocations.all()
+                    if allocation.participant_id in visible_participant_ids
+                ],
+                "total_share_percent": float(
+                    sum(
+                        (
+                            allocation.share_percent
+                            for allocation in pool.allocations.all()
+                            if allocation.participant_id
+                            in visible_participant_ids
+                        ),
+                        Decimal("0"),
+                    )
+                ),
+            }
+            for pool in pools
+        ],
+    }
+
+
+class QuotaAllocationView(PageAccessAPIView):
+    required_page_permissions = (PagePermission.PARTICIPANTS,)
+
+    def get(self, request):
+        return ok(quota_allocation_data(request.user))
+
+    def put(self, request):
+        serializer = QuotaAllocationWriteSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error("分配方案校验失败", details=serializer.errors)
+        external_account_ids = list(
+            MonitoredAccount.objects.order_by("external_account_id").values_list(
+                "external_account_id",
+                flat=True,
+            )
+        )
+        settings_id = AppSettings.load().pk
+        try:
+            with fenced_fact_write(external_account_ids):
+                AppSettings.objects.select_for_update().get(pk=settings_id)
+                serializer.apply()
+        except serializers.ValidationError as exc:
+            return error("分配方案已过期", details=exc.detail)
+        return ok(quota_allocation_data(request.user))
 
 
 class Sub2APIUserListView(AdminAPIView):
@@ -55,7 +173,6 @@ class Sub2APIUserListView(AdminAPIView):
         return ok(users)
 
 
-
 class ParticipantListView(PageAccessAPIView):
     required_page_permissions = (PagePermission.PARTICIPANTS,)
 
@@ -83,6 +200,7 @@ class ReadOnlyParticipantListView(ParticipantListView):
 
     authentication_classes = [ReadOnlyAPIKeyAuthentication]
     http_method_names = ["get", "head", "options"]
+
 
 class ParticipantDetailView(AdminAPIView):
     def _get_participant(self, participant_id: int) -> Participant | None:
@@ -121,7 +239,14 @@ class ParticipantDetailView(AdminAPIView):
                 )
                 if participant.snapshots.exists():
                     raise _ParticipantHasSnapshots
+                pool_ids = list(
+                    participant.pool_allocations.order_by().values_list(
+                        "pool_id",
+                        flat=True,
+                    )
+                )
                 participant.delete()
+                QuotaPool.bump_contract_revisions(pool_ids)
         except _ParticipantHasSnapshots:
             return error(
                 "该参与者已有测算账本，不能删除；请改为停用",

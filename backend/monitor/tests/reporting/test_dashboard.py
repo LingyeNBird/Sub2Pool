@@ -290,7 +290,7 @@ def test_constant_average_model_changes_only_presented_attribution():
 
     constant = client.get("/api/participants", **headers).json()["data"][0]
 
-    assert constant["snapshot"]["allocation_model"] == "pooled_account_sum"
+    assert constant["snapshot"]["allocation_model"] == "partitioned_pool_sum"
     constant_snapshot = constant["account_breakdowns"][0]["snapshot"]
     assert constant_snapshot["allocation_model"] == "constant_average"
     assert constant_snapshot["charged_cycle_percent"] == 5.0
@@ -321,7 +321,7 @@ def test_constant_average_model_changes_only_presented_attribution():
         "/api/participants",
         **headers,
     ).json()["data"][0]
-    assert time_varying["snapshot"]["allocation_model"] == "pooled_account_sum"
+    assert time_varying["snapshot"]["allocation_model"] == "partitioned_pool_sum"
     time_varying_snapshot = time_varying["account_breakdowns"][0]["snapshot"]
     assert time_varying_snapshot["allocation_model"] == "time_varying"
     assert time_varying_snapshot["charged_cycle_percent"] == 12.0
@@ -443,7 +443,7 @@ def test_balance_rpc_blocks_concurrent_participant_policy_write(monkeypatch):
         def set_user_balance_from_recommendation(self, _user_id, balance):
             concurrent = Client().put(
                 f"/api/participants/{participant.id}",
-                data=json.dumps({"share_percent": "40"}),
+                data=json.dumps({"notes": "blocked"}),
                 content_type="application/json",
                 **headers,
             )
@@ -464,7 +464,7 @@ def test_balance_rpc_blocks_concurrent_participant_policy_write(monkeypatch):
     assert applied.status_code == 200, applied.json()
     participant.refresh_from_db()
     snapshot.refresh_from_db()
-    assert participant.share_percent == Decimal("50")
+    assert participant.notes == ""
     assert snapshot.recommendation_applied is True
 
 
@@ -624,7 +624,7 @@ def test_ambiguous_remote_failure_reconciles_before_idempotent_retry(monkeypatch
     assert operation.state == "reconciliation_required"
     blocked_write = client.put(
         f"/api/participants/{participant.id}",
-        data=json.dumps({"share_percent": "40"}),
+        data=json.dumps({"notes": "blocked"}),
         content_type="application/json",
         **headers,
     )

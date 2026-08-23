@@ -127,23 +127,24 @@ export const tutorialGroups: TutorialGroup[] = [
         group: "开始使用",
         title: "参与者与系统用户",
         summary:
-          "把一个全局 Sub2API 用户映射为参与者，并配置一份覆盖所有启用上游账号的混池合同权益。",
+          "把全局 Sub2API 用户映射为参与者，再按上游账号额度池维护彼此独立的合同权益。",
         icon: "user-group",
         sections: [
           {
-            title: "添加参与者",
+            title: "添加参与者并分配额度池",
             steps: [
               "进入参与者页面，添加车主和每一位车友。一个参与者只绑定一个全局 Sub2API 用户。",
               "从 Sub2API 用户列表选择对应用户，不要手工猜测用户 ID。",
-              "填写参与者唯一的混池合同权益比例与车主角色。所有启用参与者的权益合计不得超过 100%。",
-              "启用的参与者会自动参与全部启用上游账号；停用参与者才会停止其整体测算。",
+              "进入“额度分配”页面：左键选择两个或更多来源账号，右键选择“合并为混池”；单账号本身就是独立池。",
+              "在每个池的参与者列填写合同百分比。每个池独立校验，份额合计不得超过 100%。",
             ],
           },
           {
-            title: "权益比例怎么填",
+            title: "池内权益比例怎么填",
             paragraphs: [
-              "权益填写双方约定的完整混池周期份额，而不是添加参与者时的剩余份额。例如车主已经使用 10%，双方仍约定各占 50%，就分别填写 50%。",
-              "各账号独立归属用量，但权益债权先跨账号相加、再统一截断为零并换算成一个 Sub2API 全局余额。某个账号超用会抵扣其他账号尚未使用的权益，不会重复生成余额。",
+              "每个额度池填写双方约定的完整周期份额，而不是配置时的剩余份额。例如双方在某个池约定各占 50%，即使车主已经使用 10%，仍分别填写 50%。",
+              "同一混池内的多个来源账号共用一份合同；不同池可以采用不同参与者和比例。系统按账号独立归属用量，再把该参与者在所有已分配池中的剩余权益合计成一个 Sub2API 全局余额建议。",
+              "合并来源时，只有原合同完全一致才会继承比例；合同不同会清空新池份额，避免自动求和、平均或猜测。保存合同后，系统会按账号与 Sub2API 用户复用已有观测，并用当前池分组和份额立即重算建议。",
             ],
             notes: [
               {
@@ -161,7 +162,7 @@ export const tutorialGroups: TutorialGroup[] = [
             ],
           },
         ],
-        action: { label: "管理参与者", to: "/participants" },
+        action: { label: "配置额度分配", to: "/allocation" },
       },
       {
         id: "first-measurement",
@@ -646,10 +647,10 @@ curl --get \\
               "每个数组项的 id 是 Sub2Pool 参与者 ID；sub2api_user_id 是绑定的 Sub2API 用户 ID。sub2api_identity 按“用户名、邮箱、账号 ID”的顺序选择可读标识。",
             ],
             bullets: [
-              "全局身份：id、name、email、notes、enabled，以及唯一的 Sub2API 用户映射字段。",
-              "混池合同：share_percent、is_owner；同一份合同覆盖全部启用监控账号。",
-              "account_breakdowns：各监控账号的元数据、账号成本缓存和局部测算 snapshot，不包含独立合同配置。",
-              "最近全局余额：latest_balance_usd、last_checked_at；snapshot 是跨账号净额化后的混池建议、完整性、调整状态和 sources 明细。",
+              "全局身份：id、name、email、notes、enabled、is_owner，以及唯一的 Sub2API 用户映射字段。",
+              "pool_allocations：参与者在各额度池中的 share_percent、池名称和 account_ids；不存在覆盖全部账号的全局份额。",
+              "account_breakdowns：各监控账号所属 pool_id、池内合同份额、账号成本缓存和局部测算 snapshot。",
+              "最近全局余额：latest_balance_usd、last_checked_at；snapshot 按池分区汇总余额建议、完整性、调整状态和 sources 明细。",
             ],
             codeBlocks: [
               {
@@ -663,7 +664,14 @@ curl --get \\
       "name": "车友",
       "sub2api_user_id": 22001,
       "sub2api_identity": "rider@example.com",
-      "share_percent": 40.0,
+      "pool_allocations": [
+        {
+          "pool_id": 7,
+          "pool_name": "默认混池",
+          "share_percent": 40.0,
+          "account_ids": [3]
+        }
+      ],
       "is_owner": false,
       "enabled": true,
       "latest_balance_usd": 320.0,
@@ -673,6 +681,10 @@ curl --get \\
           "external_account_id": 8801,
           "account_name": "主账号",
           "account_enabled": true,
+          "pool_id": 7,
+          "pool_name": "默认混池",
+          "contract_share_percent": 40.0,
+          "allocated": true,
           "latest_selected_cost": 480.0,
           "snapshot": {
             "charged_cycle_percent": 24.0,
@@ -681,10 +693,18 @@ curl --get \\
         }
       ],
       "snapshot": {
-        "allocation_model": "pooled_account_sum",
-        "share_percent": 40.0,
+        "allocation_model": "partitioned_pool_sum",
+        "pool_allocations": [
+          {
+            "pool_id": 7,
+            "pool_name": "默认混池",
+            "share_percent": 40.0,
+            "account_ids": [3]
+          }
+        ],
         "recommendation_complete": true,
         "account_count": 1,
+        "pool_count": 1,
         "recommended_balance_usd": 315.2,
         "sources": []
       }

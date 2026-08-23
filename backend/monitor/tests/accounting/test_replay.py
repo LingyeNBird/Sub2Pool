@@ -135,7 +135,7 @@ def test_integer_percent_plateau_uses_cumulative_cost_for_capacity(monkeypatch):
         <= snapshot.charged_percent_upper
     )
     assert snapshot.remaining_share_percent == (
-        owner.share_percent - snapshot.charged_cycle_percent
+        snapshot.share_percent - snapshot.charged_cycle_percent
     )
 
 @pytest.mark.django_db
@@ -425,7 +425,7 @@ def test_midcycle_initialization_assigns_existing_ten_percent_to_owner(
         <= owner_snapshot.charged_percent_upper
     )
     assert owner_snapshot.remaining_share_percent == (
-        owner.share_percent - owner_snapshot.charged_cycle_percent
+        owner_snapshot.share_percent - owner_snapshot.charged_cycle_percent
     )
     assert rider_snapshot.charged_cycle_percent == Decimal("0")
     assert rider_snapshot.remaining_share_percent == Decimal("50")
@@ -519,7 +519,6 @@ def test_unmapped_user_usage_is_saved_without_retroactive_participant_history(
                 "sub2api_user_id": 2,
                 "sub2api_username": "rider",
                 "sub2api_email": "rider@example.com",
-                "share_percent": 40,
                 "enabled": True,
             }
         ),
@@ -594,8 +593,11 @@ def test_adding_participant_midcycle_replays_the_complete_segment(monkeypatch):
     first_observation.sample_note = "必须由完整区间重放覆盖"
     first_observation.save(update_fields=["sample_note"])
 
-    owner.share_percent = Decimal("60")
-    owner.save(update_fields=["share_percent"])
+    owner_allocation = owner.pool_allocations.get()
+    owner_allocation.share_percent = Decimal("60")
+    owner_allocation.save(update_fields=["share_percent"])
+    owner_allocation.pool.contract_revision += 1
+    owner_allocation.pool.save(update_fields=["contract_revision", "updated_at"])
     rider = create_participant(name="车友",
     sub2api_user_id=2,
     share_percent=40,)

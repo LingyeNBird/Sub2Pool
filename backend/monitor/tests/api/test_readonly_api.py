@@ -16,6 +16,7 @@ from monitor.models import (
     NotificationEvent,
     Participant,
     ParticipantAPIUsageSnapshot,
+    PoolParticipant,
 )
 from monitor.tests.helpers import jwt_login
 
@@ -39,6 +40,10 @@ def test_readonly_api_key_lifecycle_and_scope():
         name="车友",
         sub2api_user_id=22,
         sub2api_email="rider@example.com",
+    )
+    PoolParticipant.objects.create(
+        pool=account.pool,
+        participant=participant,
         share_percent=Decimal("40"),
     )
     AccountParticipant.objects.create(
@@ -156,7 +161,7 @@ def test_readonly_api_key_lifecycle_and_scope():
     assert openapi_response.status_code == 200
     openapi = openapi_response.json()
     assert openapi["openapi"] == "3.1.0"
-    assert openapi["info"]["version"] == "1.2.0"
+    assert openapi["info"]["version"] == "1.3.0"
     assert openapi["servers"] == [{"url": "/api"}]
     assert set(openapi["paths"]) == {
         "/v1",
@@ -184,12 +189,21 @@ def test_readonly_api_key_lifecycle_and_scope():
     assert schemas["Participant"]["properties"]["account_breakdowns"]["items"][
         "$ref"
     ].endswith("/AccountBreakdown")
+    assert schemas["Participant"]["properties"]["pool_allocations"]["items"][
+        "$ref"
+    ].endswith("/ParticipantPoolAllocation")
     assert schemas["AggregateRecommendation"]["properties"]["allocation_model"][
         "const"
-    ] == "pooled_account_sum"
+    ] == "partitioned_pool_sum"
     assert schemas["ParticipantSnapshot"]["properties"]["allocation_model"][
         "enum"
     ] == ["time_varying", "constant_average"]
+    assert {
+        "pool_id",
+        "pool_name",
+        "pool_contract_revision",
+        "contract_share_percent",
+    }.issubset(schemas["AggregateRecommendationSource"]["properties"])
     assert schemas["ObservationList"]["properties"]["items"]["items"][
         "$ref"
     ].endswith("/Observation")

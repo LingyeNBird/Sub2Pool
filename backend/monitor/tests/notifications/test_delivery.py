@@ -27,6 +27,8 @@ from monitor.models import (
     ObservationFastCorrection,
     Participant,
     ParticipantSnapshot,
+    PoolParticipant,
+    QuotaPool,
     ParticipantUsageSample,
     Sub2APIUserUsageSample,
 )
@@ -185,20 +187,27 @@ def test_exhausted_balance_emails_multi_account_aggregate_notice(
     config.notify_on_limit_exhausted = True
     config.limit_warning_usd = Decimal("1")
     config.save()
+    pool = QuotaPool.objects.create(name="主备用混池")
     primary_account = MonitoredAccount.objects.create(
         external_account_id=7,
         name="主账号",
+        pool=pool,
     )
     secondary_account = MonitoredAccount.objects.create(
         external_account_id=8,
         name="备用账号",
+        pool=pool,
     )
     participant = Participant.objects.create(
         name="待补额车友",
         email="rider@example.com",
         sub2api_user_id=51,
-        share_percent=Decimal("50"),
         latest_balance_usd=Decimal("0"),
+    )
+    PoolParticipant.objects.create(
+        pool=pool,
+        participant=participant,
+        share_percent=Decimal("50"),
     )
     for account in (primary_account, secondary_account):
         AccountParticipant.objects.create(
@@ -225,7 +234,11 @@ def test_exhausted_balance_emails_multi_account_aggregate_notice(
         ParticipantSnapshot.objects.create(
             observation=observation,
             participant=participant,
+            source_sub2api_user_id=participant.sub2api_user_id,
             share_percent=Decimal("50"),
+            quota_pool_id=account.pool_id,
+            quota_pool_name=account.pool.name,
+            pool_contract_revision=account.pool.contract_revision,
             raw_selected_cost=Decimal("200"),
             selected_cost=Decimal("200"),
             current_balance_usd=Decimal("0"),

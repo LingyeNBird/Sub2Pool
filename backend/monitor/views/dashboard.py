@@ -346,10 +346,8 @@ def _prepare_balance_operation(
         snapshot_by_account = {
             snapshot.observation.account_id: snapshot for snapshot in snapshots
         }
-        contribution_by_account = {
-            int(source["external_account_id"]): Decimal(
-                str(source["contribution_usd"])
-            )
+        source_by_account = {
+            int(source["external_account_id"]): source
             for source in aggregate["sources"]
             if source["contribution_usd"] is not None
         }
@@ -369,7 +367,16 @@ def _prepare_balance_operation(
                     account_external_id=account_id,
                     base_revision=states[account_id].fact_revision,
                     snapshot=snapshot_by_account[account_id],
-                    contribution_usd=contribution_by_account[account_id],
+                    contribution_usd=Decimal(
+                        str(source_by_account[account_id]["contribution_usd"])
+                    ),
+                    share_percent=Decimal(
+                        str(
+                            source_by_account[account_id][
+                                "contract_share_percent"
+                            ]
+                        )
+                    ),
                 )
                 for account_id in sorted(expected_accounts)
             ]
@@ -525,10 +532,14 @@ class ApplyParticipantRecommendationView(AdminAPIView):
             .first()
         )
         account_ids = set(
-            MonitoredAccount.objects.filter(enabled=True).values_list(
-                "external_account_id",
-                flat=True,
+            MonitoredAccount.objects.filter(
+                enabled=True,
+                pool__allocations__participant=participant,
+                pool__allocations__share_percent__gt=0,
             )
+            .order_by()
+            .values_list("external_account_id", flat=True)
+            .distinct()
         )
         if pending is not None:
             account_ids.update(

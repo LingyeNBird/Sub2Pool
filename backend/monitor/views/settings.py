@@ -3,12 +3,11 @@ from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
-from ..api_auth import ReadOnlyAPIKeyAuthentication, generate_readonly_api_key
-
 from rest_framework.serializers import ValidationError
-from .base import AdminAPIView, PageAccessAPIView, error, ok
-from ..integrations.sub2api import Sub2APIClient, Sub2APIError
+
+from ..api_auth import ReadOnlyAPIKeyAuthentication, generate_readonly_api_key
 from ..history_state import LeaseLostError, fenced_fact_write
+from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 from ..models import (
     AccountParticipant,
     AppSettings,
@@ -16,6 +15,7 @@ from ..models import (
     Observation,
     PagePermission,
     Participant,
+    QuotaPool,
 )
 from ..notifications import send_notification
 from ..replay import rebuild_account
@@ -24,6 +24,7 @@ from ..serializers import (
     MonitoredAccountSerializer,
     Sub2APIConnectionSerializer,
 )
+from .base import AdminAPIView, PageAccessAPIView, error, ok
 
 DERIVED_RESULT_SETTINGS = frozenset(
     {
@@ -46,6 +47,11 @@ PLAN_RELEVANT_SETTINGS = frozenset(
         "daily_estimate_min_percent_span",
     }
 )
+
+
+class _MonitoredAccountHasObservations(RuntimeError):
+    pass
+
 
 def _temporary_sub2api_client(
     config: AppSettings,
@@ -204,7 +210,9 @@ class MonitoredAccountListView(PageAccessAPIView):
         if not serializer.is_valid():
             return error("监控账号校验失败", details=serializer.errors)
         external_account_id = serializer.validated_data["external_account_id"]
+        settings_id = AppSettings.load().pk
         with fenced_fact_write([external_account_id]):
+            AppSettings.objects.select_for_update().get(pk=settings_id)
             account = serializer.save()
             AccountParticipant.objects.bulk_create(
                 [
@@ -235,7 +243,13 @@ class MonitoredAccountDetailView(AdminAPIView):
         )
         if not serializer.is_valid():
             return error("监控账号校验失败", details=serializer.errors)
-        with fenced_fact_write([account.external_account_id]):
+        affected_account_ids = list(
+            MonitoredAccount.objects.order_by().values_list(
+                "external_account_id",
+                flat=True,
+            )
+        )
+        with fenced_fact_write(affected_account_ids):
             account = serializer.save()
         return ok(MonitoredAccountSerializer(account).data)
 
@@ -244,13 +258,31 @@ class MonitoredAccountDetailView(AdminAPIView):
             account = MonitoredAccount.objects.get(pk=account_id)
         except MonitoredAccount.DoesNotExist:
             return error("监控账号不存在", 404)
-        if Observation.objects.filter(
-            account_id=account.external_account_id
-        ).exists():
+        affected_account_ids = list(
+            MonitoredAccount.objects.order_by().values_list(
+                "external_account_id",
+                flat=True,
+            )
+        )
+        try:
+            with fenced_fact_write(affected_account_ids):
+                account = MonitoredAccount.objects.select_for_update().get(
+                    pk=account_id
+                )
+                if Observation.objects.filter(
+                    account_id=account.external_account_id
+                ).exists():
+                    raise _MonitoredAccountHasObservations
+                pool_id = account.pool_id
+                account.delete()
+                if MonitoredAccount.objects.filter(pool_id=pool_id).exists():
+                    QuotaPool.bump_contract_revisions([pool_id])
+                else:
+                    QuotaPool.objects.filter(pk=pool_id).delete()
+        except _MonitoredAccountHasObservations:
             return error("该账号已有历史事实，不能删除；请改为停用", 409)
-        with fenced_fact_write([account.external_account_id]):
-            account.delete()
         return ok({"deleted": True})
+
 
 class TestEmailView(AdminAPIView):
     def post(self, _request):

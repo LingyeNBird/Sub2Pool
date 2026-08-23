@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { Participant } from "@/types";
 import {
+  formatCompactPercent,
   formatCurrency,
   formatCurrencyRange,
-  formatPercent,
 } from "@/utils/formatters";
 
 const props = defineProps<{ participants: Participant[] }>();
@@ -20,7 +20,7 @@ defineEmits<{
       <thead>
         <tr>
           <th>参与者</th>
-          <th>混池权益</th>
+          <th>池合同</th>
           <th>账号用量合计</th>
           <th>全局余额</th>
           <th>聚合建议</th>
@@ -39,9 +39,22 @@ defineEmits<{
             </div>
           </td>
           <td>
-            <div class="flex flex-wrap items-center gap-1">
-              <span class="font-semibold tabular-nums">
-                {{ formatPercent(participant.share_percent) }}
+            <div class="flex max-w-64 flex-wrap items-center gap-1">
+              <span
+                v-for="allocation in participant.pool_allocations"
+                :key="allocation.pool_id"
+                class="badge gap-1 badge-outline badge-sm"
+              >
+                {{ allocation.pool_name }}
+                <strong>{{
+                  formatCompactPercent(allocation.share_percent)
+                }}</strong>
+              </span>
+              <span
+                v-if="!participant.pool_allocations.length"
+                class="text-sm opacity-50"
+              >
+                尚未分配
               </span>
               <span
                 class="badge badge-xs"

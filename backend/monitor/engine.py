@@ -19,7 +19,7 @@ from .models import (
     AppSettings,
     HistoryMaintenanceState,
     MonitoredAccount,
-    Participant,
+    PoolParticipant,
 )
 from .notifications import notify_collection_error
 from .replay import RESET_ROLLBACK_TOLERANCE, rebuild_observation_suffix
@@ -115,13 +115,23 @@ def _run_monitor_locked(
 ) -> dict:
     if not config.monitoring_enabled and not force_upstream:
         return {"status": "disabled", "message": "监控已停用"}
-    participants = list(
-        Participant.objects.filter(enabled=True).order_by("-is_owner", "id")
+    allocations = list(
+        PoolParticipant.objects.select_related("participant", "pool")
+        .filter(
+            pool_id=account.pool_id,
+            participant__enabled=True,
+            share_percent__gt=ZERO,
+        )
+        .order_by("-participant__is_owner", "participant_id")
     )
-    if not participants:
-        raise Sub2APIError("混池尚未添加启用的拼车参与者")
-    if sum((item.share_percent for item in participants), ZERO) > Decimal(100):
-        raise Sub2APIError("启用参与者的混池权益比例合计不能超过 100%")
+    if not allocations:
+        raise Sub2APIError("该额度池尚未分配给任何启用的拼车参与者")
+    if sum((item.share_percent for item in allocations), ZERO) > Decimal(100):
+        raise Sub2APIError("该额度池的启用参与者权益比例合计不能超过 100%")
+    participants = [allocation.participant for allocation in allocations]
+    allocations_by_participant_id = {
+        allocation.participant_id: allocation for allocation in allocations
+    }
     existing_participant_ids = set(
         AccountParticipant.objects.filter(account=account).values_list(
             "participant_id",
@@ -162,7 +172,14 @@ def _run_monitor_locked(
                 account.quota_query_mode,
             )
             reference = _window_reference(account_id, window)
-            local = _fetch_local(client, config, reference, memberships, now)
+            local = _fetch_local(
+                client,
+                config,
+                reference,
+                memberships,
+                allocations_by_participant_id,
+                now,
+            )
             interval_logs = _fetch_interval_bridge_logs(
                 client,
                 config,
@@ -221,6 +238,7 @@ def _run_monitor_locked(
             config,
             current_reference,
             memberships,
+            allocations_by_participant_id,
             now,
         )
         trigger = evaluate_sampling_trigger(
@@ -285,6 +303,7 @@ def _run_monitor_locked(
                 config,
                 reference,
                 memberships,
+                allocations_by_participant_id,
                 now,
             )
 

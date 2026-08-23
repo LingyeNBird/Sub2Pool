@@ -49,6 +49,7 @@ function addSelectedAccount() {
     "saveAccount",
     {
       id: 0,
+      pool_id: 0,
       external_account_id: option.id,
       name: option.name || `OpenAI 账号 ${option.id}`,
       enabled: true,

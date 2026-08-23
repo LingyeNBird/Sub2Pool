@@ -91,12 +91,16 @@ def create_raw_observation(
             ParticipantSnapshot(
                 observation=observation,
                 participant=row.participant,
-                share_percent=row.participant.share_percent,
+                source_sub2api_user_id=row.participant.sub2api_user_id,
+                share_percent=row.contract.share_percent,
                 is_owner=row.participant.is_owner,
+                quota_pool_id=row.contract.pool_id,
+                quota_pool_name=row.contract.pool.name,
+                pool_contract_revision=row.contract.pool.contract_revision,
                 raw_selected_cost=row.selected_cost(config.cost_basis),
                 selected_cost=row.selected_cost(config.cost_basis),
                 current_balance_usd=row.balance.balance,
-                remaining_share_percent=row.participant.share_percent,
+                remaining_share_percent=row.contract.share_percent,
             )
             for row in local.participants
         ]

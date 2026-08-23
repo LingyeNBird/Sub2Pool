@@ -287,6 +287,7 @@ def test_database_import_rejects_pending_balance_backup_without_live_writes(
         account_external_id=7,
         base_revision=5,
         snapshot=snapshot,
+        share_percent=snapshot.share_percent,
         contribution_usd=Decimal("123.45"),
     )
     live_path = tmp_path / "pinche.sqlite3"
@@ -370,6 +371,7 @@ def test_database_import_accepts_committed_balance_backup(
         account_external_id=7,
         base_revision=5,
         snapshot=snapshot,
+        share_percent=snapshot.share_percent,
         contribution_usd=Decimal("123.45"),
     )
     live_path = tmp_path / "pinche.sqlite3"

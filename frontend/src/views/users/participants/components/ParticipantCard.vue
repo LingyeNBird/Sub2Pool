@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref } from "vue";
 
 import { useDateTime } from "@/composables/useDateTime";
 import type { AccountBreakdown, Participant } from "@/types";
@@ -7,7 +7,6 @@ import {
   formatCompactPercent,
   formatCurrency,
   formatCurrencyRange,
-  formatPercent,
 } from "@/utils/formatters";
 
 const props = defineProps<{
@@ -21,20 +20,6 @@ const emit = defineEmits<{
 
 const dateTime = useDateTime();
 const pressed = ref(false);
-const chargedShare = computed(
-  () => props.participant.snapshot?.charged_cycle_percent ?? 0,
-);
-const remainingShare = computed(() =>
-  Math.max(0, props.participant.share_percent - chargedShare.value),
-);
-const allocationTotal = computed(
-  () => Math.max(chargedShare.value, 0) + remainingShare.value,
-);
-
-function allocationSegmentWidth(value: number) {
-  if (allocationTotal.value <= 0) return 0;
-  return (Math.max(value, 0) / allocationTotal.value) * 100;
-}
 
 function sourceFor(breakdown: AccountBreakdown) {
   return props.participant.snapshot?.sources.find(
@@ -86,7 +71,7 @@ function edit() {
                 {{ participant.is_owner ? "车主" : "车友" }}
               </span>
               <span class="badge badge-outline badge-sm">
-                {{ participant.account_breakdowns.length }} 个账号
+                {{ participant.snapshot?.account_count ?? 0 }} 个已分配账号
               </span>
             </div>
             <p class="mt-1 min-w-0 text-sm opacity-60">
@@ -150,54 +135,36 @@ function edit() {
         <section class="rounded-box border border-base-300 bg-base-100 p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div class="text-xs opacity-60">全局混池合同权益</div>
-              <div class="mt-1 font-semibold tabular-nums">
-                {{ formatPercent(participant.share_percent) }}
+              <div class="text-xs opacity-60">池合同</div>
+              <div class="mt-1 font-semibold">
+                {{ participant.pool_allocations.length }} 个额度池
               </div>
             </div>
-            <div class="text-right text-xs opacity-60">
-              已归属 {{ formatCompactPercent(chargedShare) }} · 剩余
-              {{ formatCompactPercent(remainingShare) }}
-            </div>
+            <RouterLink
+              v-if="editable"
+              to="/allocation"
+              class="link text-xs link-primary"
+              @click.stop
+            >
+              前往分配
+            </RouterLink>
           </div>
           <div
-            class="relative mt-3 flex h-7 min-w-0 overflow-hidden rounded-box bg-base-300 text-xs font-semibold tabular-nums"
-            role="img"
-            :aria-label="`全局混池合同：已归属 ${formatPercent(chargedShare)}，剩余 ${formatPercent(remainingShare)}`"
+            v-if="participant.pool_allocations.length"
+            class="mt-3 flex flex-wrap gap-2"
           >
-            <div class="flex h-full w-full" aria-hidden="true">
-              <div
-                v-if="chargedShare > 0"
-                class="h-full shrink-0 bg-warning"
-                :style="{ width: `${allocationSegmentWidth(chargedShare)}%` }"
-              ></div>
-              <div
-                v-if="remainingShare > 0"
-                class="h-full shrink-0 bg-primary"
-                :style="{ width: `${allocationSegmentWidth(remainingShare)}%` }"
-              ></div>
-            </div>
             <span
-              v-if="chargedShare > 0"
-              class="pointer-events-none absolute inset-y-0 left-0 z-10 flex max-w-full min-w-fit items-center justify-center px-1 text-[10px] whitespace-nowrap text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.8)] sm:text-xs"
-              :style="{ width: `${allocationSegmentWidth(chargedShare)}%` }"
+              v-for="allocation in participant.pool_allocations"
+              :key="allocation.pool_id"
+              class="badge gap-1 badge-outline"
             >
-              已归属 {{ formatCompactPercent(chargedShare) }}
+              {{ allocation.pool_name }}
+              <strong>{{
+                formatCompactPercent(allocation.share_percent)
+              }}</strong>
             </span>
-            <span
-              v-if="remainingShare > 0"
-              class="pointer-events-none absolute inset-y-0 right-0 z-10 flex max-w-full min-w-fit items-center justify-center px-1 text-[10px] whitespace-nowrap text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.8)] sm:text-xs"
-              :style="{ width: `${allocationSegmentWidth(remainingShare)}%` }"
-            >
-              剩余 {{ formatCompactPercent(remainingShare) }}
-            </span>
-            <div
-              v-if="chargedShare <= 0 && remainingShare <= 0"
-              class="absolute inset-0 flex items-center justify-center opacity-60"
-            >
-              暂无可分配权益
-            </div>
           </div>
+          <p v-else class="mt-3 text-sm opacity-60">尚未分配到任何额度池</p>
         </section>
 
         <div class="space-y-2">

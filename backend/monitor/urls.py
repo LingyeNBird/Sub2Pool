@@ -25,6 +25,7 @@ from .views.monitoring import RunMonitorView
 from .views.participants import (
     ParticipantDetailView,
     ParticipantListView,
+    QuotaAllocationView,
     ReadOnlyParticipantListView,
     Sub2APIUserListView,
 )
@@ -124,6 +125,7 @@ urlpatterns = [
     path("participants/sub2api-users", Sub2APIUserListView.as_view()),
     path("participants", ParticipantListView.as_view()),
     path("participants/<int:participant_id>", ParticipantDetailView.as_view()),
+    path("quota-allocation", QuotaAllocationView.as_view()),
     path("system-users", SystemUserListView.as_view()),
     path("system-users/<int:user_id>", SystemUserDetailView.as_view()),
     path(

@@ -26,6 +26,12 @@ export const appRoutes: RouteRecordRaw[] = [
     meta: pageMeta("参与者", "participants"),
   },
   {
+    path: "allocation",
+    name: "allocation",
+    component: () => import("@/views/users/allocation/AllocationView.vue"),
+    meta: pageMeta("额度分配", "participants"),
+  },
+  {
     path: "system-users",
     name: "system-users",
     component: () => import("@/views/users/system-users/SystemUsersView.vue"),

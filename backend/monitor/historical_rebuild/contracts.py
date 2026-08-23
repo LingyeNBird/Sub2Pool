@@ -20,6 +20,7 @@ from ..models import (
     ObservationFastCorrection,
     ParticipantBalanceSample,
     ParticipantSnapshot,
+    PoolParticipant,
     ParticipantUsageSample,
     Sub2APIUserUsageSample,
     UsageSamplePoint,
@@ -64,17 +65,23 @@ def config_digest(
     return canonical_digest(values)
 
 
-def participant_policy_digest(_account: MonitoredAccount) -> str:
-    return canonical_rows_digest(
-        Participant.objects.order_by("id")
-        .values(
-            "id",
-            "sub2api_user_id",
-            "enabled",
-            "share_percent",
-            "is_owner",
-        )
-        .iterator(chunk_size=512)
+def participant_policy_digest(account: MonitoredAccount) -> str:
+    return canonical_digest(
+        {
+            "pool_id": account.pool_id,
+            "pool_contract_revision": account.pool.contract_revision,
+            "allocations": list(
+                PoolParticipant.objects.filter(pool_id=account.pool_id)
+                .order_by("participant_id")
+                .values(
+                    "participant_id",
+                    "participant__sub2api_user_id",
+                    "participant__enabled",
+                    "participant__is_owner",
+                    "share_percent",
+                )
+            ),
+        }
     )
 
 

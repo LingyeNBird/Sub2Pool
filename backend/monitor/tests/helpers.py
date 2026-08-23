@@ -11,6 +11,8 @@ from monitor.models import (
     Observation,
     Participant,
     ParticipantSnapshot,
+    PoolParticipant,
+    QuotaPool,
 )
 
 
@@ -42,15 +44,31 @@ def create_monitored_account(
     name: str | None = None,
     quota_query_mode: str = "passive",
     enabled: bool = True,
+    pool: QuotaPool | None = None,
 ) -> MonitoredAccount:
-    account, _created = MonitoredAccount.objects.update_or_create(
-        external_account_id=external_account_id,
-        defaults={
-            "name": name or f"OpenAI 账号 {external_account_id}",
-            "quota_query_mode": quota_query_mode,
-            "enabled": enabled,
-        },
-    )
+    account = MonitoredAccount.objects.filter(
+        external_account_id=external_account_id
+    ).first()
+    values = {
+        "name": name or f"OpenAI 账号 {external_account_id}",
+        "quota_query_mode": quota_query_mode,
+        "enabled": enabled,
+    }
+    if account is None:
+        account = MonitoredAccount.objects.create(
+            external_account_id=external_account_id,
+            pool=pool
+            or QuotaPool.objects.create(
+                name=f"{values['name']} 独立池",
+            ),
+            **values,
+        )
+    else:
+        for field, value in values.items():
+            setattr(account, field, value)
+        if pool is not None:
+            account.pool = pool
+        account.save()
     return account
 
 
@@ -63,11 +81,6 @@ def create_participant(
     **participant_fields,
 ) -> Participant:
     participant = Participant.objects.create(
-        share_percent=(
-            Decimal(str(share_percent))
-            if share_percent is not None
-            else Decimal("0")
-        ),
         is_owner=is_owner,
         **participant_fields,
     )
@@ -76,6 +89,17 @@ def create_participant(
         AccountParticipant.objects.get_or_create(
             account=membership_account,
             participant=participant,
+        )
+        PoolParticipant.objects.update_or_create(
+            pool=membership_account.pool,
+            participant=participant,
+            defaults={
+                "share_percent": (
+                    Decimal(str(share_percent))
+                    if share_percent is not None
+                    else Decimal("0")
+                )
+            },
         )
     return participant
 
@@ -98,7 +122,7 @@ def participant_snapshot(
     **snapshot_fields,
 ) -> ParticipantSnapshot:
     membership = (
-        AccountParticipant.objects.select_related("account")
+        AccountParticipant.objects.select_related("account__pool")
         .filter(
             account__external_account_id=observation.account_id,
             participant=participant,
@@ -107,8 +131,14 @@ def participant_snapshot(
     )
     if membership is None:
         raise AssertionError("snapshot fixture requires an account usage row")
+    allocation = PoolParticipant.objects.filter(
+        pool=membership.account.pool,
+        participant=participant,
+    ).first()
     if share_percent is None:
-        share_percent = participant.share_percent
+        if allocation is None:
+            raise AssertionError("snapshot fixture requires a pool allocation")
+        share_percent = allocation.share_percent
     if is_owner is None:
         is_owner = participant.is_owner
     recommended = snapshot_fields.get("recommended_balance_usd")
@@ -118,8 +148,12 @@ def participant_snapshot(
     return ParticipantSnapshot(
         observation=observation,
         participant=participant,
+        source_sub2api_user_id=participant.sub2api_user_id,
         share_percent=Decimal(str(share_percent)),
         is_owner=is_owner,
+        quota_pool_id=membership.account.pool_id,
+        quota_pool_name=membership.account.pool.name,
+        pool_contract_revision=membership.account.pool.contract_revision,
         **snapshot_fields,
     )
 
@@ -157,10 +191,14 @@ def create_recommendation_snapshot(
     if participant.latest_balance_usd is None:
         participant.latest_balance_usd = Decimal("80")
         participant.save(update_fields=["latest_balance_usd", "updated_at"])
+    allocation = PoolParticipant.objects.get(
+        pool=account.pool,
+        participant=participant,
+    )
     return create_participant_snapshot(
         observation=observation,
         participant=participant,
-        share_percent=participant.share_percent,
+        share_percent=allocation.share_percent,
         is_owner=participant.is_owner,
         raw_selected_cost=Decimal("200"),
         selected_cost=Decimal("200"),

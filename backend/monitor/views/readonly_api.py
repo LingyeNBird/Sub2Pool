@@ -159,7 +159,7 @@ def _openapi_document() -> dict:
         "openapi": "3.1.0",
         "info": {
             "title": "Sub2Pool Read-only API",
-            "version": "1.2.0",
+            "version": "1.3.0",
             "description": (
                 "使用永久只读 API Key 获取账号、额度、参与者、观测、模型和通知数据。"
                 "所有端点只允许 GET、HEAD 和 OPTIONS。"
@@ -982,6 +982,24 @@ def _openapi_document() -> dict:
                         },
                     },
                 },
+                "ParticipantPoolAllocation": {
+                    "type": "object",
+                    "required": [
+                        "pool_id",
+                        "pool_name",
+                        "share_percent",
+                        "account_ids",
+                    ],
+                    "properties": {
+                        "pool_id": {"type": "integer"},
+                        "pool_name": {"type": "string"},
+                        "share_percent": {"type": "number"},
+                        "account_ids": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                        },
+                    },
+                },
                 "Participant": {
                     "type": "object",
                     "required": [
@@ -992,7 +1010,7 @@ def _openapi_document() -> dict:
                         "sub2api_username",
                         "sub2api_email",
                         "sub2api_identity",
-                        "share_percent",
+                        "pool_allocations",
                         "is_owner",
                         "enabled",
                         "notes",
@@ -1009,7 +1027,12 @@ def _openapi_document() -> dict:
                         "sub2api_username": {"type": "string"},
                         "sub2api_email": {"type": "string"},
                         "sub2api_identity": {"type": "string"},
-                        "share_percent": {"type": "number"},
+                        "pool_allocations": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/components/schemas/ParticipantPoolAllocation"
+                            },
+                        },
                         "is_owner": {"type": "boolean"},
                         "enabled": {"type": "boolean"},
                         "notes": {"type": "string"},
@@ -1036,6 +1059,10 @@ def _openapi_document() -> dict:
                     "required": [
                         "participant_id",
                         "participant_name",
+                        "quota_pool_id",
+                        "quota_pool_name",
+                        "pool_contract_revision",
+                        "share_percent",
                         "selected_cost",
                         "delta_cost",
                         "charged_delta_percent",
@@ -1062,6 +1089,14 @@ def _openapi_document() -> dict:
                     "properties": {
                         "participant_id": {"type": "integer"},
                         "participant_name": {"type": "string"},
+                        "quota_pool_id": {
+                            "type": ["integer", "null"]
+                        },
+                        "quota_pool_name": {"type": "string"},
+                        "pool_contract_revision": {
+                            "type": ["integer", "null"]
+                        },
+                        "share_percent": {"type": "number"},
                         "selected_cost": {"type": "number"},
                         "delta_cost": nullable_number,
                         "charged_delta_percent": {"type": "number"},
@@ -1106,6 +1141,10 @@ def _openapi_document() -> dict:
                         "external_account_id",
                         "account_name",
                         "account_enabled",
+                        "pool_id",
+                        "pool_name",
+                        "contract_share_percent",
+                        "allocated",
                         "snapshot",
                         "latest_selected_cost",
                         "last_checked_at",
@@ -1121,6 +1160,10 @@ def _openapi_document() -> dict:
                         "external_account_id": {"type": "integer"},
                         "account_name": {"type": "string"},
                         "account_enabled": {"type": "boolean"},
+                        "pool_id": {"type": "integer"},
+                        "pool_name": {"type": "string"},
+                        "contract_share_percent": {"type": "number"},
+                        "allocated": {"type": "boolean"},
                         "latest_selected_cost": nullable_number,
                         "last_checked_at": nullable_string,
                         "snapshot": {
@@ -1139,6 +1182,9 @@ def _openapi_document() -> dict:
                         "account_id",
                         "external_account_id",
                         "account_name",
+                        "pool_id",
+                        "pool_name",
+                        "pool_contract_revision",
                         "contract_share_percent",
                         "snapshot",
                         "net_position_usd",
@@ -1152,6 +1198,9 @@ def _openapi_document() -> dict:
                         "account_id": {"type": "integer"},
                         "external_account_id": {"type": "integer"},
                         "account_name": {"type": "string"},
+                        "pool_id": {"type": "integer"},
+                        "pool_name": {"type": "string"},
+                        "pool_contract_revision": {"type": "integer"},
                         "contract_share_percent": {"type": "number"},
                         "net_position_usd": nullable_number,
                         "net_position_min_usd": nullable_number,
@@ -1174,7 +1223,7 @@ def _openapi_document() -> dict:
                     "required": [
                         "participant_id",
                         "participant_name",
-                        "share_percent",
+                        "pool_allocations",
                         "selected_cost",
                         "charged_cycle_percent",
                         "current_balance_usd",
@@ -1187,6 +1236,7 @@ def _openapi_document() -> dict:
                         "recommendation_applied",
                         "recommendation_complete",
                         "account_count",
+                        "pool_count",
                         "reason",
                         "allocation_model",
                         "sources",
@@ -1194,7 +1244,12 @@ def _openapi_document() -> dict:
                     "properties": {
                         "participant_id": {"type": "integer"},
                         "participant_name": {"type": "string"},
-                        "share_percent": {"type": "number"},
+                        "pool_allocations": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/components/schemas/ParticipantPoolAllocation"
+                            },
+                        },
                         "selected_cost": {"type": "number"},
                         "charged_cycle_percent": {"type": "number"},
                         "current_balance_usd": nullable_number,
@@ -1207,10 +1262,11 @@ def _openapi_document() -> dict:
                         "recommendation_applied": {"type": "boolean"},
                         "recommendation_complete": {"type": "boolean"},
                         "account_count": {"type": "integer"},
+                        "pool_count": {"type": "integer"},
                         "reason": {"type": "string"},
                         "allocation_model": {
                             "type": "string",
-                            "const": "pooled_account_sum",
+                            "const": "partitioned_pool_sum",
                         },
                         "sources": {
                             "type": "array",

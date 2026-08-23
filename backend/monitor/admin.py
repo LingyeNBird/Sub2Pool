@@ -8,12 +8,16 @@ from .models import (
     Observation,
     Participant,
     ParticipantSnapshot,
+    PoolParticipant,
+    QuotaPool,
     ParticipantUsageSample,
 )
 
 # Django Admin 仅作为应急运维入口；日常使用由中文前端完成。
 admin.site.register(AppSettings)
 admin.site.register(Participant)
+admin.site.register(QuotaPool)
+admin.site.register(PoolParticipant)
 admin.site.register(Observation)
 admin.site.register(ParticipantSnapshot)
 admin.site.register(NotificationEvent)

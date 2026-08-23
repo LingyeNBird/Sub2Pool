@@ -224,6 +224,27 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
         first.id,
         second.id,
     ]
+    visible_allocation = regular_client.get(
+        "/api/quota-allocation",
+        **regular_headers,
+    )
+    assert visible_allocation.status_code == 200
+    assert [
+        item["id"] for item in visible_allocation.json()["data"]["participants"]
+    ] == [first.id, second.id]
+    assert {
+        allocation["participant_id"]
+        for pool in visible_allocation.json()["data"]["pools"]
+        for allocation in pool["allocations"]
+    } == {first.id, second.id}
+    forbidden_allocation_write = regular_client.put(
+        "/api/quota-allocation",
+        data=json.dumps({"pools": []}),
+        content_type="application/json",
+        **regular_headers,
+    )
+    assert forbidden_allocation_write.status_code == 403
+
 
     dashboard = regular_client.get("/api/dashboard", **regular_headers)
     assert dashboard.status_code == 200

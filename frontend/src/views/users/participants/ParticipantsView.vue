@@ -10,7 +10,6 @@ import type {
   Participant,
   Sub2APIUserOption,
 } from "@/types";
-import { formatPercent } from "@/utils/formatters";
 
 import ParticipantCard from "./components/ParticipantCard.vue";
 import ParticipantEditorDialog from "./components/ParticipantEditorDialog.vue";
@@ -40,10 +39,9 @@ const showCards = computed(() => !auth.isStaff || viewMode.value === "cards");
 const enabledCount = computed(
   () => participants.value.filter((item) => item.enabled).length,
 );
-const shareTotal = computed(() =>
+const allocationCount = computed(() =>
   participants.value.reduce(
-    (sum, participant) =>
-      participant.enabled ? sum + participant.share_percent : sum,
+    (sum, participant) => sum + participant.pool_allocations.length,
     0,
   ),
 );
@@ -207,9 +205,9 @@ onMounted(() => {
     <div class="stat">
       <div class="flex h-full items-center justify-between gap-4">
         <div class="min-w-0">
-          <div class="stat-title">混池权益合计</div>
+          <div class="stat-title">参与池关系</div>
           <div class="stat-value text-xl font-semibold tabular-nums">
-            {{ formatPercent(shareTotal) }}
+            {{ allocationCount }}
           </div>
         </div>
         <AppIcon name="scale" class="size-7 shrink-0 opacity-40" />
