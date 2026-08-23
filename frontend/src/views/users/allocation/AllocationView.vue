@@ -38,6 +38,10 @@ const participants = ref<QuotaAllocationParticipant[]>([]);
 const draftPools = ref<DraftPool[]>([]);
 const selectedAccountIds = ref<Set<number>>(new Set());
 const contextMenu = ref<ContextMenuState | null>(null);
+const renameDialog = ref<HTMLDialogElement | null>(null);
+const renameInput = ref<HTMLInputElement | null>(null);
+const renamingPoolKey = ref<string | null>(null);
+const renameName = ref("");
 let draftSequence = 0;
 
 const accountsById = computed(
@@ -67,6 +71,17 @@ const canMergeSelection = computed(() => {
     containingPools[0].accountIds.every((accountId) => selected.has(accountId))
   );
 });
+const splittableSelectedIds = computed(() => {
+  const selected = selectedAccountIds.value;
+  return draftPools.value.flatMap((pool) =>
+    pool.accountIds.length > 1
+      ? pool.accountIds.filter((accountId) => selected.has(accountId))
+      : [],
+  );
+});
+const canSplitSelection = computed(
+  () => splittableSelectedIds.value.length > 0,
+);
 
 function draftKey(id?: number) {
   draftSequence += 1;
@@ -232,32 +247,88 @@ function mergeSelected() {
     : "所选来源的原合同不同，新混池份额已清空，请重新分配后保存。";
 }
 
-function splitAccount(accountId: number) {
-  const sourceIndex = draftPools.value.findIndex((pool) =>
-    pool.accountIds.includes(accountId),
-  );
-  const source = draftPools.value[sourceIndex];
-  if (!source || source.accountIds.length <= 1) return;
-  const remaining = source.accountIds.filter((id) => id !== accountId);
-  const singleton: DraftPool = {
-    key: draftKey(),
-    name: `${accountName(accountId)} 独立池`,
-    contractRevision: 1,
-    accountIds: [accountId],
-    allocations: { ...source.allocations },
-  };
-  draftPools.value.splice(
-    sourceIndex,
-    1,
-    { ...source, accountIds: remaining },
-    singleton,
-  );
-  draftPools.value = [...draftPools.value];
-  selectedAccountIds.value = new Set([accountId]);
-  contextMenu.value = null;
+function splitAccounts(accountIds: Iterable<number>) {
+  const requested = new Set(accountIds);
+  const splitIds: number[] = [];
+  const nextPools: DraftPool[] = [];
+
+  for (const pool of draftPools.value) {
+    const extracted =
+      pool.accountIds.length > 1
+        ? pool.accountIds.filter((accountId) => requested.has(accountId))
+        : [];
+    if (!extracted.length) {
+      nextPools.push(pool);
+      continue;
+    }
+
+    const remaining = pool.accountIds.filter(
+      (accountId) => !requested.has(accountId),
+    );
+    if (remaining.length) {
+      nextPools.push({
+        ...pool,
+        name:
+          remaining.length === 1
+            ? `${accountName(remaining[0])} 独立池`
+            : pool.name,
+        accountIds: remaining,
+      });
+    }
+    for (const accountId of extracted) {
+      nextPools.push({
+        key: draftKey(),
+        name: `${accountName(accountId)} 独立池`,
+        contractRevision: 1,
+        accountIds: [accountId],
+        allocations: { ...pool.allocations },
+      });
+    }
+    splitIds.push(...extracted);
+  }
+
+  if (!splitIds.length) return;
+  draftPools.value = nextPools;
+  clearSelection();
   dirty.value = true;
   messageTone.value = "success";
-  message.value = `已将“${accountName(accountId)}”拆为独立池，保存后生效。`;
+  message.value = `已将 ${splitIds.length} 个来源从混池拆出，保存后生效。`;
+}
+
+function splitSelected() {
+  splitAccounts(splittableSelectedIds.value);
+}
+
+function splitAccount(accountId: number) {
+  splitAccounts([accountId]);
+}
+
+function openRenamePool(pool: DraftPool) {
+  if (!auth.isStaff || pool.accountIds.length <= 1) return;
+  renamingPoolKey.value = pool.key;
+  renameName.value = pool.name;
+  message.value = "";
+  contextMenu.value = null;
+  renameDialog.value?.showModal();
+  renameInput.value?.select();
+}
+
+function closeRenamePool() {
+  renameDialog.value?.close();
+}
+
+function applyPoolRename() {
+  const pool = draftPools.value.find(
+    (item) => item.key === renamingPoolKey.value,
+  );
+  const name = renameName.value.trim();
+  if (!pool || pool.accountIds.length <= 1 || !name) return;
+  if (pool.name !== name) {
+    pool.name = name;
+    dirty.value = true;
+    message.value = "";
+  }
+  closeRenamePool();
 }
 
 function openContextMenu(event: MouseEvent, accountId: number) {
@@ -346,7 +417,7 @@ onUnmounted(() => {
         </ul>
       </div>
       <p class="mt-1 text-sm opacity-60">
-        左键选择来源，右键合并；数字按百分比保存，无需输入百分号。
+        左键选择来源后可合并或拆出；混池名称可重命名；数字按百分比保存，无需输入百分号。
       </p>
     </div>
     <button
@@ -397,6 +468,14 @@ onUnmounted(() => {
         >
           <AppIcon name="link" class="size-4" />
           合并为混池
+        </button>
+        <button
+          class="btn btn-sm"
+          :disabled="!canSplitSelection"
+          @click.stop="splitSelected"
+        >
+          <AppIcon name="arrows-right-left" class="size-4" />
+          拆出混池
         </button>
         <button class="btn btn-ghost btn-sm" @click.stop="clearSelection">
           取消选择
@@ -519,11 +598,24 @@ onUnmounted(() => {
               >
                 <div
                   v-if="pool.accountIds.length > 1 && accountIndex === 0"
-                  class="absolute top-2 left-3 flex items-center gap-2"
+                  class="absolute top-2 left-3 flex items-center gap-1.5"
                 >
-                  <span class="badge badge-sm badge-success">
-                    {{ pool.name }}
+                  <span
+                    class="badge max-w-40 badge-sm badge-success"
+                    :title="pool.name"
+                  >
+                    <span class="truncate">{{ pool.name }}</span>
                   </span>
+                  <button
+                    v-if="auth.isStaff"
+                    type="button"
+                    class="btn btn-circle btn-ghost btn-xs"
+                    :aria-label="`重命名混池“${pool.name}”`"
+                    title="重命名混池"
+                    @click.stop="openRenamePool(pool)"
+                  >
+                    <AppIcon name="pencil" class="size-3.5" />
+                  </button>
                   <span
                     class="badge shrink-0 badge-sm"
                     :class="
@@ -634,6 +726,45 @@ onUnmounted(() => {
     </div>
   </section>
 
+  <Teleport to="body">
+    <dialog ref="renameDialog" class="modal">
+      <div class="modal-box w-[calc(100vw-2rem)] max-w-md">
+        <h2 class="text-lg font-bold">重命名混池</h2>
+        <p class="mt-1 text-sm opacity-60">
+          名称会显示在额度分配表和参与者权益来源中。
+        </p>
+        <form class="mt-4" @submit.prevent="applyPoolRename">
+          <fieldset class="fieldset">
+            <label class="label" for="mixed-pool-name">混池名称</label>
+            <input
+              id="mixed-pool-name"
+              ref="renameInput"
+              v-model="renameName"
+              class="input w-full"
+              maxlength="160"
+              required
+            />
+          </fieldset>
+          <div class="modal-action">
+            <button type="button" class="btn" @click="closeRenamePool">
+              取消
+            </button>
+            <button
+              type="submit"
+              class="btn btn-primary"
+              :disabled="!renameName.trim()"
+            >
+              应用名称
+            </button>
+          </div>
+        </form>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>关闭</button>
+      </form>
+    </dialog>
+  </Teleport>
+
   <div
     v-if="contextMenu"
     class="fixed z-50"
@@ -733,7 +864,7 @@ onUnmounted(() => {
   );
 }
 
-.allocation-table tbody:last-child > tr:last-child > * {
+.allocation-table tbody:not(.mixed-pool):last-child > tr:last-child > * {
   border-bottom: 0;
 }
 </style>
