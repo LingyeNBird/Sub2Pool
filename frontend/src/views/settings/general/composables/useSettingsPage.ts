@@ -497,19 +497,20 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   }
 
   async function generateReadOnlyApiKey(): Promise<string | null> {
-    if (!settings.value) return null;
+    const adminSettings = auth.isStaff ? settings.value : null;
+    if (auth.isStaff && !adminSettings) return null;
     generatingReadOnlyApiKey.value = true;
     message.value = "";
     success.value = "";
     try {
       const generated = await api<ReadOnlyAPIKeyGenerated>(
-        auth.isStaff ? "settings/readonly-api-key" : "settings/my-api-key",
+        adminSettings ? "settings/readonly-api-key" : "settings/my-api-key",
         { method: "POST" },
       );
-      if (auth.isStaff) {
-        settings.value.readonly_api_key_configured = true;
-        settings.value.readonly_api_key_hint = generated.hint;
-        settings.value.readonly_api_key_created_at = generated.created_at;
+      if (adminSettings) {
+        adminSettings.readonly_api_key_configured = true;
+        adminSettings.readonly_api_key_hint = generated.hint;
+        adminSettings.readonly_api_key_created_at = generated.created_at;
       } else {
         personalApiKey.value = {
           configured: true,
@@ -529,19 +530,20 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   }
 
   async function revokeReadOnlyApiKey(): Promise<boolean> {
-    if (!settings.value) return false;
+    const adminSettings = auth.isStaff ? settings.value : null;
+    if (auth.isStaff && !adminSettings) return false;
     revokingReadOnlyApiKey.value = true;
     message.value = "";
     success.value = "";
     try {
       await api(
-        auth.isStaff ? "settings/readonly-api-key" : "settings/my-api-key",
+        adminSettings ? "settings/readonly-api-key" : "settings/my-api-key",
         { method: "DELETE" },
       );
-      if (auth.isStaff) {
-        settings.value.readonly_api_key_configured = false;
-        settings.value.readonly_api_key_hint = "";
-        settings.value.readonly_api_key_created_at = null;
+      if (adminSettings) {
+        adminSettings.readonly_api_key_configured = false;
+        adminSettings.readonly_api_key_hint = "";
+        adminSettings.readonly_api_key_created_at = null;
       } else {
         personalApiKey.value = {
           configured: false,
