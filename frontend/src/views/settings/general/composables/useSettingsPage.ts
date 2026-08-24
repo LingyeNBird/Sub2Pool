@@ -503,11 +503,11 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
       settings.value.readonly_api_key_configured = true;
       settings.value.readonly_api_key_hint = generated.hint;
       settings.value.readonly_api_key_created_at = generated.created_at;
-      success.value = "只读 API Key 已生成";
+      success.value = "API Key 已生成";
       return generated.api_key;
     } catch (error) {
       message.value =
-        error instanceof ApiError ? error.message : "生成只读 API Key 失败";
+        error instanceof ApiError ? error.message : "生成 API Key 失败";
       return null;
     } finally {
       generatingReadOnlyApiKey.value = false;
@@ -524,11 +524,11 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
       settings.value.readonly_api_key_configured = false;
       settings.value.readonly_api_key_hint = "";
       settings.value.readonly_api_key_created_at = null;
-      success.value = "只读 API Key 已废弃";
+      success.value = "API Key 已废弃";
       return true;
     } catch (error) {
       message.value =
-        error instanceof ApiError ? error.message : "废弃只读 API Key 失败";
+        error instanceof ApiError ? error.message : "废弃 API Key 失败";
       return false;
     } finally {
       revokingReadOnlyApiKey.value = false;

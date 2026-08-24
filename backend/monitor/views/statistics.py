@@ -12,7 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from .base import PageAccessAPIView, error, ok
 from .query_params import bounded_query_int, monitored_account_query
 from ..access import visible_participants_for
-from ..api_auth import ReadOnlyAPIKeyAuthentication
+from ..api_auth import APIKeyAuthentication
 from ..api_usage import (
     api_usage_snapshot_data,
     get_participant_api_usage,
@@ -105,7 +105,7 @@ class StatisticsView(PageAccessAPIView):
 class ReadOnlyStatisticsView(StatisticsView):
     """External API-key view exposing the statistics-page payload."""
 
-    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    authentication_classes = [APIKeyAuthentication]
     permission_classes = [IsAuthenticated]
     http_method_names = ["get", "head", "options"]
 
@@ -155,14 +155,14 @@ class ParticipantAPIUsageView(PageAccessAPIView):
 class ReadOnlyParticipantAPIUsageView(ParticipantAPIUsageView):
     """External API-key view exposing one participant's API usage breakdown."""
 
-    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    authentication_classes = [APIKeyAuthentication]
     permission_classes = [IsAuthenticated]
     http_method_names = ["get", "head", "options"]
 
     def get(self, request, participant_id: int):
         if not request.query_params.get("account_id"):
             return error(
-                "只读 API 用量接口必须指定 account_id",
+                "API 用量接口必须指定 account_id",
                 status.HTTP_400_BAD_REQUEST,
             )
         return super().get(request, participant_id)

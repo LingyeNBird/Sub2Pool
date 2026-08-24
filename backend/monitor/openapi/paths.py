@@ -1,4 +1,4 @@
-"""OpenAPI path definitions for the read-only API."""
+"""OpenAPI path definitions for the external API."""
 
 from __future__ import annotations
 
@@ -73,6 +73,65 @@ def openapi_paths() -> dict:
                     ),
                     "400": {"$ref": "#/components/responses/BadRequest"},
                     "401": {"$ref": "#/components/responses/Unauthorized"},
+                },
+            }
+        },
+        "/v1/recommendations": {
+            "get": {
+                "summary": "读取首页待应用建议",
+                "description": (
+                    "返回与首页相同的待应用建议列表。每项包含参与者身份、"
+                    "当前全局余额、建议值与范围、差额、原因，以及逐账号的"
+                    "合同份额、测算快照和建议贡献明细。"
+                ),
+                "operationId": "listRecommendationsPendingApplication",
+                "responses": {
+                    "200": _success_response(
+                        "首页当前显示的全部待应用建议及其完整明细。",
+                        {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/components/schemas/Participant"
+                            },
+                        },
+                    ),
+                    "401": {"$ref": "#/components/responses/Unauthorized"},
+                },
+            }
+        },
+        "/v1/recommendations/{participant_id}/apply": {
+            "post": {
+                "summary": "一键设置建议余额",
+                "description": (
+                    "重新读取并校验该参与者的当前聚合建议，通过 Sub2API "
+                    "设置全局用户余额，并以幂等操作日志提交本地事实。"
+                    "请求体不接收余额，避免客户端应用过期或篡改后的建议值。"
+                ),
+                "operationId": "applyParticipantRecommendation",
+                "security": [{"ApiKey": []}],
+                "parameters": [
+                    {
+                        "name": "participant_id",
+                        "in": "path",
+                        "required": True,
+                        "description": "Sub2Pool 参与者 ID，不是 Sub2API 用户 ID。",
+                        "schema": {"type": "integer", "minimum": 1},
+                    }
+                ],
+                "responses": {
+                    "200": _success_response(
+                        "已由上游确认并提交的余额操作。",
+                        {
+                            "$ref": "#/components/schemas/AppliedRecommendation"
+                        },
+                    ),
+                    "401": {"$ref": "#/components/responses/Unauthorized"},
+                    "404": {"$ref": "#/components/responses/NotFound"},
+                    "409": {"$ref": "#/components/responses/Conflict"},
+                    "502": {"$ref": "#/components/responses/UpstreamError"},
+                    "503": {
+                        "$ref": "#/components/responses/ServiceUnavailable"
+                    },
                 },
             }
         },

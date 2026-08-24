@@ -52,25 +52,22 @@ defineExpose({ reveal });
   >
     <div class="card-body gap-5">
       <div>
-        <h2 class="card-title">
-          <AppIcon name="key" class="size-5" />只读 API
-        </h2>
+        <h2 class="card-title"><AppIcon name="key" class="size-5" />API</h2>
       </div>
 
       <div class="alert items-start alert-info">
         <AppIcon name="information-circle" class="mt-0.5 size-5 shrink-0" />
         <div class="min-w-0 text-sm leading-6">
           <p>
-            这枚 Key
-            可读取全部已开放的额度业务数据，包括监控账号、额度总览、参与者、观测与
-            FAST 明细、粒子轨迹、统计和通知正文。
+            这枚 Key 拥有全部已开放 API 权限，可读取监控账号、额度总览、参与者、
+            观测与 FAST 明细、粒子轨迹、统计和通知正文，也可一键设置建议余额。
           </p>
           <p class="mt-1">
             它不继承普通系统用户的页面或参与者范围。只应交给受信任的服务端程序，并通过
             HTTPS 传输。
           </p>
           <RouterLink
-            to="/tutorial?page=readonly-api"
+            to="/tutorial?page=api"
             class="mt-2 inline-flex link font-medium link-primary"
           >
             查看端点、参数与响应文档
@@ -88,7 +85,7 @@ defineExpose({ reveal });
         </div>
       </div>
       <div v-else class="rounded-box bg-base-100 p-4 text-sm opacity-70">
-        尚未生成 API Key，外部只读接口当前不可访问。
+        尚未生成 API Key，外部 API 当前不可访问。
       </div>
 
       <div class="flex flex-wrap gap-2">
@@ -129,7 +126,7 @@ defineExpose({ reveal });
         <div class="flex items-start gap-3">
           <AppIcon name="key" class="mt-0.5 size-6 shrink-0 text-primary" />
           <div class="min-w-0 grow">
-            <h2 class="text-lg font-bold">保存只读 API Key</h2>
+            <h2 class="text-lg font-bold">保存 API Key</h2>
             <p class="mt-2 text-sm leading-6 opacity-70">
               完整 Key
               只在本次显示。关闭后系统只保留摘要和尾号，无法再次查看或找回。
@@ -140,7 +137,7 @@ defineExpose({ reveal });
           class="textarea mt-5 h-28 w-full resize-none font-mono text-sm"
           readonly
           :value="plaintextKey"
-          aria-label="只读 API Key"
+          aria-label="API Key"
           @focus="($event.target as HTMLTextAreaElement).select()"
         ></textarea>
         <div class="modal-action">

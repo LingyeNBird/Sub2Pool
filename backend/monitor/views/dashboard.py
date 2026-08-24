@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from .base import AdminAPIView, PageAccessAPIView, error, ok
-from ..api_auth import ReadOnlyAPIKeyAuthentication
+from ..api_auth import APIKeyAuthentication
 from ..access import visible_participant_ids
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 from ..history_state import LeaseBusyError, LeaseGuard, LeaseLostError
@@ -75,6 +75,35 @@ def _selected_account(request) -> tuple[list[MonitoredAccount], MonitoredAccount
         raise ValueError("监控账号不存在")
     return accounts, selected
 
+def _participant_rows(
+    config: AppSettings,
+    user,
+) -> tuple[list[dict], list[dict]]:
+    all_rows = [
+        participant_data(item, config)
+        for item in Participant.objects.filter(enabled=True).prefetch_related(
+            "account_memberships__account"
+        )
+    ]
+    visible_ids = visible_participant_ids(user)
+    visible_rows = [
+        item
+        for item in all_rows
+        if visible_ids is None or item["id"] in visible_ids
+    ]
+    return all_rows, visible_rows
+
+
+def _actionable_recommendations(participant_rows: list[dict]) -> list[dict]:
+    return [
+        item
+        for item in participant_rows
+        if item["snapshot"]
+        and item["snapshot"]["needs_manual_update"]
+        and not item["snapshot"]["recommendation_applied"]
+    ]
+
+
 
 class DashboardView(PageAccessAPIView):
     required_page_permissions = (PagePermission.DASHBOARD,)
@@ -108,18 +137,10 @@ class DashboardView(PageAccessAPIView):
             if external_account_id is not None
             else None
         )
-        all_participant_rows = [
-            participant_data(item, config)
-            for item in Participant.objects.filter(enabled=True).prefetch_related(
-                "account_memberships__account"
-            )
-        ]
-        visible_ids = visible_participant_ids(request.user)
-        participant_rows = [
-            item
-            for item in all_participant_rows
-            if visible_ids is None or item["id"] in visible_ids
-        ]
+        all_participant_rows, participant_rows = _participant_rows(
+            config,
+            request.user,
+        )
         selected_snapshots = []
         if account is not None:
             for participant in all_participant_rows:
@@ -168,13 +189,7 @@ class DashboardView(PageAccessAPIView):
                     presented_estimated_percent - total_charged,
                 )
 
-        actionable = [
-            item
-            for item in participant_rows
-            if item["snapshot"]
-            and item["snapshot"]["needs_manual_update"]
-            and not item["snapshot"]["recommendation_applied"]
-        ]
+        actionable = _actionable_recommendations(participant_rows)
         data = {
             "configured": bool(
                 config.sub2api_admin_token_encrypted and accounts
@@ -246,8 +261,20 @@ class DashboardView(PageAccessAPIView):
 class ReadOnlyDashboardView(DashboardView):
     """External API-key view exposing the dashboard summary."""
 
-    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    authentication_classes = [APIKeyAuthentication]
     http_method_names = ["get", "head", "options"]
+
+
+class ReadOnlyRecommendationListView(PageAccessAPIView):
+    """External API-key view exposing homepage recommendations pending application."""
+
+    required_page_permissions = (PagePermission.DASHBOARD,)
+    authentication_classes = [APIKeyAuthentication]
+    http_method_names = ["get", "head", "options"]
+
+    def get(self, request):
+        _, participant_rows = _participant_rows(AppSettings.load(), request.user)
+        return ok(_actionable_recommendations(participant_rows))
 
 
 class BalanceOperationConflict(RuntimeError):
@@ -630,3 +657,9 @@ class ApplyParticipantRecommendationView(AdminAPIView):
         finally:
             for guard in reversed(tuple(guards.values())):
                 guard.release()
+
+
+class APIApplyParticipantRecommendationView(ApplyParticipantRecommendationView):
+    """Apply a recommendation with the administrator-issued external API key."""
+
+    authentication_classes = [APIKeyAuthentication]

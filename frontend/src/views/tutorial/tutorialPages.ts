@@ -465,34 +465,34 @@ export const tutorialGroups: TutorialGroup[] = [
     label: "API 文档",
     pages: [
       {
-        id: "readonly-api",
+        id: "api",
         group: "API 文档",
-        title: "只读数据 API",
+        title: "API",
         summary:
-          "使用永久 API Key 读取账号、额度、参与者、观测、模型、统计和通知数据。",
+          "使用管理员生成的永久 API Key 读取业务数据并执行全部已开放 API 操作。",
         icon: "code-bracket",
         sections: [
           {
             title: "生成和保存 API Key",
             steps: [
-              "由管理员进入“系统设置 → 只读 API”，点击“生成 API Key”。",
+              "由管理员进入“系统设置 → API”，点击“生成 API Key”。",
               "完整 Key 只在生成后的模态框中显示一次，请立即复制到调用方的密钥管理系统。",
               "关闭模态框后，页面只显示尾部四位。服务端只保存 SHA-256 摘要，无法找回原 Key。",
-              "Key 没有到期时间。重新生成会立即使旧 Key 失效；点击“废弃”会关闭全部外部只读访问。",
-              "Sub2Pool 只维护一枚全局只读 Key。它拥有全部已开放只读端点的数据范围，不继承普通系统用户的页面权限或参与者范围。",
+              "Key 没有到期时间。重新生成会立即使旧 Key 失效；点击“废弃”会关闭全部外部 API 访问。",
+              "Sub2Pool 只维护一枚全局 API Key。它默认拥有全部已开放 /api/v1 权限，不继承普通系统用户的页面权限或参与者范围。",
             ],
             notes: [
               {
                 tone: "warning",
                 title: "仅通过 HTTPS 传输",
-                text: "API Key 等同于完整业务数据读取凭据。只应交给受信任的服务端程序；不要放在 URL、查询参数、日志或前端公开代码中。",
+                text: "API Key 等同于完整外部 API 权限。只应交给受信任的服务端程序；不要放在 URL、查询参数、日志或前端公开代码中。",
               },
             ],
           },
           {
             title: "认证与响应格式",
             paragraphs: [
-              "每次请求都把完整 Key 放入标准 HTTP Authorization 请求头，认证方案为 Bearer。外部接口统一位于 /api/v1 下，并且只允许 GET、HEAD 和 OPTIONS。",
+              "每次请求都把完整 Key 放入标准 HTTP Authorization 请求头，认证方案为 Bearer。外部接口统一位于 /api/v1 下；允许的方法以各端点的 OpenAPI 定义为准。",
               '业务数据接口和 /api/v1 索引使用 { ok: true, data: ... } 响应；/api/v1/openapi.json 直接返回标准 OpenAPI 文档。失败响应使用 { ok: false, message: "..." }，字段校验失败时还可能包含 details。',
             ],
             codeBlocks: [
@@ -511,16 +511,16 @@ export const tutorialGroups: TutorialGroup[] = [
 400  查询参数无效
 401  未提供 Key、Key 无效、已重新生成或已废弃
 404  参与者或观测记录不存在
-405  该只读端点不允许写入
-409  尚未形成当前上游周期或尚未配置上游账号
-502  读取 Sub2API 数据失败`,
+405 该端点不允许所用 HTTP 方法
+409 当前建议不可应用、尚未形成当前周期或上游账号状态冲突
+502 读取或写入 Sub2API 数据失败`,
               },
             ],
           },
           {
             title: "从接口读取文档",
             paragraphs: [
-              "GET /api/v1 返回 API 名称、版本、认证方式、数据端点索引和 OpenAPI 文档地址。它适合程序先发现当前版本支持的只读能力。",
+              "GET /api/v1 返回 API 名称、版本、认证方式、端点索引和 OpenAPI 文档地址。它适合程序先发现当前版本支持的全部能力。",
               "GET /api/v1/openapi.json 返回原始 OpenAPI 3.1 文档，可下载后导入 Postman、Apifox、Insomnia 或代码生成工具。这两个文档端点使用同一枚 Bearer API Key，不需要先登录网页。",
             ],
             codeBlocks: [
@@ -543,7 +543,7 @@ export const tutorialGroups: TutorialGroup[] = [
             notes: [
               {
                 tone: "info",
-                title: "文档也受只读 Key 保护",
+                title: "文档也受 API Key 保护",
                 text: "没有有效 API Key 时，索引和 OpenAPI 文档都会返回 401；它们不会向匿名访问者公开你的接口结构。",
               },
             ],
@@ -573,6 +573,26 @@ curl --get \\
                 language: "bash",
                 code: `curl --request GET \\
   --url https://sub2pool.example.com/api/v1/account-status \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey'`,
+              },
+            ],
+          },
+          {
+            title: "待应用建议与一键设置余额",
+            paragraphs: [
+              "GET /api/v1/recommendations 返回与首页相同的待应用建议，并包含当前余额、建议值与范围、差额、原因，以及逐账号合同份额、测算快照和建议贡献明细。",
+              "POST /api/v1/recommendations/{participant_id}/apply 使用同一枚 API Key 一键设置当前建议余额。请求体不接收余额；服务端会重新读取并校验最新聚合建议，再通过幂等操作日志写入 Sub2API。",
+            ],
+            codeBlocks: [
+              {
+                title: "读取并应用参与者 12 的建议",
+                language: "bash",
+                code: `curl --request GET \\
+  --url https://sub2pool.example.com/api/v1/recommendations \\
+  --header 'Authorization: Bearer sub2pool_你的完整APIKey'
+
+curl --request POST \\
+  --url https://sub2pool.example.com/api/v1/recommendations/12/apply \\
   --header 'Authorization: Bearer sub2pool_你的完整APIKey'`,
               },
             ],
@@ -820,14 +840,14 @@ curl --get \\
           {
             title: "权限边界",
             bullets: [
-              "只读 API Key 可读取全部监控账号、总览、参与者、观测与 FAST 明细、粒子轨迹、统计、API 用量构成和通知记录。",
-              "只读 API Key 不能访问系统设置、系统用户、登录记录、IP 封禁或数据库备份。",
-              "只读 API Key 不能新增、编辑或删除数据，也不能触发测算、补算 FAST、一键调额或任何维护操作。",
-              "系统管理员的 JWT 与只读 API Key 相互独立；重新生成或废弃 API Key 不会影响网页登录。",
+              "API Key 默认拥有全部已开放 /api/v1 权限，可读取监控账号、总览、待应用建议、参与者、观测与 FAST 明细、粒子轨迹、统计、API 用量构成和通知记录。",
+              "API Key 可调用 POST /api/v1/recommendations/{participant_id}/apply；服务端只应用当前有效建议，不接受调用方指定余额。",
+              "系统设置、系统用户、登录记录、IP 封禁和数据库备份尚未开放为 /api/v1 操作，因此不在当前外部 API 能力范围内。",
+              "网页登录 JWT 与 API Key 相互独立；重新生成或废弃 API Key 不会影响网页登录。",
             ],
           },
         ],
-        action: { label: "管理只读 API Key", to: "/settings" },
+        action: { label: "管理 API Key", to: "/settings" },
       },
     ],
   },

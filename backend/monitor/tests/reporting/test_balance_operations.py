@@ -8,6 +8,7 @@ from django.db import DatabaseError, connection
 from django.test import Client
 from django.utils import timezone
 
+from monitor.api_auth import hash_api_key
 from monitor.integrations.sub2api import Sub2APIError, UserBalance
 from monitor.models import (
     AppSettings,
@@ -37,6 +38,9 @@ def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
     config = AppSettings.load()
     config.sub2api_base_url = "https://admin.example:8443/internal/path"
     config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    api_key = "sub2pool_full-access-test-key"
+    config.readonly_api_key_hash = hash_api_key(api_key)
+    config.readonly_api_key_hint = api_key[-4:]
     create_monitored_account(7)
     config.save()
     participant = create_participant(name="车友",
@@ -73,8 +77,8 @@ def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
     )
 
     applied = client.post(
-        f"/api/dashboard/participants/{participant.id}/apply-recommendation",
-        **headers,
+        f"/api/v1/recommendations/{participant.id}/apply",
+        HTTP_AUTHORIZATION=f"Bearer {api_key}",
     )
 
     assert applied.status_code == 200

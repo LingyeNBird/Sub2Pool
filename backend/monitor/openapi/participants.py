@@ -308,4 +308,21 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 },
             },
         },
+        "AppliedRecommendation": {
+            "type": "object",
+            "required": [
+                "operation_id",
+                "participant_id",
+                "sub2api_user_id",
+                "applied_balance_usd",
+                "account_count",
+            ],
+            "properties": {
+                "operation_id": {"type": "string", "format": "uuid"},
+                "participant_id": {"type": "integer"},
+                "sub2api_user_id": {"type": "integer"},
+                "applied_balance_usd": {"type": "number"},
+                "account_count": {"type": "integer"},
+            },
+        },
     }

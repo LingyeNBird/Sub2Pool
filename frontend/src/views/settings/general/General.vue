@@ -76,7 +76,7 @@ async function handleGenerateReadOnlyAPIKey() {
   if (
     settings.value?.readonly_api_key_configured &&
     !(await confirmAction({
-      title: "重新生成只读 API Key？",
+      title: "重新生成 API Key？",
       message:
         "重新生成后，原 API Key 会立即失效，所有调用方都必须改用新 Key。",
       confirmLabel: "重新生成",
@@ -92,8 +92,8 @@ async function handleGenerateReadOnlyAPIKey() {
 async function handleRevokeReadOnlyAPIKey() {
   if (
     !(await confirmAction({
-      title: "废弃只读 API Key？",
-      message: "废弃后，当前 API Key 会立即失效，外部只读接口将无法访问。",
+      title: "废弃 API Key？",
+      message: "废弃后，当前 API Key 会立即失效，外部 API 将无法访问。",
       confirmLabel: "确认废弃",
       tone: "error",
     }))

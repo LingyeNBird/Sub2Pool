@@ -6,12 +6,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..api_auth import ReadOnlyAPIKeyAuthentication
+from ..api_auth import APIKeyAuthentication
 from ..openapi.document import openapi_document
 from .base import ok
 
 
-READ_ONLY_API_ENDPOINTS = [
+API_ENDPOINTS = [
     {
         "method": "GET",
         "path": "/api/v1/accounts",
@@ -21,6 +21,16 @@ READ_ONLY_API_ENDPOINTS = [
         "method": "GET",
         "path": "/api/v1/dashboard",
         "description": "读取额度总览、当前周期和待处理建议。",
+    },
+    {
+        "method": "GET",
+        "path": "/api/v1/recommendations",
+        "description": "读取首页待应用建议及其账号来源、合同和测算明细。",
+    },
+    {
+        "method": "POST",
+        "path": "/api/v1/recommendations/{participant_id}/apply",
+        "description": "使用管理员生成的 API Key 幂等应用一名参与者的当前聚合余额建议。",
     },
     {
         "method": "GET",
@@ -68,7 +78,7 @@ READ_ONLY_API_ENDPOINTS = [
 class ReadOnlyAPIView(APIView):
     """Common policy for API-key-authenticated, read-only endpoints."""
 
-    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    authentication_classes = [APIKeyAuthentication]
     permission_classes = [IsAuthenticated]
     http_method_names = ["get", "head", "options"]
 
@@ -79,15 +89,17 @@ class ReadOnlyAPIRootView(ReadOnlyAPIView):
     def get(self, _request):
         return ok(
             {
-                "name": "Sub2Pool Read-only API",
+                "name": "Sub2Pool API",
                 "version": "v1",
                 "openapi": "/api/v1/openapi.json",
                 "authentication": {
                     "type": "http",
                     "scheme": "bearer",
                     "header": "Authorization",
+                    "key_prefix": "sub2pool_",
+                    "permissions": "all",
                 },
-                "endpoints": READ_ONLY_API_ENDPOINTS,
+                "endpoints": API_ENDPOINTS,
             }
         )
 

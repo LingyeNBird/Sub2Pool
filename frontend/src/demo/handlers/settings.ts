@@ -249,7 +249,7 @@ export function handleSettings({
   }
   if (pathname === "settings/readonly-api-key" && method === "POST") {
     const generated = {
-      api_key: "demo_public_readonly_key_not_a_secret",
+      api_key: "demo_api_key_not_a_secret",
       hint: "demo_...cret",
       created_at: state.clock,
     };

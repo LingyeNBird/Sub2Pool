@@ -1,4 +1,4 @@
-"""Assembly of the external read-only OpenAPI document."""
+"""Assembly of the external OpenAPI document."""
 
 from __future__ import annotations
 
@@ -16,15 +16,15 @@ def openapi_document() -> dict:
     return {
         "openapi": "3.1.0",
         "info": {
-            "title": "Sub2Pool Read-only API",
-            "version": "1.3.0",
+            "title": "Sub2Pool API",
+            "version": "1.4.0",
             "description": (
-                "使用永久只读 API Key 获取账号、额度、参与者、观测、模型和通知数据。"
-                "所有端点只允许 GET、HEAD 和 OPTIONS。"
+                "使用管理员在系统设置中生成的永久 API Key 调用全部已开放接口，"
+                "包括读取业务数据和一键设置当前建议余额。"
             ),
         },
         "servers": [{"url": "/api"}],
-        "security": [{"ReadOnlyApiKey": []}],
+        "security": [{"ApiKey": []}],
         "paths": openapi_paths(),
         "components": {
             "securitySchemes": security_schemes(),

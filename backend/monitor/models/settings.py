@@ -151,7 +151,7 @@ class AppSettings(models.Model):
     notification_email = models.EmailField(blank=True)
     resend_api_key_encrypted = models.TextField(blank=True)
     resend_from_email = models.CharField(max_length=320, blank=True)
-    # 外部只读 API Key 只保存摘要与尾号，明文仅在生成响应中返回一次。
+    # 外部 API Key 只保存摘要与尾号，明文仅在生成响应中返回一次。
     readonly_api_key_hash = models.CharField(max_length=64, blank=True)
     readonly_api_key_hint = models.CharField(max_length=4, blank=True)
     readonly_api_key_created_at = models.DateTimeField(null=True, blank=True)

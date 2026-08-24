@@ -5,7 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.serializers import ValidationError
 
-from ..api_auth import ReadOnlyAPIKeyAuthentication, generate_readonly_api_key
+from ..api_auth import APIKeyAuthentication, generate_api_key
 from ..history_state import LeaseLostError, fenced_fact_write
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 from ..models import (
@@ -226,7 +226,7 @@ class MonitoredAccountListView(PageAccessAPIView):
 class ReadOnlyMonitoredAccountListView(MonitoredAccountListView):
     """External API-key view exposing configured monitored accounts."""
 
-    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    authentication_classes = [APIKeyAuthentication]
     http_method_names = ["get", "head", "options"]
 
 
@@ -302,11 +302,11 @@ class TestEmailView(AdminAPIView):
 
 
 class ReadOnlyAPIKeyView(AdminAPIView):
-    """Generate, rotate, or revoke the permanent external read-only API key."""
+    """Generate, rotate, or revoke the permanent external API key."""
 
     def post(self, _request):
         config = AppSettings.load()
-        api_key, digest, hint = generate_readonly_api_key()
+        api_key, digest, hint = generate_api_key()
         config.readonly_api_key_hash = digest
         config.readonly_api_key_hint = hint
         config.readonly_api_key_created_at = timezone.now()

@@ -59,12 +59,13 @@ def _pagination_parameters() -> list[dict]:
 
 def security_schemes() -> dict:
     return {
-        "ReadOnlyApiKey": {
+        "ApiKey": {
             "type": "http",
             "scheme": "bearer",
             "bearerFormat": "Sub2Pool API Key",
             "description": (
-                "系统设置中生成的永久只读 Key，格式为 sub2pool_...。"
+                "系统设置中由管理员生成的永久 Key，格式为 sub2pool_...；"
+                "拥有全部已开放 /api/v1 操作的权限。"
             ),
         }
     }
@@ -73,7 +74,7 @@ def security_schemes() -> dict:
 def error_responses() -> dict:
     return {
         "Unauthorized": {
-            "description": "未提供 API Key，或 Key 无效、已轮换、已废弃。",
+            "description": "未提供 API Key，或 Key 无效、已重新生成、已废弃。",
             "content": {
                 "application/json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"}
@@ -105,7 +106,15 @@ def error_responses() -> dict:
             },
         },
         "UpstreamError": {
-            "description": "读取 Sub2API 数据失败。",
+            "description": "Sub2API 读取或写入失败。",
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+                }
+            },
+        },
+        "ServiceUnavailable": {
+            "description": "上游结果待对账，或本地提交暂时无法完成；可安全重试。",
             "content": {
                 "application/json": {
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"}
@@ -167,7 +176,7 @@ def common_schemas() -> dict:
             "type": "object",
             "required": ["method", "path", "description"],
             "properties": {
-                "method": {"type": "string", "const": "GET"},
+                "method": {"type": "string", "enum": ["GET", "POST"]},
                 "path": {"type": "string"},
                 "description": {"type": "string"},
             },

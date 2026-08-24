@@ -11,9 +11,11 @@ from .views.auth import (
 )
 from .views.account_status import AccountStatusView, ReadOnlyAccountStatusView
 from .views.dashboard import (
+    APIApplyParticipantRecommendationView,
     ApplyParticipantRecommendationView,
     DashboardView,
     ReadOnlyDashboardView,
+    ReadOnlyRecommendationListView,
 )
 from .views.database import DatabaseExportView, DatabaseImportView
 from .views.maintenance import (
@@ -106,6 +108,11 @@ urlpatterns = [
     path("v1/openapi.json", ReadOnlyOpenAPIView.as_view()),
     path("v1/accounts", ReadOnlyMonitoredAccountListView.as_view()),
     path("v1/dashboard", ReadOnlyDashboardView.as_view()),
+    path("v1/recommendations", ReadOnlyRecommendationListView.as_view()),
+    path(
+        "v1/recommendations/<int:participant_id>/apply",
+        APIApplyParticipantRecommendationView.as_view(),
+    ),
     path("v1/account-status", ReadOnlyAccountStatusView.as_view()),
     path("v1/participants", ReadOnlyParticipantListView.as_view()),
     path("v1/observations", ReadOnlyObservationListView.as_view()),

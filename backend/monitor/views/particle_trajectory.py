@@ -1,7 +1,7 @@
 """粒子滤波历史周期轨迹接口。"""
 
 from .base import PageAccessAPIView, error, ok
-from ..api_auth import ReadOnlyAPIKeyAuthentication
+from ..api_auth import APIKeyAuthentication
 from ..models import AppSettings, PagePermission
 from .query_params import monitored_account_query
 from ..particle_trajectory import particle_trajectory_data
@@ -39,5 +39,5 @@ class ParticleTrajectoryView(PageAccessAPIView):
 class ReadOnlyParticleTrajectoryView(ParticleTrajectoryView):
     """External API-key view exposing deterministic trajectory replay."""
 
-    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    authentication_classes = [APIKeyAuthentication]
     http_method_names = ["get", "head", "options"]

@@ -6,7 +6,7 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404
 
 from .base import AdminAPIView, PageAccessAPIView, error, ok
-from ..api_auth import ReadOnlyAPIKeyAuthentication
+from ..api_auth import APIKeyAuthentication
 from ..access import visible_participant_ids
 from ..fast_correction.repair import calculate_missing_fast_correction
 from ..integrations.sub2api import Sub2APIError
@@ -219,7 +219,7 @@ class ObservationListView(PageAccessAPIView):
 class ReadOnlyObservationListView(ObservationListView):
     """External API-key view exposing paginated observation records."""
 
-    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    authentication_classes = [APIKeyAuthentication]
     http_method_names = ["get", "head", "options"]
 
 
@@ -366,7 +366,7 @@ class ReadOnlyObservationFastCorrectionDetailView(
 ):
     """External API-key view exposing persisted FAST correction facts."""
 
-    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    authentication_classes = [APIKeyAuthentication]
     http_method_names = ["get", "head", "options"]
 
 class ObservationFastCorrectionCalculateView(AdminAPIView):

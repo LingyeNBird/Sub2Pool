@@ -148,7 +148,7 @@ watch(activePageId, async () => {
             <div
               v-if="section.codeBlocks"
               class="mt-5 flex w-full flex-col gap-4"
-              :class="{ 'max-w-4xl': activePage.id !== 'readonly-api' }"
+              :class="{ 'max-w-4xl': activePage.id !== 'api' }"
             >
               <TutorialCodeBlock
                 v-for="block in section.codeBlocks"

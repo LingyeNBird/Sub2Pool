@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 from django.utils import timezone
 
-from monitor.api_auth import API_KEY_PREFIX, hash_readonly_api_key
+from monitor.api_auth import API_KEY_PREFIX, hash_api_key
 from monitor.fast_correction.rules import fast_correction_rules_digest
 from monitor.models import (
     AccountParticipant,
@@ -18,11 +18,15 @@ from monitor.models import (
     ParticipantAPIUsageSnapshot,
     PoolParticipant,
 )
-from monitor.tests.helpers import jwt_login
+from monitor.tests.helpers import (
+    create_participant,
+    create_recommendation_snapshot,
+    jwt_login,
+)
 
 
 @pytest.mark.django_db
-def test_readonly_api_key_lifecycle_and_scope():
+def test_api_key_lifecycle_and_scope():
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
@@ -101,10 +105,10 @@ def test_readonly_api_key_lifecycle_and_scope():
     notification = NotificationEvent.objects.create(
         event_type="test",
         participant=participant,
-        dedupe_key="readonly-api-test",
+        dedupe_key="api-test",
         recipient="rider@example.com",
         subject="额度测试",
-        body="只读 API 通知正文",
+        body="API 通知正文",
         status="sent",
     )
 
@@ -123,7 +127,7 @@ def test_readonly_api_key_lifecycle_and_scope():
     assert len(api_key) >= 90
 
     config.refresh_from_db()
-    assert config.readonly_api_key_hash == hash_readonly_api_key(api_key)
+    assert config.readonly_api_key_hash == hash_api_key(api_key)
     assert api_key not in config.readonly_api_key_hash
     assert config.readonly_api_key_hint == api_key[-4:]
 
@@ -144,6 +148,8 @@ def test_readonly_api_key_lifecycle_and_scope():
     expected_endpoint_paths = {
         "/api/v1/accounts",
         "/api/v1/dashboard",
+        "/api/v1/recommendations",
+        "/api/v1/recommendations/{participant_id}/apply",
         "/api/v1/account-status",
         "/api/v1/participants",
         "/api/v1/observations",
@@ -156,12 +162,20 @@ def test_readonly_api_key_lifecycle_and_scope():
     assert {
         endpoint["path"] for endpoint in index_data["endpoints"]
     } == expected_endpoint_paths
+    apply_index = next(
+        endpoint
+        for endpoint in index_data["endpoints"]
+        if endpoint["path"] == "/api/v1/recommendations/{participant_id}/apply"
+    )
+    assert apply_index["method"] == "POST"
+    assert index_data["authentication"]["key_prefix"] == "sub2pool_"
+    assert index_data["authentication"]["permissions"] == "all"
 
     openapi_response = client.get("/api/v1/openapi.json", **api_headers)
     assert openapi_response.status_code == 200
     openapi = openapi_response.json()
     assert openapi["openapi"] == "3.1.0"
-    assert openapi["info"]["version"] == "1.3.0"
+    assert openapi["info"]["version"] == "1.4.0"
     assert openapi["servers"] == [{"url": "/api"}]
     assert set(openapi["paths"]) == {
         "/v1",
@@ -173,11 +187,14 @@ def test_readonly_api_key_lifecycle_and_scope():
         for path in openapi["paths"]
         if path not in {"/v1", "/v1/openapi.json"}
     } == expected_endpoint_paths
-    assert openapi["security"] == [{"ReadOnlyApiKey": []}]
+    assert openapi["security"] == [{"ApiKey": []}]
     assert (
-        openapi["components"]["securitySchemes"]["ReadOnlyApiKey"]["scheme"]
-        == "bearer"
+        openapi["components"]["securitySchemes"]["ApiKey"]["scheme"] == "bearer"
     )
+    assert set(openapi["components"]["securitySchemes"]) == {"ApiKey"}
+    assert openapi["paths"]["/v1/recommendations/{participant_id}/apply"][
+        "post"
+    ]["security"] == [{"ApiKey": []}]
     schemas = openapi["components"]["schemas"]
     assert schemas["CapacityPoint"]["properties"]["basis"]["oneOf"][0][
         "$ref"
@@ -204,6 +221,13 @@ def test_readonly_api_key_lifecycle_and_scope():
         "pool_contract_revision",
         "contract_share_percent",
     }.issubset(schemas["AggregateRecommendationSource"]["properties"])
+    assert {
+        "operation_id",
+        "participant_id",
+        "sub2api_user_id",
+        "applied_balance_usd",
+        "account_count",
+    } == set(schemas["AppliedRecommendation"]["properties"])
     assert schemas["ObservationList"]["properties"]["items"]["items"][
         "$ref"
     ].endswith("/Observation")
@@ -332,6 +356,7 @@ def test_readonly_api_key_lifecycle_and_scope():
     read_paths = [
         "/api/v1/accounts",
         f"/api/v1/dashboard?account_id={account.id}",
+        "/api/v1/recommendations",
         "/api/v1/account-status",
         "/api/v1/participants",
         f"/api/v1/observations?account_id={account.id}",
@@ -347,6 +372,13 @@ def test_readonly_api_key_lifecycle_and_scope():
     for path in read_paths:
         assert client.post(path, **api_headers).status_code == 405
     assert client.post("/api/v1/openapi.json", **api_headers).status_code == 405
+    assert (
+        client.post(
+            f"/api/v1/recommendations/{participant.id}/apply",
+            **api_headers,
+        ).status_code
+        == 409
+    )
     assert client.get("/api/settings", **api_headers).status_code == 401
     assert client.get("/api/login-events", **api_headers).status_code == 401
 
@@ -368,3 +400,46 @@ def test_readonly_api_key_lifecycle_and_scope():
     assert config.readonly_api_key_hash == ""
     assert config.readonly_api_key_hint == ""
     assert config.readonly_api_key_created_at is None
+
+
+@pytest.mark.django_db
+def test_recommendation_api_matches_homepage_and_includes_source_details():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    participant = create_participant(
+        name="需要调整",
+        sub2api_user_id=51,
+        share_percent=50,
+    )
+    create_recommendation_snapshot(participant)
+    client = Client()
+    admin_headers, _ = jwt_login(client)
+    api_key = client.post(
+        "/api/settings/readonly-api-key",
+        **admin_headers,
+    ).json()["data"]["api_key"]
+    api_headers = {"HTTP_AUTHORIZATION": f"Bearer {api_key}"}
+
+    homepage = client.get("/api/dashboard", **admin_headers)
+    recommendations = client.get("/api/v1/recommendations", **api_headers)
+
+    assert homepage.status_code == 200
+    assert recommendations.status_code == 200
+    data = recommendations.json()["data"]
+    assert data == homepage.json()["data"]["participants"]
+    assert [item["id"] for item in data] == [participant.id]
+    recommendation = data[0]["snapshot"]
+    assert recommendation["recommendation_complete"] is True
+    assert recommendation["needs_manual_update"] is True
+    assert recommendation["recommended_balance_usd"] is not None
+    assert recommendation["recommended_balance_min_usd"] is not None
+    assert recommendation["recommended_balance_max_usd"] is not None
+    assert recommendation["reason"]
+    assert len(recommendation["sources"]) == 1
+    source = recommendation["sources"][0]
+    assert source["contract_share_percent"] == 50.0
+    assert source["snapshot"]["participant_id"] == participant.id
+    assert source["contribution_usd"] is not None

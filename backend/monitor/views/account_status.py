@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from .base import PageAccessAPIView, ok
 from ..access import visible_accounts_for
-from ..api_auth import ReadOnlyAPIKeyAuthentication
+from ..api_auth import APIKeyAuthentication
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError, WeeklyWindow
 from ..models import AppSettings, MonitoredAccount, Observation, PagePermission
 
@@ -181,5 +181,5 @@ class AccountStatusView(PageAccessAPIView):
 class ReadOnlyAccountStatusView(AccountStatusView):
     """External API-key view exposing live upstream account status."""
 
-    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    authentication_classes = [APIKeyAuthentication]
     http_method_names = ["get", "head", "options"]

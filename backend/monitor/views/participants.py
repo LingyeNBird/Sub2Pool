@@ -4,7 +4,7 @@ from decimal import Decimal
 from rest_framework import serializers, status
 
 from ..access import visible_participants_for
-from ..api_auth import ReadOnlyAPIKeyAuthentication
+from ..api_auth import APIKeyAuthentication
 from ..history_state import fenced_fact_write
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 from ..models import (
@@ -198,7 +198,7 @@ class ParticipantListView(PageAccessAPIView):
 class ReadOnlyParticipantListView(ParticipantListView):
     """External API-key view exposing only participant table data."""
 
-    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    authentication_classes = [APIKeyAuthentication]
     http_method_names = ["get", "head", "options"]
 
 

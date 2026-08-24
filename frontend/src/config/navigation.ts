@@ -154,8 +154,8 @@ export const navigation: NavigationGroup[] = [
       },
       { label: "API 文档", section: true },
       {
-        label: "只读数据 API",
-        to: "/tutorial?page=readonly-api",
+        label: "API",
+        to: "/tutorial?page=api",
         exactQuery: true,
       },
     ],

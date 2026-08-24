@@ -3,7 +3,7 @@
 from django.db.models import Q
 
 from .base import PageAccessAPIView, error, ok
-from ..api_auth import ReadOnlyAPIKeyAuthentication
+from ..api_auth import APIKeyAuthentication
 from ..access import visible_participants_for
 from ..reporting import iso
 from .record_helpers import paginated_rows, query_datetime
@@ -114,5 +114,5 @@ class NotificationListView(PageAccessAPIView):
 class ReadOnlyNotificationListView(NotificationListView):
     """External API-key view exposing notification audit records."""
 
-    authentication_classes = [ReadOnlyAPIKeyAuthentication]
+    authentication_classes = [APIKeyAuthentication]
     http_method_names = ["get", "head", "options"]
