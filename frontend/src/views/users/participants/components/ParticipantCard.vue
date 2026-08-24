@@ -20,9 +20,6 @@ interface EntitlementSourceGroup {
   allocation: ParticipantPoolAllocation;
   accounts: AccountBreakdown[];
   title: string;
-  complete: boolean;
-  expectedEntitlement: number | null;
-  consumedEntitlement: number | null;
   remainingEntitlement: number | null;
   usagePercent: number | null;
 }
@@ -102,9 +99,6 @@ const sourceGroups = computed<EntitlementSourceGroup[]>(() =>
       accounts,
       title:
         accounts.length === 1 ? accounts[0].account_name : allocation.pool_name,
-      complete,
-      expectedEntitlement,
-      consumedEntitlement,
       remainingEntitlement,
       usagePercent,
     };
@@ -223,17 +217,6 @@ function edit() {
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div class="text-xs font-medium opacity-60">整体权益进度</div>
-              <div class="mt-1 font-semibold tabular-nums">
-                已使用
-                {{
-                  formatCurrency(participant.snapshot?.consumed_entitlement_usd)
-                }}
-                <span class="font-normal opacity-40">/</span>
-                预计
-                {{
-                  formatCurrency(participant.snapshot?.expected_entitlement_usd)
-                }}
-              </div>
             </div>
             <div class="text-right text-xs tabular-nums opacity-60">
               <div>
@@ -288,10 +271,6 @@ function edit() {
                     合同
                     {{ formatCompactPercent(group.allocation.share_percent) }}
                   </span>
-                </div>
-                <div class="mt-1 text-xs tabular-nums opacity-60">
-                  已使用权益 {{ formatCurrency(group.consumedEntitlement) }} ·
-                  预计权益 {{ formatCurrency(group.expectedEntitlement) }}
                 </div>
               </div>
               <div class="text-right text-xs tabular-nums opacity-60">
