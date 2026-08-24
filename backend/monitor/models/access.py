@@ -18,6 +18,17 @@ class PagePermission(models.TextChoices):
     SETTINGS = "settings", "系统设置"
     TUTORIAL = "tutorial", "使用教程"
 
+ASSIGNABLE_PAGE_PERMISSIONS = tuple(
+    permission
+    for permission in PagePermission.values
+    if permission != PagePermission.SETTINGS
+)
+ASSIGNABLE_PAGE_PERMISSION_CHOICES = tuple(
+    choice
+    for choice in PagePermission.choices
+    if choice[0] != PagePermission.SETTINGS
+)
+
 
 PARTICIPANT_SCOPED_PAGE_PERMISSIONS = frozenset(
     {
@@ -47,7 +58,10 @@ class SystemUserPageAccess(models.Model):
         on_delete=models.CASCADE,
         related_name="page_accesses",
     )
-    page_code = models.CharField(max_length=32, choices=PagePermission.choices)
+    page_code = models.CharField(
+        max_length=32,
+        choices=ASSIGNABLE_PAGE_PERMISSION_CHOICES,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

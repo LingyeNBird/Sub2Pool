@@ -178,7 +178,7 @@ def test_api_key_lifecycle_and_scope():
     assert openapi_response.status_code == 200
     openapi = openapi_response.json()
     assert openapi["openapi"] == "3.1.0"
-    assert openapi["info"]["version"] == "1.5.0"
+    assert openapi["info"]["version"] == "1.5.1"
     assert openapi["servers"] == [{"url": "/api"}]
     assert set(openapi["paths"]) == {
         "/v1",
@@ -422,7 +422,6 @@ def test_system_user_api_key_follows_live_page_and_data_permissions():
         [
             SystemUserPageAccess(user=viewer, page_code=page_code)
             for page_code in (
-                PagePermission.SETTINGS,
                 PagePermission.ACCOUNT_STATUS,
                 PagePermission.PARTICIPANTS,
                 PagePermission.OBSERVATIONS,
@@ -517,7 +516,11 @@ def test_system_user_api_key_follows_live_page_and_data_permissions():
     } == expected_paths
 
     openapi = client.get("/api/v1/openapi.json", **api_headers).json()
-    assert openapi["info"]["version"] == "1.5.0"
+    assert openapi["info"]["version"] == "1.5.1"
+    assert "无需单独分配“系统设置”权限" in openapi["info"]["description"]
+    assert "无需单独分配“系统设置”权限" in openapi["components"][
+        "securitySchemes"
+    ]["ApiKey"]["description"]
     assert set(openapi["paths"]) == {
         "/v1",
         "/v1/openapi.json",

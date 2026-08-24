@@ -149,6 +149,21 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
     assert missing_particle_account_scope.status_code == 400
     assert missing_particle_account_scope.json()["details"]["account_ids"]
 
+    automatic_settings = client.patch(
+        f"/api/system-users/{user_id}/permissions",
+        data=json.dumps(
+            {
+                "page_permissions": ["settings"],
+                "participant_ids": [],
+                "account_ids": [],
+            }
+        ),
+        content_type="application/json",
+        **admin_headers,
+    )
+    assert automatic_settings.status_code == 400
+    assert automatic_settings.json()["details"]["page_permissions"]
+
     granted_pages = [
         "dashboard",
         "account_status",
@@ -158,6 +173,7 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
         "statistics",
         "notifications",
     ]
+    effective_pages = [*granted_pages, "settings"]
     permissions = client.patch(
         f"/api/system-users/{user_id}/permissions",
         data=json.dumps(
@@ -252,12 +268,12 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
     )
     login_identity = logged_in.json()["data"]
     assert login_identity["is_staff"] is False
-    assert login_identity["page_permissions"] == granted_pages
+    assert login_identity["page_permissions"] == effective_pages
     me_identity = regular_client.get("/api/auth/me", **regular_headers).json()[
         "data"
     ]
     assert me_identity["is_staff"] is False
-    assert me_identity["page_permissions"] == granted_pages
+    assert me_identity["page_permissions"] == effective_pages
 
     statistics = regular_client.get("/api/statistics", **regular_headers)
     assert statistics.status_code == 200
@@ -406,7 +422,7 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
     ] == [second.id]
     assert regular_client.get("/api/auth/me", **regular_headers).json()["data"][
         "page_permissions"
-    ] == ["statistics"]
+    ] == ["statistics", "settings"]
 
     deleted = client.delete(
         f"/api/system-users/{user_id}",
@@ -447,6 +463,27 @@ def test_system_user_validation_returns_field_errors():
 
 
 @pytest.mark.django_db
+def test_settings_access_is_automatic_for_unassigned_system_users():
+    get_user_model().objects.create_user(
+        username="settings-only",
+        password="settings-only-password",
+    )
+    client = Client()
+    headers, logged_in = jwt_login(
+        client,
+        username="settings-only",
+        password="settings-only-password",
+    )
+
+    assert logged_in.json()["data"]["page_permissions"] == ["settings"]
+    assert client.get("/api/auth/me", **headers).json()["data"][
+        "page_permissions"
+    ] == ["settings"]
+    assert client.get("/api/settings/my-api-key", **headers).status_code == 200
+    assert client.get("/api/settings", **headers).status_code == 403
+
+
+@pytest.mark.django_db
 def test_non_participant_page_grants_allow_read_dependencies():
     User = get_user_model()
     User.objects.create_superuser(
@@ -468,7 +505,6 @@ def test_non_participant_page_grants_allow_read_dependencies():
                 "page_permissions": [
                     "particle_filter",
                     "login_records",
-                    "settings",
                 ],
                 "participant_ids": [],
                 "account_ids": [account.id],
@@ -489,10 +525,11 @@ def test_non_participant_page_grants_allow_read_dependencies():
         "/api/particle-trajectory",
         "/api/login-events",
         "/api/ip-blocks",
-        "/api/settings",
         "/api/settings/monitored-accounts",
     ):
         assert client.get(path, **headers).status_code != 403
+    assert client.get("/api/settings", **headers).status_code == 403
+    assert client.get("/api/settings/my-api-key", **headers).status_code == 200
 @pytest.mark.django_db
 def test_refresh_rotation_blacklists_old_cookie_and_logout_clears_current_cookie():
     get_user_model().objects.create_superuser(

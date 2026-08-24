@@ -141,12 +141,6 @@ async function handleRevokeReadOnlyAPIKey() {
     <AppIcon name="check-circle" class="size-5" />
     <span>{{ success }}</span>
   </div>
-  <div v-if="settings && !auth.isStaff" class="col-span-12 alert alert-info">
-    <AppIcon name="information-circle" class="size-5" />
-    <span>
-      只有管理员可以修改全局配置；你可以在下方管理绑定当前账号的 API Key。
-    </span>
-  </div>
   <section v-if="loading" class="card col-span-12 bg-base-200 shadow-xs">
     <div class="card-body items-center">
       <span class="loading loading-lg loading-spinner"></span>
@@ -154,8 +148,7 @@ async function handleRevokeReadOnlyAPIKey() {
   </section>
 
   <fieldset
-    v-if="settings"
-    :disabled="!auth.isStaff"
+    v-if="settings && auth.isStaff"
     class="col-span-12 columns-1 gap-6 xl:columns-2"
   >
     <Sub2APIConnectionCard
@@ -234,7 +227,7 @@ async function handleRevokeReadOnlyAPIKey() {
       @revoke="handleRevokeReadOnlyAPIKey"
     />
   </fieldset>
-  <div v-if="settings && !auth.isStaff" class="col-span-12 xl:col-span-6">
+  <div v-if="!auth.isStaff && personalApiKey" class="col-span-12 xl:col-span-6">
     <ReadOnlyAPIKeyCard
       ref="readOnlyAPIKeyCard"
       :configured="apiKeyConfigured"

@@ -3,6 +3,8 @@ from .validators import PERCENT_VALIDATORS, validate_service_url
 
 from .access import (
     ACCOUNT_SCOPED_PAGE_PERMISSIONS,
+    ASSIGNABLE_PAGE_PERMISSION_CHOICES,
+    ASSIGNABLE_PAGE_PERMISSIONS,
     PARTICIPANT_SCOPED_PAGE_PERMISSIONS,
     PagePermission,
     SystemUserAPIKey,
@@ -46,6 +48,8 @@ __all__ = [
     "ParticipantAPIUsageSnapshot",
     "PagePermission",
     "ACCOUNT_SCOPED_PAGE_PERMISSIONS",
+    "ASSIGNABLE_PAGE_PERMISSION_CHOICES",
+    "ASSIGNABLE_PAGE_PERMISSIONS",
     "PARTICIPANT_SCOPED_PAGE_PERMISSIONS",
     "Participant",
     "ParticipantSnapshot",

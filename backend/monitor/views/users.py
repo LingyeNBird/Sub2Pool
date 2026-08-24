@@ -5,7 +5,7 @@ from rest_framework import status
 
 from .base import AdminAPIView, PageAccessAPIView, error, ok
 from ..access import (
-    page_permissions_for,
+    assigned_page_permissions_for,
     visible_account_ids,
     visible_participant_ids,
 )
@@ -41,7 +41,7 @@ def system_user_data(
         "username": user.get_username(),
         "email": user.email,
         "is_active": user.is_active,
-        "page_permissions": page_permissions_for(user),
+        "page_permissions": assigned_page_permissions_for(user),
         "participant_ids": [item.id for item in participants],
         "participant_names": [item.name for item in participants],
         "account_ids": [item.id for item in accounts],

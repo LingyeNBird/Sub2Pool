@@ -126,13 +126,14 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   async function load() {
     loading.value = true;
     try {
-      settings.value = await api<AppSettingsData>("settings");
-      if (!auth.isStaff) {
+      if (auth.isStaff) {
+        settings.value = await api<AppSettingsData>("settings");
+        await loadMonitoredAccounts();
+        if (settings.value.sub2api_token_configured) {
+          await loadOpenAIAccounts(false);
+        }
+      } else {
         personalApiKey.value = await api<APIKeyState>("settings/my-api-key");
-      }
-      await loadMonitoredAccounts();
-      if (auth.isStaff && settings.value.sub2api_token_configured) {
-        await loadOpenAIAccounts(false);
       }
     } catch (error) {
       message.value =

@@ -7,6 +7,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from ..models import (
+    ASSIGNABLE_PAGE_PERMISSION_CHOICES,
     ACCOUNT_SCOPED_PAGE_PERMISSIONS,
     PARTICIPANT_SCOPED_PAGE_PERMISSIONS,
     MonitoredAccount,
@@ -103,7 +104,9 @@ class SystemUserWriteSerializer(serializers.Serializer):
 
 class SystemUserPermissionSerializer(serializers.Serializer):
     page_permissions = serializers.ListField(
-        child=serializers.ChoiceField(choices=PagePermission.choices),
+        child=serializers.ChoiceField(
+            choices=ASSIGNABLE_PAGE_PERMISSION_CHOICES
+        ),
         allow_empty=True,
     )
     participant_ids = serializers.PrimaryKeyRelatedField(

@@ -6,6 +6,7 @@ from django.db.models import QuerySet
 from rest_framework.permissions import BasePermission
 
 from .models import (
+    ASSIGNABLE_PAGE_PERMISSIONS,
     MonitoredAccount,
     PagePermission,
     Participant,
@@ -16,9 +17,10 @@ from .models import (
 ALL_PAGE_PERMISSIONS = tuple(PagePermission.values)
 
 
-def page_permissions_for(user) -> list[str]:
+def assigned_page_permissions_for(user) -> list[str]:
+    """Return only page grants that an administrator can configure."""
     if user.is_staff:
-        return list(ALL_PAGE_PERMISSIONS)
+        return list(ASSIGNABLE_PAGE_PERMISSIONS)
     prefetched = getattr(user, "_prefetched_objects_cache", {}).get(
         "page_accesses"
     )
@@ -31,7 +33,23 @@ def page_permissions_for(user) -> list[str]:
         )
     else:
         granted = {access.page_code for access in prefetched}
-    return [page_code for page_code in ALL_PAGE_PERMISSIONS if page_code in granted]
+    return [
+        page_code
+        for page_code in ASSIGNABLE_PAGE_PERMISSIONS
+        if page_code in granted
+    ]
+
+
+def page_permissions_for(user) -> list[str]:
+    """Return effective page access, including automatic personal settings."""
+    if user.is_staff:
+        return list(ALL_PAGE_PERMISSIONS)
+    assigned = set(assigned_page_permissions_for(user))
+    return [
+        page_code
+        for page_code in ALL_PAGE_PERMISSIONS
+        if page_code == PagePermission.SETTINGS or page_code in assigned
+    ]
 
 
 def has_page_permission(user, page_codes: str | Iterable[str]) -> bool:
@@ -41,9 +59,13 @@ def has_page_permission(user, page_codes: str | Iterable[str]) -> bool:
         return True
     if isinstance(page_codes, str):
         page_codes = (page_codes,)
+    else:
+        page_codes = tuple(page_codes)
+    if PagePermission.SETTINGS in page_codes:
+        return True
     return SystemUserPageAccess.objects.filter(
         user=user,
-        page_code__in=tuple(page_codes),
+        page_code__in=page_codes,
     ).exists()
 
 

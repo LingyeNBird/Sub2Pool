@@ -73,16 +73,9 @@ def _temporary_sub2api_client(
     )
 
 
-class SettingsView(PageAccessAPIView):
-    required_page_permissions = (PagePermission.SETTINGS,)
-
-    def get(self, request):
-        data = AppSettingsSerializer(AppSettings.load()).data
-        if not request.user.is_staff:
-            data["readonly_api_key_configured"] = False
-            data["readonly_api_key_hint"] = ""
-            data["readonly_api_key_created_at"] = None
-        return ok(data)
+class SettingsView(AdminAPIView):
+    def get(self, _request):
+        return ok(AppSettingsSerializer(AppSettings.load()).data)
 
     def patch(self, request):
         config = AppSettings.load()
@@ -205,7 +198,6 @@ class MonitoredAccountListView(PageAccessAPIView):
     required_page_permissions = (
         PagePermission.OBSERVATIONS,
         PagePermission.PARTICLE_FILTER,
-        PagePermission.SETTINGS,
         PagePermission.STATISTICS,
     )
 

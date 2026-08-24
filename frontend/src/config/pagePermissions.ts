@@ -14,6 +14,10 @@ export const pagePermissionCodes = [
 
 export type PagePermission = (typeof pagePermissionCodes)[number];
 
+export const assignablePagePermissionCodes = pagePermissionCodes.filter(
+  (code) => code !== "settings",
+);
+
 export interface PagePermissionOption {
   code: PagePermission;
   label: string;
@@ -78,11 +82,6 @@ export const pagePermissionGroups: PagePermissionGroup[] = [
         code: "login_records",
         label: "登录记录",
         description: "只读查看登录和封禁记录",
-      },
-      {
-        code: "settings",
-        label: "系统设置",
-        description: "只读查看脱敏后的系统配置",
       },
       {
         code: "tutorial",

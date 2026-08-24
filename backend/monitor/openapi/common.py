@@ -64,8 +64,9 @@ def security_schemes() -> dict:
             "scheme": "bearer",
             "bearerFormat": "Sub2Pool API Key",
             "description": (
-                "系统设置中生成的永久 Key，格式为 sub2pool_...。管理员 Key "
-                "拥有全部已开放操作；系统用户 Key 受其页面和数据可见范围限制。"
+                "在系统设置中生成的永久 Key，格式为 sub2pool_...。管理员 Key "
+                "拥有全部已开放操作；普通系统用户无需单独分配“系统设置”权限即可"
+                "生成个人 Key，个人 Key 受可配置页面权限和数据可见范围限制。"
             ),
         }
     }

@@ -3,7 +3,7 @@ import { computed, reactive, ref } from "vue";
 
 import {
   accountScopedPagePermissions,
-  pagePermissionCodes,
+  assignablePagePermissionCodes,
   pagePermissionGroups,
   participantScopedPagePermissions,
   type PagePermission,
@@ -130,7 +130,9 @@ function applyValidationDetails(details: unknown): boolean {
 
 function open(user: SystemUser) {
   editingUser.value = user;
-  form.page_permissions = [...user.page_permissions];
+  form.page_permissions = user.page_permissions.filter(
+    (permission) => permission !== "settings",
+  );
   form.participant_ids = [...user.participant_ids];
   form.account_ids = [...user.account_ids];
   participantQuery.value = "";
@@ -144,7 +146,7 @@ function close() {
 }
 
 function selectAllPages() {
-  form.page_permissions = [...pagePermissionCodes];
+  form.page_permissions = [...assignablePagePermissionCodes];
 }
 
 function clearPages() {

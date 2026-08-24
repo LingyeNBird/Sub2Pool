@@ -1,7 +1,7 @@
 import type { SystemUser } from "@/types/security";
 import {
   accountScopedPagePermissions,
-  pagePermissionCodes,
+  assignablePagePermissionCodes,
   participantScopedPagePermissions,
   type PagePermission,
 } from "@/config/pagePermissions";
@@ -78,7 +78,7 @@ export function handleSystemUsers({
     const requestedPages = Array.isArray(payload.page_permissions)
       ? payload.page_permissions.map(String)
       : [];
-    const validPages = new Set<string>(pagePermissionCodes);
+    const validPages = new Set<string>(assignablePagePermissionCodes);
     if (requestedPages.some((page) => !validPages.has(page))) {
       return fail("系统用户权限校验失败", 400, {
         page_permissions: ["包含未知页面权限"],
