@@ -3,7 +3,11 @@ from decimal import Decimal
 
 from rest_framework import serializers, status
 
-from ..access import visible_participants_for
+from ..access import (
+    scope_participant_data,
+    visible_account_ids,
+    visible_participants_for,
+)
 from ..api_auth import APIKeyAuthentication
 from ..history_state import fenced_fact_write
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
@@ -182,7 +186,16 @@ class ParticipantListView(PageAccessAPIView):
             request.user,
             Participant.objects.prefetch_related("account_memberships__account"),
         )
-        return ok([participant_data(item, config) for item in participants])
+        allowed_account_ids = visible_account_ids(request.user)
+        return ok(
+            [
+                scope_participant_data(
+                    participant_data(item, config),
+                    allowed_account_ids,
+                )
+                for item in participants
+            ]
+        )
 
     def post(self, request):
         serializer = ParticipantWriteSerializer(data=request.data)

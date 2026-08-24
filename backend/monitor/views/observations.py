@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404
 
 from .base import AdminAPIView, PageAccessAPIView, error, ok
 from ..api_auth import APIKeyAuthentication
-from ..access import visible_participant_ids
+from ..access import visible_accounts_for, visible_participant_ids
 from ..fast_correction.repair import calculate_missing_fast_correction
 from ..integrations.sub2api import Sub2APIError
 from ..reporting import iso, snapshot_data
@@ -43,9 +43,9 @@ class ObservationListView(PageAccessAPIView):
             "manual_start_end"
         ).prefetch_related("participant_snapshots__participant")
         if account is not None:
-            queryset = queryset.filter(
-                account_id=account.external_account_id
-            )
+            queryset = queryset.filter(account_id=account.external_account_id)
+        elif not request.user.is_staff:
+            queryset = queryset.none()
         try:
             observed_from = query_datetime(request, "from")
             observed_to = query_datetime(request, "to")
@@ -230,10 +230,14 @@ class ObservationFastCorrectionDetailView(PageAccessAPIView):
 
     def get(self, request, observation_id: int):
         config = AppSettings.load()
-        observation = get_object_or_404(
-            Observation.objects.prefetch_related("fast_corrections"),
-            pk=observation_id,
-        )
+        observations = Observation.objects.prefetch_related("fast_corrections")
+        if not request.user.is_staff:
+            observations = observations.filter(
+                account_id__in=visible_accounts_for(
+                    request.user
+                ).values_list("external_account_id", flat=True)
+            )
+        observation = get_object_or_404(observations, pk=observation_id)
         details = list(observation.fast_corrections.all())
         visible_ids = visible_participant_ids(request.user)
         participant_queryset = Participant.objects.filter(

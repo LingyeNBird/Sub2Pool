@@ -73,6 +73,43 @@ def visible_account_ids(user) -> set[int] | None:
     return set(user.visible_monitored_accounts.values_list("id", flat=True))
 
 
+def scope_participant_data(
+    data: dict,
+    allowed_account_ids: set[int] | None,
+) -> dict:
+    """Remove account-scoped participant details the principal cannot view."""
+
+    if allowed_account_ids is None:
+        return data
+    scoped = {
+        **data,
+        "account_breakdowns": [
+            item
+            for item in data["account_breakdowns"]
+            if item["account_id"] in allowed_account_ids
+        ],
+        "pool_allocations": [],
+    }
+    for allocation in data["pool_allocations"]:
+        account_ids = [
+            account_id
+            for account_id in allocation["account_ids"]
+            if account_id in allowed_account_ids
+        ]
+        if account_ids:
+            scoped["pool_allocations"].append(
+                {**allocation, "account_ids": account_ids}
+            )
+
+    aggregate = data.get("snapshot")
+    if aggregate is not None and any(
+        source["account_id"] not in allowed_account_ids
+        for source in aggregate["sources"]
+    ):
+        scoped["snapshot"] = None
+    return scoped
+
+
 class HasPageAccess(BasePermission):
     """Allow staff or a non-staff user holding any page code declared by a view."""
 

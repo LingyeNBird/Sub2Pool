@@ -11,7 +11,12 @@ from django.utils import timezone
 
 from .base import AdminAPIView, PageAccessAPIView, error, ok
 from ..api_auth import APIKeyAuthentication
-from ..access import visible_participant_ids
+from ..access import (
+    scope_participant_data,
+    visible_account_ids,
+    visible_accounts_for,
+    visible_participant_ids,
+)
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 from ..history_state import LeaseBusyError, LeaseGuard, LeaseLostError
 from ..models import (
@@ -60,8 +65,15 @@ def _account_data(account: MonitoredAccount) -> dict:
     }
 
 
-def _selected_account(request) -> tuple[list[MonitoredAccount], MonitoredAccount | None]:
-    accounts = list(MonitoredAccount.objects.order_by("name", "external_account_id"))
+def _selected_account(
+    request,
+) -> tuple[list[MonitoredAccount], MonitoredAccount | None]:
+    accounts = list(
+        visible_accounts_for(
+            request.user,
+            MonitoredAccount.objects.order_by("name", "external_account_id"),
+        )
+    )
     raw_account_id = request.query_params.get("account_id")
     if raw_account_id is None:
         selected = next((item for item in accounts if item.enabled), None)
@@ -72,7 +84,7 @@ def _selected_account(request) -> tuple[list[MonitoredAccount], MonitoredAccount
         raise ValueError("监控账号参数无效") from exc
     selected = next((item for item in accounts if item.id == account_id), None)
     if selected is None:
-        raise ValueError("监控账号不存在")
+        raise ValueError("监控账号不存在或未授权")
     return accounts, selected
 
 def _participant_rows(
@@ -85,11 +97,13 @@ def _participant_rows(
             "account_memberships__account"
         )
     ]
-    visible_ids = visible_participant_ids(user)
+    visible_participant_id_set = visible_participant_ids(user)
+    allowed_account_ids = visible_account_ids(user)
     visible_rows = [
-        item
+        scope_participant_data(item, allowed_account_ids)
         for item in all_rows
-        if visible_ids is None or item["id"] in visible_ids
+        if visible_participant_id_set is None
+        or item["id"] in visible_participant_id_set
     ]
     return all_rows, visible_rows
 

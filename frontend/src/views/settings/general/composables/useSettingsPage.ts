@@ -12,6 +12,7 @@ import { useAuthStore } from "@/stores/auth";
 import type { OpenAIAccountOption, MonitoredAccount } from "@/types/accounts";
 import type { ConfirmDialogOptions } from "@/types/common";
 import type {
+  APIKeyState,
   AppSettingsData,
   HistoricalRebuildPlan,
   ReadOnlyAPIKeyGenerated,
@@ -29,6 +30,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
   const auth = useAuthStore();
   const settings = ref<AppSettingsData | null>(null);
+  const personalApiKey = ref<APIKeyState | null>(null);
   const loading = ref(true);
   const saving = ref("");
   const testing = ref("");
@@ -125,6 +127,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     loading.value = true;
     try {
       settings.value = await api<AppSettingsData>("settings");
+      if (!auth.isStaff) {
+        personalApiKey.value = await api<APIKeyState>("settings/my-api-key");
+      }
       await loadMonitoredAccounts();
       if (auth.isStaff && settings.value.sub2api_token_configured) {
         await loadOpenAIAccounts(false);
@@ -497,12 +502,20 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     success.value = "";
     try {
       const generated = await api<ReadOnlyAPIKeyGenerated>(
-        "settings/readonly-api-key",
+        auth.isStaff ? "settings/readonly-api-key" : "settings/my-api-key",
         { method: "POST" },
       );
-      settings.value.readonly_api_key_configured = true;
-      settings.value.readonly_api_key_hint = generated.hint;
-      settings.value.readonly_api_key_created_at = generated.created_at;
+      if (auth.isStaff) {
+        settings.value.readonly_api_key_configured = true;
+        settings.value.readonly_api_key_hint = generated.hint;
+        settings.value.readonly_api_key_created_at = generated.created_at;
+      } else {
+        personalApiKey.value = {
+          configured: true,
+          hint: generated.hint,
+          created_at: generated.created_at,
+        };
+      }
       success.value = "API Key 已生成";
       return generated.api_key;
     } catch (error) {
@@ -520,10 +533,21 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     message.value = "";
     success.value = "";
     try {
-      await api("settings/readonly-api-key", { method: "DELETE" });
-      settings.value.readonly_api_key_configured = false;
-      settings.value.readonly_api_key_hint = "";
-      settings.value.readonly_api_key_created_at = null;
+      await api(
+        auth.isStaff ? "settings/readonly-api-key" : "settings/my-api-key",
+        { method: "DELETE" },
+      );
+      if (auth.isStaff) {
+        settings.value.readonly_api_key_configured = false;
+        settings.value.readonly_api_key_hint = "";
+        settings.value.readonly_api_key_created_at = null;
+      } else {
+        personalApiKey.value = {
+          configured: false,
+          hint: "",
+          created_at: null,
+        };
+      }
       success.value = "API Key 已废弃";
       return true;
     } catch (error) {
@@ -592,6 +616,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
 
   return {
     settings,
+    personalApiKey,
     loading,
     saving,
     testing,

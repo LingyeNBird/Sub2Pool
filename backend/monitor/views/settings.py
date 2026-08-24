@@ -4,7 +4,9 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.serializers import ValidationError
+from rest_framework.permissions import IsAuthenticated
 
+from ..access import HasPageAccess, visible_accounts_for
 from ..api_auth import APIKeyAuthentication, generate_api_key
 from ..history_state import LeaseLostError, fenced_fact_write
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
@@ -16,6 +18,7 @@ from ..models import (
     PagePermission,
     Participant,
     QuotaPool,
+    SystemUserAPIKey,
 )
 from ..notifications import send_notification
 from ..replay import rebuild_account
@@ -24,7 +27,7 @@ from ..serializers import (
     MonitoredAccountSerializer,
     Sub2APIConnectionSerializer,
 )
-from .base import AdminAPIView, PageAccessAPIView, error, ok
+from .base import AdminAPIView, AuthenticatedAPIView, PageAccessAPIView, error, ok
 
 DERIVED_RESULT_SETTINGS = frozenset(
     {
@@ -73,8 +76,13 @@ def _temporary_sub2api_client(
 class SettingsView(PageAccessAPIView):
     required_page_permissions = (PagePermission.SETTINGS,)
 
-    def get(self, _request):
-        return ok(AppSettingsSerializer(AppSettings.load()).data)
+    def get(self, request):
+        data = AppSettingsSerializer(AppSettings.load()).data
+        if not request.user.is_staff:
+            data["readonly_api_key_configured"] = False
+            data["readonly_api_key_hint"] = ""
+            data["readonly_api_key_created_at"] = None
+        return ok(data)
 
     def patch(self, request):
         config = AppSettings.load()
@@ -201,8 +209,11 @@ class MonitoredAccountListView(PageAccessAPIView):
         PagePermission.STATISTICS,
     )
 
-    def get(self, _request):
-        accounts = MonitoredAccount.objects.order_by("name", "external_account_id")
+    def get(self, request):
+        accounts = visible_accounts_for(
+            request.user,
+            MonitoredAccount.objects.order_by("name", "external_account_id"),
+        )
         return ok(MonitoredAccountSerializer(accounts, many=True).data)
 
     def post(self, request):
@@ -225,6 +236,8 @@ class MonitoredAccountListView(PageAccessAPIView):
 
 class ReadOnlyMonitoredAccountListView(MonitoredAccountListView):
     """External API-key view exposing configured monitored accounts."""
+
+    required_page_permissions = (PagePermission.ACCOUNT_STATUS,)
 
     authentication_classes = [APIKeyAuthentication]
     http_method_names = ["get", "head", "options"]
@@ -339,4 +352,62 @@ class ReadOnlyAPIKeyView(AdminAPIView):
                 "updated_at",
             ]
         )
+        return ok({"revoked": True})
+
+
+def _system_user_api_key_data(user) -> dict:
+    record = SystemUserAPIKey.objects.filter(user=user).first()
+    return {
+        "configured": record is not None,
+        "hint": record.hint if record is not None else "",
+        "created_at": (
+            record.created_at.isoformat() if record is not None else None
+        ),
+    }
+
+
+class MyAPIKeyView(AuthenticatedAPIView):
+    """Manage the API key bound to the current ordinary system user."""
+
+    permission_classes = [IsAuthenticated, HasPageAccess]
+    required_page_permissions = (PagePermission.SETTINGS,)
+
+    @staticmethod
+    def _reject_staff(request):
+        if request.user.is_staff or request.user.is_superuser:
+            return error("管理员请使用全局 API Key", 400)
+        return None
+
+    def get(self, request):
+        rejected = self._reject_staff(request)
+        if rejected is not None:
+            return rejected
+        return ok(_system_user_api_key_data(request.user))
+
+    def post(self, request):
+        rejected = self._reject_staff(request)
+        if rejected is not None:
+            return rejected
+        api_key, digest, hint = generate_api_key()
+        record, _created = SystemUserAPIKey.objects.update_or_create(
+            user=request.user,
+            defaults={
+                "key_hash": digest,
+                "hint": hint,
+                "created_at": timezone.now(),
+            },
+        )
+        return ok(
+            {
+                "api_key": api_key,
+                "hint": record.hint,
+                "created_at": record.created_at.isoformat(),
+            }
+        )
+
+    def delete(self, request):
+        rejected = self._reject_staff(request)
+        if rejected is not None:
+            return rejected
+        SystemUserAPIKey.objects.filter(user=request.user).delete()
         return ok({"revoked": True})

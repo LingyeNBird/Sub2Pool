@@ -385,6 +385,54 @@ def test_particle_trajectory_allows_authenticated_system_user():
 
 
 @pytest.mark.django_db
+def test_particle_trajectory_uses_only_authorized_accounts(monkeypatch):
+    viewer = get_user_model().objects.create_user(
+        username="scoped-viewer",
+        password="very-strong-password",
+    )
+    SystemUserPageAccess.objects.create(
+        user=viewer,
+        page_code=PagePermission.PARTICLE_FILTER,
+    )
+    hidden = create_monitored_account(7, name="A 隐藏账号")
+    allowed = create_monitored_account(8, name="Z 授权账号")
+    viewer.visible_monitored_accounts.add(allowed)
+    monkeypatch.setattr(
+        "monitor.views.particle_trajectory.particle_trajectory_data",
+        lambda _config, account, period_id=None: {
+            "account_id": account.id,
+            "period_id": period_id,
+        },
+    )
+    client = Client()
+    headers, _ = jwt_login(
+        client,
+        username="scoped-viewer",
+        password="very-strong-password",
+    )
+
+    default_response = client.get("/api/particle-trajectory", **headers)
+    assert default_response.status_code == 200
+    assert default_response.json()["data"]["account_id"] == allowed.id
+
+    unauthorized_response = client.get(
+        f"/api/particle-trajectory?account_id={hidden.id}",
+        **headers,
+    )
+    assert unauthorized_response.status_code == 400
+    assert "未授权" in unauthorized_response.json()["message"]
+
+    selector_response = client.get(
+        "/api/settings/monitored-accounts",
+        **headers,
+    )
+    assert selector_response.status_code == 200
+    assert [item["id"] for item in selector_response.json()["data"]] == [
+        allowed.id
+    ]
+
+
+@pytest.mark.django_db
 def test_particle_trajectory_requires_authentication():
     response = Client().get("/api/particle-trajectory")
 

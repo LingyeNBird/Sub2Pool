@@ -1,6 +1,7 @@
 """API 查询参数的边界解析。"""
 
 
+from ..access import visible_accounts_for
 from ..models import MonitoredAccount
 
 
@@ -10,7 +11,10 @@ def monitored_account_query(
     enabled_only: bool = False,
 ) -> MonitoredAccount | None:
     """Resolve an internal monitored-account id, defaulting to the first enabled."""
-    queryset = MonitoredAccount.objects.order_by("name", "external_account_id")
+    queryset = visible_accounts_for(
+        request.user,
+        MonitoredAccount.objects.order_by("name", "external_account_id"),
+    )
     raw = request.query_params.get("account_id")
     if raw is None or raw == "":
         return queryset.filter(enabled=True).first()
@@ -24,7 +28,7 @@ def monitored_account_query(
         queryset = queryset.filter(enabled=True)
     account = queryset.filter(pk=account_id).first()
     if account is None:
-        raise ValueError("监控账号不存在或已停用")
+        raise ValueError("监控账号不存在、未授权或已停用")
     return account
 
 

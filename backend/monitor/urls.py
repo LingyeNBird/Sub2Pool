@@ -57,6 +57,7 @@ from .views.security import (
 from .views.settings import (
     MonitoredAccountDetailView,
     MonitoredAccountListView,
+    MyAPIKeyView,
     ReadOnlyMonitoredAccountListView,
     OpenAIAccountListView,
     SettingsView,
@@ -173,6 +174,7 @@ urlpatterns = [
     path("settings/test-sub2api", TestSub2APIView.as_view()),
     path("settings/test-email", TestEmailView.as_view()),
     path("settings/readonly-api-key", ReadOnlyAPIKeyView.as_view()),
+    path("settings/my-api-key", MyAPIKeyView.as_view()),
     path(
         "settings/data-maintenance/history-rebuild-plans",
         HistoricalRebuildPlanListView.as_view(),

@@ -401,7 +401,8 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
         email="viewer@example.com",
     )
     config = AppSettings.load()
-    create_monitored_account(7)
+    account = create_monitored_account(7)
+    account.authorized_users.add(viewer)
     config.cost_basis = "actual"
     config.fast_correction_enabled = True
     config.save()

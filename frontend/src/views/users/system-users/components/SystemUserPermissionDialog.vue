@@ -2,6 +2,7 @@
 import { computed, reactive, ref } from "vue";
 
 import {
+  accountScopedPagePermissions,
   pagePermissionCodes,
   pagePermissionGroups,
   participantScopedPagePermissions,
@@ -82,7 +83,9 @@ const needsParticipantScope = computed(() =>
 );
 
 const needsAccountScope = computed(() =>
-  form.page_permissions.includes("account_status"),
+  form.page_permissions.some((permission) =>
+    accountScopedPagePermissions.has(permission),
+  ),
 );
 
 function clearFormErrors() {
@@ -177,7 +180,7 @@ function submit() {
   }
   if (needsAccountScope.value && !form.account_ids.length) {
     fieldErrors.account_ids = [
-      "已开放账号状态页面，请至少选择一个可查看的账号",
+      "已开放包含账号数据的页面，请至少选择一个可查看的账号",
     ];
     formMessage.value = "请检查标红的表单项";
     return;

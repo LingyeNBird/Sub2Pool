@@ -3,12 +3,22 @@ import { nextTick, ref } from "vue";
 
 import { useDateTime } from "@/composables/useDateTime";
 
-const { configured, hint, createdAt, generating, revoking } = defineProps<{
+const {
+  configured,
+  hint,
+  createdAt,
+  generating,
+  revoking,
+  fullAccess,
+  showDocumentation,
+} = defineProps<{
   configured: boolean;
   hint: string;
   createdAt: string | null;
   generating: boolean;
   revoking: boolean;
+  fullAccess: boolean;
+  showDocumentation: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -58,15 +68,29 @@ defineExpose({ reveal });
       <div class="alert items-start alert-info">
         <AppIcon name="information-circle" class="mt-0.5 size-5 shrink-0" />
         <div class="min-w-0 text-sm leading-6">
-          <p>
-            这枚 Key 拥有全部已开放 API 权限，可读取监控账号、额度总览、参与者、
-            观测与 FAST 明细、粒子轨迹、统计和通知正文，也可一键设置建议余额。
-          </p>
-          <p class="mt-1">
-            它不继承普通系统用户的页面或参与者范围。只应交给受信任的服务端程序，并通过
-            HTTPS 传输。
-          </p>
+          <template v-if="fullAccess">
+            <p>
+              这枚 Key 拥有全部已开放 API
+              权限，可读取监控账号、额度总览、参与者、 观测与 FAST
+              明细、粒子轨迹、统计和通知正文，也可一键设置建议余额。
+            </p>
+            <p class="mt-1">
+              它不继承普通系统用户的页面或数据范围。只应交给受信任的服务端程序，并通过
+              HTTPS 传输。
+            </p>
+          </template>
+          <template v-else>
+            <p>
+              这枚 Key
+              绑定当前系统用户，只能调用已获页面权限对应的只读接口，并继续遵守账号和参与者可见范围。
+            </p>
+            <p class="mt-1">
+              API 索引和 OpenAPI 文档会自动隐藏无权访问的端点；这枚 Key
+              不能一键设置建议余额或执行其他管理写操作。
+            </p>
+          </template>
           <RouterLink
+            v-if="showDocumentation"
             to="/tutorial?page=api"
             class="mt-2 inline-flex link font-medium link-primary"
           >
@@ -85,7 +109,7 @@ defineExpose({ reveal });
         </div>
       </div>
       <div v-else class="rounded-box bg-base-100 p-4 text-sm opacity-70">
-        尚未生成 API Key，外部 API 当前不可访问。
+        尚未生成当前 API Key。生成后，这枚 Key 才能访问对应的授权 API。
       </div>
 
       <div class="flex flex-wrap gap-2">

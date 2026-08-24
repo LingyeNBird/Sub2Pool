@@ -9,7 +9,7 @@ import secrets
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed
 
-from .models import AppSettings
+from .models import AppSettings, SystemUserAPIKey
 
 API_KEY_PREFIX = "sub2pool_"
 
@@ -28,7 +28,7 @@ def generate_api_key() -> tuple[str, str, str]:
 
 
 class APIKeyPrincipal:
-    """Administrator-issued principal with full access to exposed API operations."""
+    """Administrator-issued principal with full exposed-API access."""
 
     is_authenticated = True
     is_active = True
@@ -59,13 +59,33 @@ class APIKeyAuthentication(BaseAuthentication):
         except UnicodeError as exc:
             raise AuthenticationFailed("API Key 格式无效") from exc
 
+        digest = hash_api_key(api_key)
         config = AppSettings.load()
-        if not config.readonly_api_key_hash or not hmac.compare_digest(
-            hash_api_key(api_key),
+        if config.readonly_api_key_hash and hmac.compare_digest(
+            digest,
             config.readonly_api_key_hash,
         ):
+            return APIKeyPrincipal(), {
+                "hint": config.readonly_api_key_hint,
+                "scope": "administrator",
+            }
+
+        user_key = (
+            SystemUserAPIKey.objects.select_related("user")
+            .filter(
+                key_hash=digest,
+                user__is_active=True,
+                user__is_staff=False,
+                user__is_superuser=False,
+            )
+            .first()
+        )
+        if user_key is None:
             raise AuthenticationFailed("API Key 无效或已失效")
-        return APIKeyPrincipal(), {"hint": config.readonly_api_key_hint}
+        return user_key.user, {
+            "hint": user_key.hint,
+            "scope": "system_user",
+        }
 
     def authenticate_header(self, _request) -> str:
         return "Bearer"

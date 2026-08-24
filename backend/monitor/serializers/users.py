@@ -7,6 +7,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from ..models import (
+    ACCOUNT_SCOPED_PAGE_PERMISSIONS,
     PARTICIPANT_SCOPED_PAGE_PERMISSIONS,
     MonitoredAccount,
     PagePermission,
@@ -144,14 +145,13 @@ class SystemUserPermissionSerializer(serializers.Serializer):
                     )
                 }
             )
-        if (
-            PagePermission.ACCOUNT_STATUS in page_permissions
-            and not attrs["accounts"]
-        ):
+        if page_permissions & ACCOUNT_SCOPED_PAGE_PERMISSIONS and not attrs[
+            "accounts"
+        ]:
             raise serializers.ValidationError(
                 {
                     "account_ids": (
-                        "已开放账号状态页面，请至少选择一个可查看的账号"
+                        "已开放包含账号数据的页面，请至少选择一个可查看的账号"
                     )
                 }
             )

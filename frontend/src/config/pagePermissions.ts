@@ -101,6 +101,14 @@ export const participantScopedPagePermissions = new Set<PagePermission>([
   "notifications",
 ]);
 
+export const accountScopedPagePermissions = new Set<PagePermission>([
+  "dashboard",
+  "account_status",
+  "observations",
+  "particle_filter",
+  "statistics",
+]);
+
 export const pagePermissionRoutes: Array<{
   code: PagePermission;
   path: string;

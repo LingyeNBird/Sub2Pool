@@ -2,6 +2,7 @@
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class PagePermission(models.TextChoices):
@@ -25,6 +26,15 @@ PARTICIPANT_SCOPED_PAGE_PERMISSIONS = frozenset(
         PagePermission.OBSERVATIONS,
         PagePermission.STATISTICS,
         PagePermission.NOTIFICATIONS,
+    }
+)
+ACCOUNT_SCOPED_PAGE_PERMISSIONS = frozenset(
+    {
+        PagePermission.DASHBOARD,
+        PagePermission.ACCOUNT_STATUS,
+        PagePermission.OBSERVATIONS,
+        PagePermission.PARTICLE_FILTER,
+        PagePermission.STATISTICS,
     }
 )
 
@@ -51,3 +61,22 @@ class SystemUserPageAccess(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user}: {self.get_page_code_display()}"
+
+
+class SystemUserAPIKey(models.Model):
+    """One permanent API key bound to an ordinary system user."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="system_api_key",
+    )
+    key_hash = models.CharField(max_length=64, unique=True)
+    hint = models.CharField(max_length=4)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["user_id"]
+
+    def __str__(self) -> str:
+        return f"{self.user}: ****{self.hint}"

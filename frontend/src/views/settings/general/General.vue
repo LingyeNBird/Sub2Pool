@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { useAuthStore } from "@/stores/auth";
@@ -27,6 +27,7 @@ function confirmAction(options: ConfirmDialogOptions) {
 
 const {
   settings,
+  personalApiKey,
   loading,
   saving,
   testing,
@@ -72,9 +73,25 @@ const readOnlyAPIKeyCard = ref<InstanceType<typeof ReadOnlyAPIKeyCard> | null>(
   null,
 );
 
+const apiKeyConfigured = computed(() =>
+  auth.isStaff
+    ? (settings.value?.readonly_api_key_configured ?? false)
+    : (personalApiKey.value?.configured ?? false),
+);
+const apiKeyHint = computed(() =>
+  auth.isStaff
+    ? (settings.value?.readonly_api_key_hint ?? "")
+    : (personalApiKey.value?.hint ?? ""),
+);
+const apiKeyCreatedAt = computed(() =>
+  auth.isStaff
+    ? (settings.value?.readonly_api_key_created_at ?? null)
+    : (personalApiKey.value?.created_at ?? null),
+);
+
 async function handleGenerateReadOnlyAPIKey() {
   if (
-    settings.value?.readonly_api_key_configured &&
+    apiKeyConfigured.value &&
     !(await confirmAction({
       title: "重新生成 API Key？",
       message:
@@ -126,7 +143,9 @@ async function handleRevokeReadOnlyAPIKey() {
   </div>
   <div v-if="settings && !auth.isStaff" class="col-span-12 alert alert-info">
     <AppIcon name="information-circle" class="size-5" />
-    <span>当前账号拥有系统设置查看权限，但只有管理员可以修改配置。</span>
+    <span>
+      只有管理员可以修改全局配置；你可以在下方管理绑定当前账号的 API Key。
+    </span>
   </div>
   <section v-if="loading" class="card col-span-12 bg-base-200 shadow-xs">
     <div class="card-body items-center">
@@ -202,15 +221,32 @@ async function handleRevokeReadOnlyAPIKey() {
     />
     <LoginSecurityCard v-model:form="passwordForm" @change="changePassword" />
     <ReadOnlyAPIKeyCard
+      v-if="auth.isStaff"
       ref="readOnlyAPIKeyCard"
-      :configured="settings.readonly_api_key_configured"
-      :hint="settings.readonly_api_key_hint"
-      :created-at="settings.readonly_api_key_created_at"
+      :configured="apiKeyConfigured"
+      :hint="apiKeyHint"
+      :created-at="apiKeyCreatedAt"
       :generating="generatingReadOnlyApiKey"
       :revoking="revokingReadOnlyApiKey"
+      :full-access="true"
+      :show-documentation="auth.canAccess('tutorial')"
       @generate="handleGenerateReadOnlyAPIKey"
       @revoke="handleRevokeReadOnlyAPIKey"
     />
   </fieldset>
+  <div v-if="settings && !auth.isStaff" class="col-span-12 xl:col-span-6">
+    <ReadOnlyAPIKeyCard
+      ref="readOnlyAPIKeyCard"
+      :configured="apiKeyConfigured"
+      :hint="apiKeyHint"
+      :created-at="apiKeyCreatedAt"
+      :generating="generatingReadOnlyApiKey"
+      :revoking="revokingReadOnlyApiKey"
+      :full-access="false"
+      :show-documentation="auth.canAccess('tutorial')"
+      @generate="handleGenerateReadOnlyAPIKey"
+      @revoke="handleRevokeReadOnlyAPIKey"
+    />
+  </div>
   <ConfirmDialog ref="confirmDialog" />
 </template>

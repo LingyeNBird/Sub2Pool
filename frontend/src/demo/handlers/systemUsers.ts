@@ -1,5 +1,6 @@
 import type { SystemUser } from "@/types/security";
 import {
+  accountScopedPagePermissions,
   pagePermissionCodes,
   participantScopedPagePermissions,
   type PagePermission,
@@ -125,9 +126,14 @@ export function handleSystemUsers({
         ],
       });
     }
-    if (requestedPages.includes("account_status") && !accountIds.length) {
+    if (
+      requestedPages.some((page) =>
+        accountScopedPagePermissions.has(page as PagePermission),
+      ) &&
+      !accountIds.length
+    ) {
       return fail("系统用户权限校验失败", 400, {
-        account_ids: ["已开放账号状态页面，请至少选择一个可查看的账号"],
+        account_ids: ["已开放包含账号数据的页面，请至少选择一个可查看的账号"],
       });
     }
     item.page_permissions = requestedPages as PagePermission[];

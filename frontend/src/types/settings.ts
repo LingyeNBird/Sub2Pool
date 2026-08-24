@@ -52,6 +52,11 @@ export interface AppSettingsData {
   last_success_at: string | null;
   last_error: string;
 }
+export interface APIKeyState {
+  configured: boolean;
+  hint: string;
+  created_at: string | null;
+}
 export interface ReadOnlyAPIKeyGenerated {
   api_key: string;
   hint: string;

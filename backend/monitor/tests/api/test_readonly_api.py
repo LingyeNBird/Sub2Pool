@@ -12,11 +12,14 @@ from monitor.models import (
     AccountParticipant,
     AppSettings,
     MonitoredAccount,
-    Observation,
     NotificationEvent,
+    Observation,
+    PagePermission,
     Participant,
     ParticipantAPIUsageSnapshot,
     PoolParticipant,
+    SystemUserAPIKey,
+    SystemUserPageAccess,
 )
 from monitor.tests.helpers import (
     create_participant,
@@ -175,7 +178,7 @@ def test_api_key_lifecycle_and_scope():
     assert openapi_response.status_code == 200
     openapi = openapi_response.json()
     assert openapi["openapi"] == "3.1.0"
-    assert openapi["info"]["version"] == "1.4.0"
+    assert openapi["info"]["version"] == "1.5.0"
     assert openapi["servers"] == [{"url": "/api"}]
     assert set(openapi["paths"]) == {
         "/v1",
@@ -401,6 +404,222 @@ def test_api_key_lifecycle_and_scope():
     assert config.readonly_api_key_hint == ""
     assert config.readonly_api_key_created_at is None
 
+
+
+@pytest.mark.django_db
+def test_system_user_api_key_follows_live_page_and_data_permissions():
+    user_model = get_user_model()
+    user_model.objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    viewer = user_model.objects.create_user(
+        username="viewer",
+        password="viewer-password",
+    )
+    SystemUserPageAccess.objects.bulk_create(
+        [
+            SystemUserPageAccess(user=viewer, page_code=page_code)
+            for page_code in (
+                PagePermission.SETTINGS,
+                PagePermission.ACCOUNT_STATUS,
+                PagePermission.PARTICIPANTS,
+                PagePermission.OBSERVATIONS,
+                PagePermission.PARTICLE_FILTER,
+            )
+        ]
+    )
+    allowed_account = MonitoredAccount.objects.create(
+        external_account_id=7,
+        name="授权账号",
+    )
+    hidden_account = MonitoredAccount.objects.create(
+        external_account_id=8,
+        name="隐藏账号",
+    )
+    viewer.visible_monitored_accounts.add(allowed_account)
+    visible_participant = Participant.objects.create(
+        name="授权参与者",
+        sub2api_user_id=21,
+    )
+    hidden_participant = Participant.objects.create(
+        name="隐藏参与者",
+        sub2api_user_id=22,
+    )
+    viewer.quota_participants.add(visible_participant)
+    for account in (allowed_account, hidden_account):
+        AccountParticipant.objects.create(
+            account=account,
+            participant=visible_participant,
+        )
+        PoolParticipant.objects.create(
+            pool=account.pool,
+            participant=visible_participant,
+            share_percent=Decimal("40"),
+        )
+    now = timezone.now()
+    observations = {}
+    for offset, account in enumerate((allowed_account, hidden_account)):
+        observations[account.id] = Observation.objects.create(
+            account_id=account.external_account_id,
+            observed_at=now + timedelta(minutes=offset),
+            window_seconds=604800,
+            upstream_resets_at=now + timedelta(days=3),
+            attribution_started_at=now - timedelta(days=4),
+            upstream_used_percent=Decimal("20"),
+            interval_used_percent=Decimal("20"),
+            raw_selected_total_cost=Decimal("400"),
+            selected_total_cost=Decimal("400"),
+            total_standard_cost=Decimal("400"),
+            total_actual_cost=Decimal("400"),
+            effective_usd_per_percent=Decimal("20"),
+        )
+
+    client = Client()
+    viewer_headers, _ = jwt_login(
+        client,
+        username="viewer",
+        password="viewer-password",
+    )
+    state = client.get("/api/settings/my-api-key", **viewer_headers)
+    assert state.status_code == 200
+    assert state.json()["data"] == {
+        "configured": False,
+        "hint": "",
+        "created_at": None,
+    }
+
+    generated = client.post(
+        "/api/settings/my-api-key",
+        **viewer_headers,
+    ).json()["data"]
+    api_key = generated["api_key"]
+    record = SystemUserAPIKey.objects.get(user=viewer)
+    assert record.key_hash == hash_api_key(api_key)
+    assert record.hint == api_key[-4:]
+
+    api_headers = {"HTTP_AUTHORIZATION": f"Bearer {api_key}"}
+    index = client.get("/api/v1", **api_headers)
+    assert index.status_code == 200
+    index_data = index.json()["data"]
+    assert index_data["authentication"]["permissions"] == "page_scoped"
+    expected_paths = {
+        "/api/v1/accounts",
+        "/api/v1/account-status",
+        "/api/v1/participants",
+        "/api/v1/particle-trajectory",
+        "/api/v1/observations",
+        "/api/v1/observations/{observation_id}/fast-correction",
+    }
+    assert {
+        endpoint["path"] for endpoint in index_data["endpoints"]
+    } == expected_paths
+
+    openapi = client.get("/api/v1/openapi.json", **api_headers).json()
+    assert openapi["info"]["version"] == "1.5.0"
+    assert set(openapi["paths"]) == {
+        "/v1",
+        "/v1/openapi.json",
+        *(path.removeprefix("/api") for path in expected_paths),
+    }
+    assert "/v1/recommendations/{participant_id}/apply" not in openapi["paths"]
+
+    accounts = client.get("/api/v1/accounts", **api_headers)
+    assert accounts.status_code == 200
+    assert [item["id"] for item in accounts.json()["data"]] == [
+        allowed_account.id
+    ]
+
+    participants = client.get("/api/v1/participants", **api_headers)
+    assert participants.status_code == 200
+    participant_rows = participants.json()["data"]
+    assert [item["id"] for item in participant_rows] == [
+        visible_participant.id
+    ]
+    assert [
+        item["account_id"]
+        for item in participant_rows[0]["account_breakdowns"]
+    ] == [allowed_account.id]
+    assert hidden_participant.id not in {
+        item["id"] for item in participant_rows
+    }
+
+    allowed_observations = client.get(
+        f"/api/v1/observations?account_id={allowed_account.id}",
+        **api_headers,
+    )
+    assert allowed_observations.status_code == 200
+    assert [
+        item["id"] for item in allowed_observations.json()["data"]["items"]
+    ] == [observations[allowed_account.id].id]
+    assert (
+        client.get(
+            f"/api/v1/observations?account_id={hidden_account.id}",
+            **api_headers,
+        ).status_code
+        == 400
+    )
+    assert (
+        client.get(
+            (
+                "/api/v1/observations/"
+                f"{observations[hidden_account.id].id}/fast-correction"
+            ),
+            **api_headers,
+        ).status_code
+        == 404
+    )
+    viewer.visible_monitored_accounts.clear()
+    no_account_observations = client.get(
+        "/api/v1/observations",
+        **api_headers,
+    )
+    assert no_account_observations.status_code == 200
+    assert no_account_observations.json()["data"]["items"] == []
+    assert no_account_observations.json()["data"]["pagination"]["total"] == 0
+    assert client.get("/api/v1/dashboard", **api_headers).status_code == 403
+    assert (
+        client.post(
+            f"/api/v1/recommendations/{visible_participant.id}/apply",
+            **api_headers,
+        ).status_code
+        == 403
+    )
+
+    SystemUserPageAccess.objects.filter(
+        user=viewer,
+        page_code=PagePermission.PARTICLE_FILTER,
+    ).delete()
+    refreshed_index = client.get("/api/v1", **api_headers).json()["data"]
+    assert "/api/v1/particle-trajectory" not in {
+        endpoint["path"] for endpoint in refreshed_index["endpoints"]
+    }
+    assert (
+        client.get("/api/v1/particle-trajectory", **api_headers).status_code
+        == 403
+    )
+
+    rotated_key = client.post(
+        "/api/settings/my-api-key",
+        **viewer_headers,
+    ).json()["data"]["api_key"]
+    assert rotated_key != api_key
+    assert client.get("/api/v1", **api_headers).status_code == 401
+    rotated_headers = {"HTTP_AUTHORIZATION": f"Bearer {rotated_key}"}
+    assert client.get("/api/v1", **rotated_headers).status_code == 200
+    viewer.is_active = False
+    viewer.save(update_fields=["is_active"])
+    assert client.get("/api/v1", **rotated_headers).status_code == 401
+    viewer.is_active = True
+    viewer.save(update_fields=["is_active"])
+    assert client.get("/api/v1", **rotated_headers).status_code == 200
+
+    revoked = client.delete("/api/settings/my-api-key", **viewer_headers)
+    assert revoked.status_code == 200
+    assert revoked.json()["data"] == {"revoked": True}
+    assert not SystemUserAPIKey.objects.filter(user=viewer).exists()
+    assert client.get("/api/v1", **rotated_headers).status_code == 401
 
 @pytest.mark.django_db
 def test_recommendation_api_matches_homepage_and_includes_source_details():

@@ -134,6 +134,21 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
     assert missing_account_scope.status_code == 400
     assert missing_account_scope.json()["details"]["account_ids"]
 
+    missing_particle_account_scope = client.patch(
+        f"/api/system-users/{user_id}/permissions",
+        data=json.dumps(
+            {
+                "page_permissions": ["particle_filter"],
+                "participant_ids": [],
+                "account_ids": [],
+            }
+        ),
+        content_type="application/json",
+        **admin_headers,
+    )
+    assert missing_particle_account_scope.status_code == 400
+    assert missing_particle_account_scope.json()["details"]["account_ids"]
+
     granted_pages = [
         "dashboard",
         "account_status",
@@ -376,7 +391,7 @@ def test_regular_user_page_access_and_participant_scope_are_enforced():
             {
                 "page_permissions": ["statistics"],
                 "participant_ids": [second.id],
-                "account_ids": [],
+                "account_ids": [visible_account.id],
             }
         ),
         content_type="application/json",
@@ -443,6 +458,7 @@ def test_non_participant_page_grants_allow_read_dependencies():
         username="page-viewer",
         password="page-viewer-password",
     )
+    account = create_monitored_account(7, name="授权账号")
     admin_client = Client()
     admin_headers, _ = jwt_login(admin_client)
     response = admin_client.patch(
@@ -455,7 +471,7 @@ def test_non_participant_page_grants_allow_read_dependencies():
                     "settings",
                 ],
                 "participant_ids": [],
-                "account_ids": [],
+                "account_ids": [account.id],
             }
         ),
         content_type="application/json",
