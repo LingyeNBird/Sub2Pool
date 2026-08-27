@@ -9,6 +9,7 @@ from .accounting.adaptive_range import run_adaptive_range_filter
 from .accounting.boundaries import participant_raw_costs
 from .accounting.contracts import ALGORITHM_VERSION, ReplaySegment
 from .accounting.model_inputs import (
+    DynamicReplayInput,
     build_dynamic_replay_input,
     stable_segment_seed,
 )
@@ -137,10 +138,71 @@ def _initial_capacity(segment: ReplaySegment) -> float | None:
     return None
 
 
+def _cycle_usage_data(
+    segment: ReplaySegment,
+    replay_input: DynamicReplayInput,
+    latest_point: dict,
+    allowed_participant_ids: set[int] | None,
+) -> dict:
+    """Return selected-cycle costs from the same FAST-corrected replay input."""
+
+    latest_row = replay_input.observation_row_indices[-1]
+    participant_by_id = {}
+    for observation in segment.observations:
+        for snapshot in observation.participant_snapshots.all():
+            participant_by_id[snapshot.participant_id] = snapshot.participant
+
+    participants = []
+    for participant_id, participant in sorted(
+        participant_by_id.items(),
+        key=lambda item: (not item[1].is_owner, item[0]),
+    ):
+        if (
+            allowed_participant_ids is not None
+            and participant_id not in allowed_participant_ids
+        ):
+            continue
+        subject_index = replay_input.participant_subject_indices.get(
+            participant_id
+        )
+        if subject_index is None:
+            continue
+        participants.append(
+            {
+                "participant_id": participant_id,
+                "participant_name": participant.name,
+                "is_owner": participant.is_owner,
+                "used_usd": round(
+                    float(
+                        replay_input.model_input.costs_usd[
+                            latest_row,
+                            subject_index,
+                        ]
+                    ),
+                    6,
+                ),
+            }
+        )
+
+    latest_observation = segment.observations[-1]
+    return {
+        "observed_at": iso(latest_observation.observed_at),
+        "estimated_used_percent": latest_point["estimated_percent"],
+        "displayed_used_percent": latest_point["displayed_percent"],
+        "account_total_usd": round(
+            float(replay_input.selected_totals[-1]),
+            6,
+        ),
+        "participants": participants,
+    }
+
+
 def particle_trajectory_data(
     config: AppSettings,
     account: MonitoredAccount,
     period_id: int | None = None,
+    *,
+    allowed_participant_ids: set[int] | None = None,
 ) -> dict:
     """Read-only replay for one selected account and historical period."""
 
@@ -317,6 +379,12 @@ def particle_trajectory_data(
             "reason_label": REASON_LABELS.get(segment.reason, segment.reason),
             "observation_count": len(points),
         },
+        "cycle_usage": _cycle_usage_data(
+            segment,
+            replay_input,
+            latest,
+            allowed_participant_ids,
+        ),
         "latest": {
             "observed_at": latest["observed_at"],
             "capacity_usd": latest["capacity_usd"],

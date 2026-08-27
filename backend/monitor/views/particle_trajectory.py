@@ -1,6 +1,7 @@
 """粒子滤波历史周期轨迹接口。"""
 
 from .base import PageAccessAPIView, error, ok
+from ..access import visible_participant_ids
 from ..api_auth import APIKeyAuthentication
 from ..models import AppSettings, PagePermission
 from .query_params import monitored_account_query
@@ -30,6 +31,9 @@ class ParticleTrajectoryView(PageAccessAPIView):
                     AppSettings.load(),
                     account,
                     period_id=period_id,
+                    allowed_participant_ids=visible_participant_ids(
+                        request.user
+                    ),
                 )
             )
         except ValueError as exc:

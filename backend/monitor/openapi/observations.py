@@ -256,6 +256,9 @@ def observation_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                     },
                 },
                 "segment": {"type": "object"},
+                "cycle_usage": {
+                    "$ref": "#/components/schemas/TrajectoryCycleUsage"
+                },
                 "latest": {"type": "object"},
                 "points": {
                     "type": "array",
@@ -269,6 +272,46 @@ def observation_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                         "$ref": "#/components/schemas/RangePromotion"
                     },
                 },
+            },
+        },
+        "TrajectoryCycleUsage": {
+            "type": "object",
+            "required": [
+                "observed_at",
+                "account_total_usd",
+                "estimated_used_percent",
+                "displayed_used_percent",
+                "participants",
+            ],
+            "properties": {
+                "observed_at": {"type": "string", "format": "date-time"},
+                "account_total_usd": {"type": "number"},
+                "estimated_used_percent": {"type": "number"},
+                "displayed_used_percent": {"type": "number"},
+                "participants": {
+                    "type": "array",
+                    "items": {
+                        "$ref": (
+                            "#/components/schemas/"
+                            "TrajectoryParticipantUsage"
+                        )
+                    },
+                },
+            },
+        },
+        "TrajectoryParticipantUsage": {
+            "type": "object",
+            "required": [
+                "participant_id",
+                "participant_name",
+                "is_owner",
+                "used_usd",
+            ],
+            "properties": {
+                "participant_id": {"type": "integer"},
+                "participant_name": {"type": "string"},
+                "is_owner": {"type": "boolean"},
+                "used_usd": {"type": "number"},
             },
         },
         "TrajectoryPeriod": {

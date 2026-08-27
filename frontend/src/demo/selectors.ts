@@ -52,6 +52,9 @@ export function trajectoryData(
     state.monitoredAccounts.find((item) => item.id === accountId) ??
     state.monitoredAccounts.find((item) => item.enabled) ??
     state.monitoredAccounts[0];
+  const latestObservation = state.observations.find(
+    (item) => item.id === period.observationIds.at(-1),
+  );
   return {
     account: account
       ? {
@@ -76,6 +79,22 @@ export function trajectoryData(
       reason: "upstream_reset",
       reason_label: "上游周期重置",
       observation_count: period.observationIds.length,
+    },
+    cycle_usage: {
+      observed_at: latest.observed_at,
+      estimated_used_percent: latest.estimated_percent,
+      displayed_used_percent: latest.displayed_percent,
+      account_total_usd: latestObservation?.selected_total_cost ?? 0,
+      participants:
+        latestObservation?.participants.map((snapshot) => ({
+          participant_id: snapshot.participant_id,
+          participant_name: snapshot.participant_name,
+          is_owner:
+            state.participants.find(
+              (participant) => participant.id === snapshot.participant_id,
+            )?.is_owner ?? false,
+          used_usd: snapshot.selected_cost,
+        })) ?? [],
     },
     latest: {
       observed_at: latest.observed_at,

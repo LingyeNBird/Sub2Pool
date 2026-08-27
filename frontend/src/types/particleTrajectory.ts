@@ -43,6 +43,19 @@ export interface ParticleTrajectoryPeriod {
   observation_count: number;
   is_current: boolean;
 }
+export interface ParticleCycleParticipantUsage {
+  participant_id: number;
+  participant_name: string;
+  is_owner: boolean;
+  used_usd: number;
+}
+export interface ParticleCycleUsage {
+  observed_at: string;
+  estimated_used_percent: number;
+  displayed_used_percent: number;
+  account_total_usd: number;
+  participants: ParticleCycleParticipantUsage[];
+}
 export interface ParticleTrajectoryData {
   account?: Pick<MonitoredAccount, "id" | "external_account_id" | "name">;
   available: boolean;
@@ -62,6 +75,7 @@ export interface ParticleTrajectoryData {
     reason_label: string;
     observation_count: number;
   };
+  cycle_usage?: ParticleCycleUsage;
   latest?: {
     observed_at: string;
     capacity_usd: number;

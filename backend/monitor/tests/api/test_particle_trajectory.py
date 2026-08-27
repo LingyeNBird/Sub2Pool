@@ -9,7 +9,10 @@ from django.utils import timezone
 from monitor.models import (
     AppSettings,
     Observation,
+    ObservationFastCorrection,
     PagePermission,
+    Participant,
+    ParticipantSnapshot,
     SystemUserPageAccess,
 )
 from monitor.replay import rebuild_account, rebuild_observation_suffix
@@ -26,6 +29,10 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
     )
     config = AppSettings.load()
     create_monitored_account(7)
+    participant = Participant.objects.create(
+        name="车友甲",
+        sub2api_user_id=51,
+    )
     config.save()
 
     started_at = timezone.now() - timedelta(hours=12)
@@ -55,6 +62,34 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
         total_standard_cost=Decimal("190"),
         total_actual_cost=Decimal("190"),
         effective_usd_per_percent=Decimal("16"),
+        fast_correction_started_at=started_at,
+        fast_correction_standard_cost=Decimal("20"),
+        fast_correction_actual_cost=Decimal("20"),
+        fast_correction_request_count=1,
+    )
+    ParticipantSnapshot.objects.create(
+        observation=first,
+        participant=participant,
+        share_percent=Decimal("40"),
+        selected_cost=Decimal("4"),
+        raw_selected_cost=Decimal("4"),
+    )
+    ParticipantSnapshot.objects.create(
+        observation=second,
+        participant=participant,
+        share_percent=Decimal("40"),
+        selected_cost=Decimal("104"),
+        raw_selected_cost=Decimal("104"),
+    )
+    ObservationFastCorrection.objects.create(
+        observation=second,
+        sub2api_user_id=participant.sub2api_user_id,
+        fast_request_count=1,
+        request_count=1,
+        fast_standard_cost=Decimal("80"),
+        fast_actual_cost=Decimal("80"),
+        standard_correction_cost=Decimal("20"),
+        actual_correction_cost=Decimal("20"),
     )
     rebuild_account(7, config)
     stored_before = list(
@@ -91,6 +126,20 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
             "is_current": True,
         }
     ]
+    assert data["cycle_usage"] == {
+        "observed_at": second.observed_at.isoformat(),
+        "estimated_used_percent": data["points"][-1]["estimated_percent"],
+        "displayed_used_percent": 10.0,
+        "account_total_usd": 200.0,
+        "participants": [
+            {
+                "participant_id": participant.id,
+                "participant_name": "车友甲",
+                "is_owner": False,
+                "used_usd": 120.0,
+            }
+        ],
+    }
     assert [point["observation_id"] for point in data["points"]] == [
         first.id,
         second.id,
@@ -112,6 +161,78 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
         )
         == stored_before
     )
+
+
+@pytest.mark.django_db
+def test_particle_trajectory_hides_unauthorized_participant_usage():
+    viewer = get_user_model().objects.create_user(
+        username="scoped-viewer",
+        password="very-strong-password",
+    )
+    SystemUserPageAccess.objects.create(
+        user=viewer,
+        page_code=PagePermission.PARTICLE_FILTER,
+    )
+    account = create_monitored_account(7)
+    viewer.visible_monitored_accounts.add(account)
+    visible = Participant.objects.create(
+        name="可见车友",
+        sub2api_user_id=61,
+    )
+    hidden = Participant.objects.create(
+        name="隐藏车友",
+        sub2api_user_id=62,
+    )
+    viewer.quota_participants.add(visible)
+
+    observed_at = timezone.now()
+    started_at = observed_at - timedelta(days=1)
+    observation = Observation.objects.create(
+        account_id=7,
+        source="scheduled",
+        observed_at=observed_at,
+        window_seconds=604800,
+        upstream_resets_at=started_at + timedelta(days=7),
+        attribution_started_at=started_at,
+        upstream_used_percent=Decimal("10"),
+        raw_selected_total_cost=Decimal("100"),
+        selected_total_cost=Decimal("100"),
+        total_standard_cost=Decimal("100"),
+        total_actual_cost=Decimal("100"),
+        effective_usd_per_percent=Decimal("16"),
+    )
+    for participant, cost in (
+        (visible, Decimal("30")),
+        (hidden, Decimal("40")),
+    ):
+        ParticipantSnapshot.objects.create(
+            observation=observation,
+            participant=participant,
+            share_percent=Decimal("40"),
+            selected_cost=cost,
+            raw_selected_cost=cost,
+        )
+
+    client = Client()
+    headers, _ = jwt_login(
+        client,
+        username="scoped-viewer",
+        password="very-strong-password",
+    )
+    response = client.get(
+        f"/api/particle-trajectory?account_id={account.id}",
+        **headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["cycle_usage"]["participants"] == [
+        {
+            "participant_id": visible.id,
+            "participant_name": "可见车友",
+            "is_owner": False,
+            "used_usd": 30.0,
+        }
+    ]
 
 
 @pytest.mark.django_db
@@ -187,6 +308,12 @@ def test_particle_trajectory_selects_historical_period():
         current_first.id,
         current_second.id,
     ]
+    assert current_data["cycle_usage"]["account_total_usd"] == 160.0
+    assert current_data["cycle_usage"]["displayed_used_percent"] == 8.0
+    assert (
+        current_data["cycle_usage"]["estimated_used_percent"]
+        == current_data["points"][-1]["estimated_percent"]
+    )
 
     historical_response = client.get(
         f"/api/particle-trajectory?period={old_first.id}",
@@ -202,6 +329,12 @@ def test_particle_trajectory_selects_historical_period():
         old_first.id,
         old_second.id,
     ]
+    assert historical_data["cycle_usage"]["account_total_usd"] == 180.0
+    assert historical_data["cycle_usage"]["displayed_used_percent"] == 10.0
+    assert (
+        historical_data["cycle_usage"]["estimated_used_percent"]
+        == historical_data["points"][-1]["estimated_percent"]
+    )
     old_period = historical_data["periods"][0]
     assert old_period["started_at"] == old_start.isoformat()
     assert (
@@ -400,7 +533,7 @@ def test_particle_trajectory_uses_only_authorized_accounts(monkeypatch):
     viewer.visible_monitored_accounts.add(allowed)
     monkeypatch.setattr(
         "monitor.views.particle_trajectory.particle_trajectory_data",
-        lambda _config, account, period_id=None: {
+        lambda _config, account, period_id=None, **_kwargs: {
             "account_id": account.id,
             "period_id": period_id,
         },

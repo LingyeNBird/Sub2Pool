@@ -40,6 +40,7 @@ const points = computed<ParticleTrajectoryPoint[]>(
 const promotions = computed<ParticleRangePromotion[]>(
   () => data.value?.promotions ?? [],
 );
+const cycleUsage = computed(() => data.value?.cycle_usage ?? null);
 const periods = computed<ParticleTrajectoryPeriod[]>(() =>
   [...(data.value?.periods ?? [])].reverse(),
 );
@@ -446,6 +447,94 @@ onBeforeUnmount(() => {
             >后验粒子点云
           </span>
         </div>
+      </div>
+    </section>
+
+    <section v-if="cycleUsage" class="card col-span-12 bg-base-200 shadow-xs">
+      <div class="card-body gap-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="card-title text-base">
+            <AppIcon name="banknotes" class="size-5" />本周期使用统计
+          </h2>
+          <span class="badge badge-soft badge-sm badge-success">
+            金额已含 FAST 修正
+          </span>
+        </div>
+
+        <div class="grid gap-4 lg:grid-cols-2">
+          <div class="stats stats-vertical bg-base-100 sm:stats-horizontal">
+            <div class="stat">
+              <div class="stat-title">账号本周期已用</div>
+              <div class="stat-value text-3xl">
+                {{ formatCurrency(cycleUsage.account_total_usd) }}
+              </div>
+              <div class="stat-desc">
+                {{ data.account?.name ?? "当前账号" }} · 截至
+                {{ dateTime(cycleUsage.observed_at) }}
+              </div>
+            </div>
+            <div class="stat">
+              <div class="stat-title">账号本周期已用百分比</div>
+              <div class="stat-value text-3xl">
+                {{ formatPercent(cycleUsage.estimated_used_percent) }}
+              </div>
+              <div class="stat-desc">
+                粒子估计 · 上游显示
+                {{ formatPercent(cycleUsage.displayed_used_percent) }}
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-box bg-base-100">
+            <div
+              class="flex flex-wrap items-center justify-between gap-2 px-4 pt-4"
+            >
+              <div class="font-semibold">参与者用量</div>
+              <div class="text-xs opacity-55">
+                从本周期起点累计到最后一条有效观测
+              </div>
+            </div>
+            <div v-if="cycleUsage.participants.length" class="overflow-x-auto">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>参与者</th>
+                    <th class="text-right">本周期已用</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="participant in cycleUsage.participants"
+                    :key="participant.participant_id"
+                  >
+                    <td>
+                      <span class="font-medium">
+                        {{ participant.participant_name }}
+                      </span>
+                      <span
+                        v-if="participant.is_owner"
+                        class="ml-2 badge badge-soft badge-xs badge-primary"
+                      >
+                        车主
+                      </span>
+                    </td>
+                    <td class="text-right font-semibold tabular-nums">
+                      {{ formatCurrency(participant.used_usd) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="px-4 py-8 text-center text-sm opacity-55">
+              该周期没有可见的参与者用量
+            </div>
+          </div>
+        </div>
+
+        <p class="text-xs opacity-55">
+          账号总额与参与者明细均按当前成本口径计算并包含已保存的 FAST
+          修正；未绑定用户或聚合口径差异可能使参与者明细之和与账号总额不同。
+        </p>
       </div>
     </section>
 
