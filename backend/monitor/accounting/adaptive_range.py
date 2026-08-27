@@ -13,19 +13,16 @@ from .dynamic_contracts import (
     DynamicModelInput,
     ParticleFilterOutput,
 )
-from .particle_filter import (
-    V_MAX,
-    V_MIN,
-    ParticleFilterConfig,
-    run_particle_filter,
+from .particle_filter import ParticleFilterConfig, run_particle_filter
+from ..quota_profiles import (
+    CapacityRangeProfile,
+    PRO_20X_CAPACITY_PROFILE,
 )
 
 ExpansionDirection = Literal["upper", "lower"]
 
 BOUNDARY_MASS_THRESHOLD = 0.10
 DISPLAY_RESIDUAL_THRESHOLD_PP = 0.05
-UPPER_STAGES_USD = (6000.0, 10000.0, 20000.0)
-LOWER_STAGES_USD = (700.0, 250.0, 50.0)
 
 
 @dataclass(frozen=True)
@@ -120,9 +117,7 @@ def _initial_promotion(
     lower_row = _first_signal(lower_signal)
     if upper_row is None and lower_row is None:
         return None, None
-    if lower_row is None or (
-        upper_row is not None and upper_row < lower_row
-    ):
+    if lower_row is None or (upper_row is not None and upper_row < lower_row):
         return "upper", upper_row
     if upper_row is None or lower_row < upper_row:
         return "lower", lower_row
@@ -170,12 +165,8 @@ def _overwrite_bounds(
 ) -> DeterministicBoundsOutput:
     target.total_percent_lower[start:] = source.total_percent_lower[start:]
     target.total_percent_upper[start:] = source.total_percent_upper[start:]
-    target.attributed_percent_lower[start:] = source.attributed_percent_lower[
-        start:
-    ]
-    target.attributed_percent_upper[start:] = source.attributed_percent_upper[
-        start:
-    ]
+    target.attributed_percent_lower[start:] = source.attributed_percent_lower[start:]
+    target.attributed_percent_upper[start:] = source.attributed_percent_upper[start:]
     target.balance_lower_usd[start:] = source.balance_lower_usd[start:]
     target.balance_upper_usd[start:] = source.balance_upper_usd[start:]
     return replace(
@@ -192,13 +183,15 @@ def run_adaptive_range_filter(
     *,
     seed: int,
     config: ParticleFilterConfig | None = None,
+    capacity_profile: CapacityRangeProfile = PRO_20X_CAPACITY_PROFILE,
 ) -> AdaptiveRangeOutput:
-    """从标准范围开始，按同方向持续证据逐级重放并扩张。"""
+    """从账号档位范围开始，按同方向持续证据逐级重放并扩张。"""
 
     base_config = replace(
         config or ParticleFilterConfig(),
-        capacity_min_usd=V_MIN,
-        capacity_max_usd=V_MAX,
+        capacity_min_usd=capacity_profile.capacity_min_usd,
+        capacity_max_usd=capacity_profile.capacity_max_usd,
+        initial_capacity_sd_usd=capacity_profile.initial_capacity_sd_usd,
     )
     base_particle = run_particle_filter(
         model_input,
@@ -207,14 +200,22 @@ def run_adaptive_range_filter(
     )
     base_bounds = run_deterministic_bounds(
         model_input,
-        capacity_min_usd=V_MIN,
-        capacity_max_usd=V_MAX,
+        capacity_min_usd=capacity_profile.capacity_min_usd,
+        capacity_max_usd=capacity_profile.capacity_max_usd,
     )
     particle = _copy_particle(base_particle)
     bounds = _copy_bounds(base_bounds)
     row_count = len(model_input.times_hours)
-    active_min = np.full(row_count, V_MIN, dtype=float)
-    active_max = np.full(row_count, V_MAX, dtype=float)
+    active_min = np.full(
+        row_count,
+        capacity_profile.capacity_min_usd,
+        dtype=float,
+    )
+    active_max = np.full(
+        row_count,
+        capacity_profile.capacity_max_usd,
+        dtype=float,
+    )
     active_stage = np.zeros(row_count, dtype=int)
 
     direction, promotion_row = _initial_promotion(
@@ -233,10 +234,14 @@ def run_adaptive_range_filter(
             filter_config=base_config,
         )
 
-    targets = UPPER_STAGES_USD if direction == "upper" else LOWER_STAGES_USD
+    targets = (
+        capacity_profile.upper_stages_usd
+        if direction == "upper"
+        else capacity_profile.lower_stages_usd
+    )
     current_particle = base_particle
-    current_min = V_MIN
-    current_max = V_MAX
+    current_min = capacity_profile.capacity_min_usd
+    current_max = capacity_profile.capacity_max_usd
     promotions: list[RangePromotion] = []
 
     for stage_number, target in enumerate(targets, start=1):

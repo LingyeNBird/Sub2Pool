@@ -44,6 +44,10 @@ def create_monitored_account(
     name: str | None = None,
     quota_query_mode: str = "passive",
     enabled: bool = True,
+    quota_profile: str = "auto",
+    detected_plan_type: str = "",
+    capacity_min_usd_override: Decimal | int | str | None = None,
+    capacity_max_usd_override: Decimal | int | str | None = None,
     pool: QuotaPool | None = None,
 ) -> MonitoredAccount:
     account = MonitoredAccount.objects.filter(
@@ -53,6 +57,10 @@ def create_monitored_account(
         "name": name or f"OpenAI 账号 {external_account_id}",
         "quota_query_mode": quota_query_mode,
         "enabled": enabled,
+        "quota_profile": quota_profile,
+        "detected_plan_type": detected_plan_type,
+        "capacity_min_usd_override": capacity_min_usd_override,
+        "capacity_max_usd_override": capacity_max_usd_override,
     }
     if account is None:
         account = MonitoredAccount.objects.create(

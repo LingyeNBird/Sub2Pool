@@ -22,7 +22,12 @@ from .models import (
     PoolParticipant,
 )
 from .notifications import notify_collection_error
-from .replay import RESET_ROLLBACK_TOLERANCE, rebuild_observation_suffix
+from .replay import (
+    RESET_ROLLBACK_TOLERANCE,
+    rebuild_account,
+    rebuild_observation_suffix,
+)
+from .quota_profiles import normalize_detected_plan_type
 from .sampling.local_usage import (
     fetch_interval_bridge_logs as _fetch_interval_bridge_logs,
     fetch_local as _fetch_local,
@@ -48,6 +53,31 @@ from .sampling.types import (
 )
 
 ZERO = Decimal("0")
+
+
+def _rebuild_capture(
+    account: MonitoredAccount,
+    window,
+    observation,
+    config: AppSettings,
+    guard: LeaseGuard,
+) -> None:
+    detected_plan_type = normalize_detected_plan_type(window.plan_type)
+    previous_profile = account.effective_quota_profile
+    with transaction.atomic():
+        if detected_plan_type and detected_plan_type != account.detected_plan_type:
+            account.detected_plan_type = detected_plan_type
+            account.save(
+                update_fields=["detected_plan_type", "updated_at"],
+            )
+        if account.effective_quota_profile != previous_profile:
+            rebuild_account(
+                account.external_account_id,
+                config,
+                guard=guard,
+            )
+        else:
+            rebuild_observation_suffix(observation, config, guard=guard)
 
 
 @transaction.atomic
@@ -104,8 +134,6 @@ def _persist_capture(
     return observation
 
 
-
-
 def _run_monitor_locked(
     config: AppSettings,
     account: MonitoredAccount,
@@ -148,9 +176,7 @@ def _run_monitor_locked(
     )
     memberships_by_participant = {
         item.participant_id: item
-        for item in AccountParticipant.objects.select_related(
-            "participant"
-        ).filter(
+        for item in AccountParticipant.objects.select_related("participant").filter(
             account=account,
             participant_id__in=[item.id for item in participants],
         )
@@ -209,7 +235,7 @@ def _run_monitor_locked(
                 fast_interval=fast_interval,
                 fast_error=fast_error,
             )
-            rebuild_observation_suffix(observation, config, guard=guard)
+            _rebuild_capture(account, window, observation, config, guard)
             observation.refresh_from_db()
             _finish_success(config, account, local.checked_at)
             if observation.excluded_at is None:
@@ -220,9 +246,7 @@ def _run_monitor_locked(
                 )
             return {
                 "status": (
-                    "calibrated"
-                    if observation.excluded_at is None
-                    else "reset_pending"
+                    "calibrated" if observation.excluded_at is None else "reset_pending"
                 ),
                 "observation_id": observation.pk,
                 "reason": (
@@ -350,7 +374,7 @@ def _run_monitor_locked(
             fast_interval=fast_interval,
             fast_error=fast_error,
         )
-        rebuild_observation_suffix(observation, config, guard=guard)
+        _rebuild_capture(account, window, observation, config, guard)
         observation.refresh_from_db()
         _finish_success(config, account, local.checked_at)
 

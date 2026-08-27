@@ -1,4 +1,5 @@
 """Passive and direct seven-day quota-window resources."""
+
 from datetime import datetime, timezone
 from typing import Any
 
@@ -6,7 +7,9 @@ from .dto import Sub2APIError, WeeklyWindow, _decimal
 
 
 class QuotaResourceMixin:
-    def query_weekly_window(self, account_id: int, mode: str = "passive") -> WeeklyWindow:
+    def query_weekly_window(
+        self, account_id: int, mode: str = "passive"
+    ) -> WeeklyWindow:
         """读取七天窗口。
 
         passive 只读取 Sub2API 已由真实转发请求写入账号 Extra 的快照；direct 才会调用
@@ -26,16 +29,22 @@ class QuotaResourceMixin:
             raise Sub2APIError("配置的账号不是 OpenAI 账号")
         extra = data.get("extra")
         if not isinstance(extra, dict) or "codex_7d_used_percent" not in extra:
-            raise Sub2APIError("Sub2API 尚无该账号的被动七天快照；请先通过该账号产生一次真实请求")
+            raise Sub2APIError(
+                "Sub2API 尚无该账号的被动七天快照；请先通过该账号产生一次真实请求"
+            )
 
         sampled_at = str(extra.get("codex_usage_updated_at") or "") or None
         reset_at = self._parse_passive_reset_at(extra, sampled_at)
         window_minutes = int(extra.get("codex_7d_window_minutes") or 10080)
         now_epoch = int(datetime.now(tz=timezone.utc).timestamp())
         if reset_at <= now_epoch:
-            raise Sub2APIError("Sub2API 中的被动七天快照已过期；等待下一次真实请求刷新后再测算")
+            raise Sub2APIError(
+                "Sub2API 中的被动七天快照已过期；等待下一次真实请求刷新后再测算"
+            )
         return WeeklyWindow(
-            used_percent=_decimal(extra.get("codex_7d_used_percent"), "extra.codex_7d_used_percent"),
+            used_percent=_decimal(
+                extra.get("codex_7d_used_percent"), "extra.codex_7d_used_percent"
+            ),
             window_seconds=window_minutes * 60,
             reset_after_seconds=max(0, reset_at - now_epoch),
             reset_at=reset_at,
@@ -50,7 +59,9 @@ class QuotaResourceMixin:
             try:
                 if isinstance(raw, (int, float)):
                     return int(raw)
-                return int(datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp())
+                return int(
+                    datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp()
+                )
             except (ValueError, TypeError):
                 pass
         reset_after = int(extra.get("codex_7d_reset_after_seconds") or 0)
@@ -71,10 +82,13 @@ class QuotaResourceMixin:
         sampled_at = None
         if fetched_at:
             try:
-                sampled_at = datetime.fromtimestamp(int(fetched_at), tz=timezone.utc).isoformat()
+                sampled_at = datetime.fromtimestamp(
+                    int(fetched_at), tz=timezone.utc
+                ).isoformat()
             except (ValueError, TypeError, OSError):
                 sampled_at = None
 
+        plan_type = str(data.get("plan_type") or "").strip() or None
         candidates: list[WeeklyWindow] = []
         for slot in ("primary_window", "secondary_window"):
             item = rate_limit.get(slot)
@@ -83,26 +97,38 @@ class QuotaResourceMixin:
             seconds = int(item.get("limit_window_seconds") or 0)
             candidates.append(
                 WeeklyWindow(
-                    used_percent=_decimal(item.get("used_percent"), f"{slot}.used_percent"),
+                    used_percent=_decimal(
+                        item.get("used_percent"), f"{slot}.used_percent"
+                    ),
                     window_seconds=seconds,
                     reset_after_seconds=int(item.get("reset_after_seconds") or 0),
                     reset_at=int(item.get("reset_at") or 0),
                     slot=slot,
                     sampled_at=sampled_at,
+                    plan_type=plan_type,
                 )
             )
         if not candidates:
             raise Sub2APIError("OpenAI 账号没有主窗口或次窗口数据")
         weekly = min(candidates, key=lambda item: abs(item.window_seconds - 604800))
         if abs(weekly.window_seconds - 604800) > 86400:
-            raise Sub2APIError(f"未找到七天窗口，最接近的窗口为 {weekly.window_seconds} 秒")
+            raise Sub2APIError(
+                f"未找到七天窗口，最接近的窗口为 {weekly.window_seconds} 秒"
+            )
         if weekly.reset_at <= 0:
             raise Sub2APIError("七天窗口缺少 reset_at")
         return weekly
 
-    def test_connection(self, account_id: int | None, quota_query_mode: str = "passive") -> dict[str, Any]:
+    def test_connection(
+        self, account_id: int | None, quota_query_mode: str = "passive"
+    ) -> dict[str, Any]:
         users = self._get("api/v1/admin/users", params={"page": 1, "page_size": 1})
-        result: dict[str, Any] = {"users_api": "ok", "user_count": (users or {}).get("total") if isinstance(users, dict) else None}
+        result: dict[str, Any] = {
+            "users_api": "ok",
+            "user_count": (users or {}).get("total")
+            if isinstance(users, dict)
+            else None,
+        }
         if account_id:
             window = self.query_weekly_window(account_id, quota_query_mode)
             result.update(
@@ -112,6 +138,7 @@ class QuotaResourceMixin:
                     "used_percent": float(window.used_percent),
                     "reset_at": window.reset_at,
                     "sampled_at": window.sampled_at,
+                    "plan_type": window.plan_type,
                 }
             )
         return result

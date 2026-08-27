@@ -1,4 +1,5 @@
 """Typed facts returned by the Sub2API Admin API."""
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -17,6 +18,7 @@ class WeeklyWindow:
     reset_at: int
     slot: str
     sampled_at: str | None = None
+    plan_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -55,7 +57,6 @@ class Sub2APIUsageLog:
 
     def selected(self, basis: str) -> Decimal:
         return self.actual_cost if basis == "actual" else self.total_cost
-
 
 
 @dataclass(frozen=True)

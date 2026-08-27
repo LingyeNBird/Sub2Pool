@@ -14,6 +14,13 @@ from monitor.accounting.particle_filter import (
     ParticleFilterConfig,
     run_particle_filter,
 )
+from monitor.quota_profiles import (
+    PLUS_CAPACITY_PROFILE,
+    PRO_5X_CAPACITY_PROFILE,
+    PRO_20X_CAPACITY_PROFILE,
+    capacity_range_profile,
+    normalize_detected_plan_type,
+)
 
 
 def _constant_capacity_input() -> DynamicModelInput:
@@ -119,9 +126,7 @@ def test_adaptive_range_replays_lower_stages_when_evidence_persists():
 def test_expanded_capacity_support_tracks_values_above_legacy_ceiling():
     model_input = DynamicModelInput(
         times_hours=np.asarray([0.0, 12.0, 24.0, 36.0]),
-        costs_usd=np.asarray(
-            [[0.0], [140.0], [280.0], [560.0]]
-        ),
+        costs_usd=np.asarray([[0.0], [140.0], [280.0], [560.0]]),
         displayed_percent=np.asarray([0.0, 5.0, 10.0, 20.0]),
         rights_percent=np.asarray([100.0]),
     )
@@ -140,6 +145,93 @@ def test_expanded_capacity_support_tracks_values_above_legacy_ceiling():
     assert abs(expanded.total_percent_hat[-1] - 20.0) < abs(
         legacy.total_percent_hat[-1] - 20.0
     )
+
+
+def test_plus_profile_tracks_chatgpt_plus_scale_without_expansion():
+    model_input = DynamicModelInput(
+        times_hours=np.asarray([0.0, 12.0]),
+        costs_usd=np.asarray([[0.0], [65.0]]),
+        displayed_percent=np.asarray([0.0, 44.0]),
+        rights_percent=np.asarray([100.0]),
+    )
+
+    output = run_adaptive_range_filter(
+        model_input,
+        seed=20260827,
+        capacity_profile=PLUS_CAPACITY_PROFILE,
+    )
+
+    assert output.direction is None
+    assert output.particle.capacity_hat_usd[-1] == pytest.approx(
+        65.0 / 0.44,
+        abs=8.0,
+    )
+    np.testing.assert_array_equal(output.capacity_min_usd, 100.0)
+    np.testing.assert_array_equal(output.capacity_max_usd, 200.0)
+
+
+@pytest.mark.parametrize(
+    ("costs", "direction", "expected_stages"),
+    [
+        (
+            [[0.0], [40.0], [80.0], [120.0]],
+            "upper",
+            [(100.0, 300.0), (100.0, 500.0)],
+        ),
+        (
+            [[0.0], [4.0], [8.0], [12.0]],
+            "lower",
+            [(50.0, 200.0), (25.0, 200.0)],
+        ),
+    ],
+)
+def test_plus_profile_expands_in_both_directions(
+    costs,
+    direction,
+    expected_stages,
+):
+    output = run_adaptive_range_filter(
+        DynamicModelInput(
+            times_hours=np.asarray([0.0, 12.0, 24.0, 36.0]),
+            costs_usd=np.asarray(costs),
+            displayed_percent=np.asarray([0.0, 10.0, 20.0, 30.0]),
+            rights_percent=np.asarray([100.0]),
+        ),
+        seed=81,
+        capacity_profile=PLUS_CAPACITY_PROFILE,
+    )
+
+    assert output.direction == direction
+    assert [
+        (item.to_min_usd, item.to_max_usd) for item in output.promotions
+    ] == expected_stages
+
+
+def test_pro_5x_profile_uses_revised_base_and_auto_detects_plus_or_pro():
+    assert PRO_5X_CAPACITY_PROFILE.capacity_min_usd == 500.0
+    assert PRO_5X_CAPACITY_PROFILE.capacity_max_usd == 1500.0
+    assert PRO_5X_CAPACITY_PROFILE.upper_stages_usd == tuple(
+        value / 2 for value in PRO_20X_CAPACITY_PROFILE.upper_stages_usd
+    )
+    assert PRO_5X_CAPACITY_PROFILE.lower_stages_usd == tuple(
+        value / 2 for value in PRO_20X_CAPACITY_PROFILE.lower_stages_usd
+    )
+    assert normalize_detected_plan_type("chatgptplus") == "plus"
+    assert normalize_detected_plan_type("chatgpt_pro") == "pro"
+    assert capacity_range_profile("auto", "plus") is PLUS_CAPACITY_PROFILE
+    assert capacity_range_profile("auto", "pro") is PRO_20X_CAPACITY_PROFILE
+
+
+def test_capacity_profile_accepts_per_account_base_range():
+    custom = capacity_range_profile("pro_5x", "", 600, 1400)
+
+    assert custom.capacity_min_usd == 600.0
+    assert custom.capacity_max_usd == 1400.0
+    assert custom.upper_stages_usd == PRO_5X_CAPACITY_PROFILE.upper_stages_usd
+    assert custom.lower_stages_usd == PRO_5X_CAPACITY_PROFILE.lower_stages_usd
+    assert PRO_5X_CAPACITY_PROFILE.capacity_min_usd == 500.0
+    assert PRO_5X_CAPACITY_PROFILE.capacity_max_usd == 1500.0
+
 
 def test_particle_filter_supports_uncertain_manual_baseline():
     model_input = DynamicModelInput(
@@ -169,12 +261,13 @@ def test_deterministic_bounds_contain_constant_case_truth():
     assert output.total_percent_upper[-1] >= 20.0
     assert output.infeasible_repairs == 0
 
+
 def test_guarded_projection_restores_deterministic_progress_feasibility():
     bounds = run_deterministic_bounds(_constant_capacity_input())
     impossible = np.zeros_like(bounds.attributed_percent_lower)
 
-    projected, repaired_rows, max_adjustment = (
-        project_attribution_to_bounds(impossible, bounds)
+    projected, repaired_rows, max_adjustment = project_attribution_to_bounds(
+        impossible, bounds
     )
 
     assert repaired_rows > 0
@@ -191,9 +284,7 @@ def test_guarded_projection_preserves_cumulative_monotonicity():
         total_percent_lower=np.asarray([0.0, 5.0, 10.0]),
         total_percent_upper=np.asarray([0.0, 5.0, 10.0]),
         attributed_percent_lower=np.zeros((3, 2)),
-        attributed_percent_upper=np.asarray(
-            [[0.0, 0.0], [5.0, 5.0], [10.0, 10.0]]
-        ),
+        attributed_percent_upper=np.asarray([[0.0, 0.0], [5.0, 5.0], [10.0, 10.0]]),
         balance_lower_usd=np.zeros((3, 2)),
         balance_upper_usd=np.zeros((3, 2)),
         infeasible_repairs=0,

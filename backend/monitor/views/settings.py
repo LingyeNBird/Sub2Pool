@@ -1,4 +1,5 @@
 """系统业务设置与连接测试 API。"""
+
 from datetime import timedelta
 
 from django.db import transaction
@@ -124,9 +125,7 @@ class SettingsView(AdminAPIView):
                     pk=config.pk
                 )
                 if locked_config.updated_at != config.updated_at:
-                    raise LeaseLostError(
-                        "系统设置已被其他请求修改，请刷新后重试"
-                    )
+                    raise LeaseLostError("系统设置已被其他请求修改，请刷新后重试")
                 serializer.instance = locked_config
                 config = serializer.save()
                 for account_id in derived_account_ids:
@@ -248,14 +247,26 @@ class MonitoredAccountDetailView(AdminAPIView):
         )
         if not serializer.is_valid():
             return error("监控账号校验失败", details=serializer.errors)
-        affected_account_ids = list(
-            MonitoredAccount.objects.order_by().values_list(
-                "external_account_id",
-                flat=True,
+        external_account_id = account.external_account_id
+        previous_capacity_profile = account.resolved_capacity_profile
+        try:
+            with fenced_fact_write(
+                [external_account_id],
+                ttl=timedelta(minutes=30),
+            ) as guards:
+                account = serializer.save()
+                if account.resolved_capacity_profile != previous_capacity_profile:
+                    rebuild_account(
+                        external_account_id,
+                        AppSettings.load(),
+                        guard=guards[external_account_id],
+                    )
+        except ValueError as exc:
+            return error(
+                "账号档位未保存：历史派生结果重建失败",
+                409,
+                {"replay": [str(exc)]},
             )
-        )
-        with fenced_fact_write(affected_account_ids):
-            account = serializer.save()
         return ok(MonitoredAccountSerializer(account).data)
 
     def delete(self, _request, account_id: int):
@@ -352,9 +363,7 @@ def _system_user_api_key_data(user) -> dict:
     return {
         "configured": record is not None,
         "hint": record.hint if record is not None else "",
-        "created_at": (
-            record.created_at.isoformat() if record is not None else None
-        ),
+        "created_at": (record.created_at.isoformat() if record is not None else None),
     }
 
 

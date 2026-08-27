@@ -1,4 +1,5 @@
 """Singleton application settings model."""
+
 from decimal import Decimal
 
 from django.conf import settings
@@ -8,6 +9,12 @@ from django.db import models, transaction
 from ..fast_correction.rules import (
     default_fast_correction_rules,
     validate_fast_correction_rules,
+)
+from ..quota_profiles import (
+    QUOTA_PROFILE_CHOICES,
+    CapacityRangeProfile,
+    capacity_range_profile,
+    effective_quota_profile,
 )
 from .validators import validate_service_url
 
@@ -38,6 +45,32 @@ class MonitoredAccount(models.Model):
         choices=QUERY_MODE_CHOICES,
         default="passive",
     )
+    quota_profile = models.CharField(
+        max_length=16,
+        choices=QUOTA_PROFILE_CHOICES,
+        default="auto",
+    )
+    detected_plan_type = models.CharField(max_length=16, blank=True)
+    capacity_min_usd_override = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[
+            MinValueValidator(Decimal("1")),
+            MaxValueValidator(Decimal("50000")),
+        ],
+    )
+    capacity_max_usd_override = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[
+            MinValueValidator(Decimal("1")),
+            MaxValueValidator(Decimal("50000")),
+        ],
+    )
     last_local_check_at = models.DateTimeField(null=True, blank=True)
     last_upstream_check_at = models.DateTimeField(null=True, blank=True)
     last_success_at = models.DateTimeField(null=True, blank=True)
@@ -48,6 +81,26 @@ class MonitoredAccount(models.Model):
 
     class Meta:
         ordering = ["name", "external_account_id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        capacity_min_usd_override__isnull=True,
+                        capacity_max_usd_override__isnull=True,
+                    )
+                    | models.Q(
+                        capacity_min_usd_override__isnull=False,
+                        capacity_max_usd_override__isnull=False,
+                        capacity_min_usd_override__gte=Decimal("1"),
+                        capacity_max_usd_override__lte=Decimal("50000"),
+                        capacity_min_usd_override__lt=models.F(
+                            "capacity_max_usd_override"
+                        ),
+                    )
+                ),
+                name="account_capacity_range_valid",
+            )
+        ]
         verbose_name = "监控上游账号"
         verbose_name_plural = "监控上游账号"
 
@@ -59,6 +112,22 @@ class MonitoredAccount(models.Model):
         with transaction.atomic():
             self.pool = QuotaPool.for_new_account(self.name)
             return super().save(*args, **kwargs)
+
+    @property
+    def effective_quota_profile(self) -> str:
+        return effective_quota_profile(
+            self.quota_profile,
+            self.detected_plan_type,
+        )
+
+    @property
+    def resolved_capacity_profile(self) -> CapacityRangeProfile:
+        return capacity_range_profile(
+            self.quota_profile,
+            self.detected_plan_type,
+            self.capacity_min_usd_override,
+            self.capacity_max_usd_override,
+        )
 
     def __str__(self) -> str:
         return f"{self.name} ({self.external_account_id})"
@@ -103,9 +172,13 @@ class AppSettings(models.Model):
         default=default_fast_correction_rules,
         validators=[validate_fast_correction_rules],
     )
-    initial_usd_per_percent = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("16"))
+    initial_usd_per_percent = models.DecimalField(
+        max_digits=12, decimal_places=4, default=Decimal("16")
+    )
     safety_factor = models.DecimalField(
-        max_digits=6, decimal_places=4, default=Decimal("0.95"),
+        max_digits=6,
+        decimal_places=4,
+        default=Decimal("0.95"),
         validators=[MinValueValidator(Decimal("0.1")), MaxValueValidator(Decimal("1"))],
     )
     daily_estimate_min_percent_span = models.DecimalField(
@@ -118,23 +191,53 @@ class AppSettings(models.Model):
         ],
     )
 
-    local_poll_minutes = models.PositiveIntegerField(default=10, validators=[MinValueValidator(2), MaxValueValidator(1440)])
-    progress_threshold_percent = models.DecimalField(
-        max_digits=6, decimal_places=3, default=Decimal("0.75"),
-        validators=[MinValueValidator(Decimal("0.1")), MaxValueValidator(Decimal("10"))],
+    local_poll_minutes = models.PositiveIntegerField(
+        default=10, validators=[MinValueValidator(2), MaxValueValidator(1440)]
     )
-    active_max_calibration_hours = models.PositiveIntegerField(default=8, validators=[MinValueValidator(1), MaxValueValidator(168)])
-    reset_proximity_minutes = models.PositiveIntegerField(default=30, validators=[MinValueValidator(5), MaxValueValidator(1440)])
-    stale_warning_hours = models.PositiveIntegerField(default=12, validators=[MinValueValidator(1), MaxValueValidator(336)])
+    progress_threshold_percent = models.DecimalField(
+        max_digits=6,
+        decimal_places=3,
+        default=Decimal("0.75"),
+        validators=[
+            MinValueValidator(Decimal("0.1")),
+            MaxValueValidator(Decimal("10")),
+        ],
+    )
+    active_max_calibration_hours = models.PositiveIntegerField(
+        default=8, validators=[MinValueValidator(1), MaxValueValidator(168)]
+    )
+    reset_proximity_minutes = models.PositiveIntegerField(
+        default=30, validators=[MinValueValidator(5), MaxValueValidator(1440)]
+    )
+    stale_warning_hours = models.PositiveIntegerField(
+        default=12, validators=[MinValueValidator(1), MaxValueValidator(336)]
+    )
 
-    limit_warning_usd = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("1"), validators=[MinValueValidator(0)])
-    recommendation_change_usd = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("10"), validators=[MinValueValidator(0)])
-    rate_change_alert_percent = models.DecimalField(max_digits=8, decimal_places=3, default=Decimal("5"), validators=[MinValueValidator(0)])
+    limit_warning_usd = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        default=Decimal("1"),
+        validators=[MinValueValidator(0)],
+    )
+    recommendation_change_usd = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        default=Decimal("10"),
+        validators=[MinValueValidator(0)],
+    )
+    rate_change_alert_percent = models.DecimalField(
+        max_digits=8,
+        decimal_places=3,
+        default=Decimal("5"),
+        validators=[MinValueValidator(0)],
+    )
     notify_on_limit_exhausted = models.BooleanField(default=True)
     notify_on_recommendation_change = models.BooleanField(default=False)
     notify_on_rate_change = models.BooleanField(default=True)
     notify_on_collection_error = models.BooleanField(default=True)
-    notification_cooldown_minutes = models.PositiveIntegerField(default=120, validators=[MinValueValidator(1), MaxValueValidator(10080)])
+    notification_cooldown_minutes = models.PositiveIntegerField(
+        default=120, validators=[MinValueValidator(1), MaxValueValidator(10080)]
+    )
     email_provider = models.CharField(
         max_length=16,
         choices=(("smtp", "SMTP"), ("resend", "Resend")),

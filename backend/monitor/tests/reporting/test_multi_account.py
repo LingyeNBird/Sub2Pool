@@ -28,7 +28,11 @@ from monitor.models import (
 )
 from monitor.replay import rebuild_account
 from monitor.reporting import aggregate_recommendation
-from monitor.tests.helpers import create_monitored_account, create_participant, jwt_login
+from monitor.tests.helpers import (
+    create_monitored_account,
+    create_participant,
+    jwt_login,
+)
 
 
 def create_account_snapshot(
@@ -133,13 +137,12 @@ def test_allocation_api_merges_singleton_accounts_into_one_pool_contract():
     assert data["pool_allocations"] == []
     assert data["is_owner"] is True
     assert data["snapshot"] is None
-    assert {
-        item["external_account_id"] for item in data["account_breakdowns"]
-    } == {71, 72}
+    assert {item["external_account_id"] for item in data["account_breakdowns"]} == {
+        71,
+        72,
+    }
     assert all(not item["allocated"] for item in data["account_breakdowns"])
-    assert AccountParticipant.objects.filter(
-        participant_id=data["id"]
-    ).count() == 2
+    assert AccountParticipant.objects.filter(participant_id=data["id"]).count() == 2
 
     allocation = client.put(
         "/api/quota-allocation",
@@ -193,6 +196,88 @@ def test_allocation_api_merges_singleton_accounts_into_one_pool_contract():
         **headers,
     )
     assert duplicate_user.status_code == 400
+
+
+@pytest.mark.django_db
+def test_account_quota_profile_and_capacity_range_can_be_selected_manually():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    account = create_monitored_account(71)
+    client = Client()
+    headers, _response = jwt_login(client)
+
+    initial = client.get(
+        "/api/settings/monitored-accounts",
+        **headers,
+    ).json()["data"][0]
+    response = client.put(
+        f"/api/settings/monitored-accounts/{account.id}",
+        data=json.dumps(
+            {
+                "quota_profile": "pro_5x",
+                "capacity_min_usd_override": 600,
+                "capacity_max_usd_override": 1400,
+            }
+        ),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert initial["quota_profile"] == "auto"
+    assert initial["detected_plan_type"] == ""
+    assert initial["effective_quota_profile"] == "pro_20x"
+    assert initial["capacity_min_usd_override"] is None
+    assert initial["capacity_max_usd_override"] is None
+    assert initial["capacity_min_usd"] == 1400.0
+    assert initial["capacity_max_usd"] == 4000.0
+    assert response.status_code == 200, response.json()
+    updated = response.json()["data"]
+    assert updated["quota_profile"] == "pro_5x"
+    assert updated["effective_quota_profile"] == "pro_5x"
+    assert updated["capacity_min_usd_override"] == 600.0
+    assert updated["capacity_max_usd_override"] == 1400.0
+    assert updated["capacity_min_usd"] == 600.0
+    assert updated["capacity_max_usd"] == 1400.0
+    account.refresh_from_db()
+    assert account.quota_profile == "pro_5x"
+    assert account.capacity_min_usd_override == Decimal("600")
+    assert account.capacity_max_usd_override == Decimal("1400")
+
+
+@pytest.mark.django_db
+def test_account_capacity_range_requires_two_ordered_bounds():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    account = create_monitored_account(71)
+    client = Client()
+    headers, _response = jwt_login(client)
+
+    missing_upper = client.put(
+        f"/api/settings/monitored-accounts/{account.id}",
+        data=json.dumps({"capacity_min_usd_override": 600}),
+        content_type="application/json",
+        **headers,
+    )
+    reversed_bounds = client.put(
+        f"/api/settings/monitored-accounts/{account.id}",
+        data=json.dumps(
+            {
+                "capacity_min_usd_override": 1600,
+                "capacity_max_usd_override": 1400,
+            }
+        ),
+        content_type="application/json",
+        **headers,
+    )
+
+    assert missing_upper.status_code == 400
+    assert reversed_bounds.status_code == 400
 
 
 @pytest.mark.django_db
@@ -341,7 +426,6 @@ def test_aggregate_recommendation_nets_accounts_before_global_zero_clamp():
     assert aggregate["entitlement_usage_percent"] == 110.0
 
 
-
 @pytest.mark.django_db
 def test_regrouping_accounts_reuses_account_user_snapshots():
     config = AppSettings.load()
@@ -419,9 +503,7 @@ def test_regrouping_accounts_reuses_account_user_snapshots():
     assert aggregate is not None
     assert aggregate["recommendation_complete"] is True
     assert {item.observation.account_id for item in snapshots} == {72, 73}
-    sources = {
-        item["external_account_id"]: item for item in aggregate["sources"]
-    }
+    sources = {item["external_account_id"]: item for item in aggregate["sources"]}
     assert set(sources) == {72, 73}
     assert all(item["contract_share_percent"] == 30.0 for item in sources.values())
     assert all(item["net_position_usd"] == 400.0 for item in sources.values())
@@ -532,9 +614,7 @@ def test_share_change_can_reapply_reused_account_snapshot(monkeypatch):
             Decimal(str(aggregate["recommended_balance_usd"])),
         )
     ]
-    operations = list(
-        ParticipantBalanceOperation.objects.order_by("created_at", "id")
-    )
+    operations = list(ParticipantBalanceOperation.objects.order_by("created_at", "id"))
     assert len(operations) == 2
     assert list(
         operations[-1].sources.values_list(
@@ -550,6 +630,7 @@ def test_share_change_can_reapply_reused_account_snapshot(monkeypatch):
     assert applied is not None
     assert applied["recommendation_applied"] is True
     assert applied["needs_manual_update"] is False
+
 
 @pytest.mark.django_db
 def test_applying_aggregate_recommendation_writes_one_global_balance_and_two_sources(
@@ -628,13 +709,17 @@ def test_applying_aggregate_recommendation_writes_one_global_balance_and_two_sou
     operation = ParticipantBalanceOperation.objects.get()
     assert operation.state == "committed"
     assert operation.requested_balance_usd == expected
-    assert set(
-        operation.sources.values_list("account_external_id", flat=True)
-    ) == {71, 72}
-    assert sum(
-        operation.sources.values_list("contribution_usd", flat=True),
-        Decimal("0"),
-    ) == expected
+    assert set(operation.sources.values_list("account_external_id", flat=True)) == {
+        71,
+        72,
+    }
+    assert (
+        sum(
+            operation.sources.values_list("contribution_usd", flat=True),
+            Decimal("0"),
+        )
+        == expected
+    )
     participant.refresh_from_db()
     assert participant.latest_balance_usd == expected
     for snapshot in snapshots:
@@ -807,18 +892,14 @@ def test_monitor_run_samples_only_participants_allocated_to_each_pool(
     assert captured_windows == [(71, "passive"), (72, "direct")]
     observations = {
         item.account_id: item
-        for item in Observation.objects.prefetch_related(
-            "participant_snapshots"
-        )
+        for item in Observation.objects.prefetch_related("participant_snapshots")
     }
     assert set(observations) == {71, 72}
     assert {
-        item.participant_id
-        for item in observations[71].participant_snapshots.all()
+        item.participant_id for item in observations[71].participant_snapshots.all()
     } == {first_participant.id, second_participant.id}
     assert {
-        item.participant_id
-        for item in observations[72].participant_snapshots.all()
+        item.participant_id for item in observations[72].participant_snapshots.all()
     } == {second_participant.id}
     assert AccountParticipant.objects.get(
         account=first,

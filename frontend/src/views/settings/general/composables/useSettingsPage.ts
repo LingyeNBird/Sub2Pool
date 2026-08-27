@@ -201,7 +201,14 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   async function saveMonitoredAccount(
     account: Pick<
       MonitoredAccount,
-      "id" | "external_account_id" | "name" | "enabled" | "quota_query_mode"
+      | "id"
+      | "external_account_id"
+      | "name"
+      | "enabled"
+      | "quota_query_mode"
+      | "quota_profile"
+      | "capacity_min_usd_override"
+      | "capacity_max_usd_override"
     >,
     create = false,
   ) {
@@ -220,6 +227,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
             name: account.name,
             enabled: account.enabled,
             quota_query_mode: account.quota_query_mode,
+            quota_profile: account.quota_profile,
+            capacity_min_usd_override: account.capacity_min_usd_override,
+            capacity_max_usd_override: account.capacity_max_usd_override,
           }),
         },
       );

@@ -124,9 +124,7 @@ def _segment_for_period(
             participant_raw_costs(first) if observed_baseline else {}
         ),
         percent_baseline=(
-            first.upstream_used_percent
-            if reason == "manual_override"
-            else ZERO
+            first.upstream_used_percent if reason == "manual_override" else ZERO
         ),
     )
 
@@ -182,10 +180,12 @@ def particle_trajectory_data(
     filter_config = ParticleFilterConfig(
         initial_capacity_usd=_initial_capacity(segment),
     )
+    range_profile = account.resolved_capacity_profile
     adaptive = run_adaptive_range_filter(
         replay_input.model_input,
         seed=seed,
         config=filter_config,
+        capacity_profile=range_profile,
     )
     particle = adaptive.particle
 
@@ -255,8 +255,7 @@ def particle_trajectory_data(
             "stage": index,
             "direction": promotion.direction,
             "occurred_at": iso(
-                segment.started_at
-                + timedelta(hours=promotion.time_hours)
+                segment.started_at + timedelta(hours=promotion.time_hours)
             ),
             "from_range_usd": [
                 promotion.from_min_usd,
@@ -280,6 +279,13 @@ def particle_trajectory_data(
             "id": account.id,
             "external_account_id": account.external_account_id,
             "name": account.name,
+            "quota_profile": account.quota_profile,
+            "detected_plan_type": account.detected_plan_type,
+            "effective_quota_profile": account.effective_quota_profile,
+            "capacity_min_usd_override": account.capacity_min_usd_override,
+            "capacity_max_usd_override": account.capacity_max_usd_override,
+            "capacity_min_usd": range_profile.capacity_min_usd,
+            "capacity_max_usd": range_profile.capacity_max_usd,
         },
         "available": True,
         "message": "",

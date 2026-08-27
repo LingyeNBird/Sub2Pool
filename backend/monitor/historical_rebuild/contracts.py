@@ -1,4 +1,5 @@
 """Stable local history-maintenance digests and errors."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -61,6 +62,13 @@ def config_digest(
         "external_account_id": account.external_account_id,
         "quota_query_mode": account.quota_query_mode,
         "enabled": account.enabled,
+        "quota_profile": account.quota_profile,
+        "detected_plan_type": account.detected_plan_type,
+        "effective_quota_profile": account.effective_quota_profile,
+        "capacity_min_usd_override": account.capacity_min_usd_override,
+        "capacity_max_usd_override": account.capacity_max_usd_override,
+        "capacity_min_usd": (account.resolved_capacity_profile.capacity_min_usd),
+        "capacity_max_usd": (account.resolved_capacity_profile.capacity_max_usd),
     }
     return canonical_digest(values)
 

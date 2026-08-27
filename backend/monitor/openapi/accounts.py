@@ -15,6 +15,13 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "name",
                 "enabled",
                 "quota_query_mode",
+                "quota_profile",
+                "detected_plan_type",
+                "effective_quota_profile",
+                "capacity_min_usd_override",
+                "capacity_max_usd_override",
+                "capacity_min_usd",
+                "capacity_max_usd",
                 "last_local_check_at",
                 "last_upstream_check_at",
                 "last_success_at",
@@ -30,6 +37,22 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                     "type": "string",
                     "enum": ["passive", "direct"],
                 },
+                "quota_profile": {
+                    "type": "string",
+                    "enum": ["auto", "plus", "pro_5x", "pro_20x"],
+                },
+                "detected_plan_type": {
+                    "type": "string",
+                    "enum": ["", "plus", "pro"],
+                },
+                "effective_quota_profile": {
+                    "type": "string",
+                    "enum": ["plus", "pro_5x", "pro_20x"],
+                },
+                "capacity_min_usd_override": nullable_number,
+                "capacity_max_usd_override": nullable_number,
+                "capacity_min_usd": {"type": "number"},
+                "capacity_max_usd": {"type": "number"},
                 "last_local_check_at": nullable_string,
                 "last_upstream_check_at": nullable_string,
                 "last_success_at": nullable_string,
@@ -62,9 +85,7 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "monitoring_enabled": {"type": "boolean"},
                 "accounts": {
                     "type": "array",
-                    "items": {
-                        "$ref": "#/components/schemas/MonitoredAccount"
-                    },
+                    "items": {"$ref": "#/components/schemas/MonitoredAccount"},
                 },
                 "selected_account_id": _nullable("integer"),
                 "last_local_check_at": nullable_string,
@@ -129,9 +150,7 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "selected_total_cost_breakdown": {
                     "$ref": "#/components/schemas/CostBreakdown"
                 },
-                "start_cost_breakdown": {
-                    "$ref": "#/components/schemas/CostBreakdown"
-                },
+                "start_cost_breakdown": {"$ref": "#/components/schemas/CostBreakdown"},
                 "unattributed_used_percent": {"type": "number"},
                 "sample_note": {"type": "string"},
                 "snapshot_sampled_at": nullable_string,
@@ -171,9 +190,7 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "connection_error": nullable_string,
                 "accounts": {
                     "type": "array",
-                    "items": {
-                        "$ref": "#/components/schemas/AccountStatusAccount"
-                    },
+                    "items": {"$ref": "#/components/schemas/AccountStatusAccount"},
                 },
             },
         },
@@ -201,9 +218,7 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 },
                 "runtime": {
                     "oneOf": [
-                        {
-                            "$ref": "#/components/schemas/AccountRuntimeStatus"
-                        },
+                        {"$ref": "#/components/schemas/AccountRuntimeStatus"},
                         {"type": "null"},
                     ]
                 },
@@ -288,7 +303,6 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "account_cost_with_fast_correction_usd": nullable_number,
                 "standard_cost_usd": nullable_number,
                 "user_cost_usd": nullable_number,
-
                 "request_count": _nullable("integer"),
                 "token_count": _nullable("integer"),
                 "avg_daily_cost_usd": nullable_number,

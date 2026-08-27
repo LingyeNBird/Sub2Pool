@@ -14,6 +14,40 @@ import {
 } from "../state";
 import { participantBreakdowns } from "./participants";
 import { accountNames } from "./systemUsers";
+function quotaProfile(value: unknown): MonitoredAccount["quota_profile"] {
+  return value === "plus" || value === "pro_5x" || value === "pro_20x"
+    ? value
+    : "auto";
+}
+
+function effectiveQuotaProfile(
+  account: Pick<MonitoredAccount, "quota_profile" | "detected_plan_type">,
+): MonitoredAccount["effective_quota_profile"] {
+  if (account.quota_profile !== "auto") return account.quota_profile;
+  return account.detected_plan_type === "plus" ? "plus" : "pro_20x";
+}
+
+function applyCapacityRange(
+  account: MonitoredAccount,
+  payload: Record<string, unknown>,
+) {
+  if (
+    payload.capacity_min_usd_override !== undefined ||
+    payload.capacity_max_usd_override !== undefined
+  ) {
+    const rawMin = payload.capacity_min_usd_override;
+    const rawMax = payload.capacity_max_usd_override;
+    account.capacity_min_usd_override = rawMin == null ? null : Number(rawMin);
+    account.capacity_max_usd_override = rawMax == null ? null : Number(rawMax);
+  }
+  const defaults = {
+    plus: { min: 100, max: 200 },
+    pro_5x: { min: 500, max: 1500 },
+    pro_20x: { min: 1400, max: 4000 },
+  }[account.effective_quota_profile];
+  account.capacity_min_usd = account.capacity_min_usd_override ?? defaults.min;
+  account.capacity_max_usd = account.capacity_max_usd_override ?? defaults.max;
+}
 
 function createPlan(
   state: DemoState,
@@ -77,12 +111,21 @@ export function handleSettings({
       enabled: payload.enabled !== false,
       quota_query_mode:
         payload.quota_query_mode === "direct" ? "direct" : "passive",
+      quota_profile: quotaProfile(payload.quota_profile),
+      detected_plan_type: "",
+      effective_quota_profile: "pro_20x",
+      capacity_min_usd_override: null,
+      capacity_max_usd_override: null,
+      capacity_min_usd: 1400,
+      capacity_max_usd: 4000,
       last_local_check_at: null,
       last_upstream_check_at: null,
       last_success_at: null,
       next_local_check_at: null,
       last_error: "",
     };
+    account.effective_quota_profile = effectiveQuotaProfile(account);
+    applyCapacityRange(account, payload);
     state.monitoredAccounts.push(account);
     state.quotaPools.push({
       id: poolId,
@@ -121,6 +164,11 @@ export function handleSettings({
         : payload.enabled !== false;
     account.quota_query_mode =
       payload.quota_query_mode === "direct" ? "direct" : "passive";
+    account.quota_profile = quotaProfile(
+      payload.quota_profile ?? account.quota_profile,
+    );
+    account.effective_quota_profile = effectiveQuotaProfile(account);
+    applyCapacityRange(account, payload);
     for (const participant of state.participants) {
       participant.account_breakdowns = participantBreakdowns(
         state,

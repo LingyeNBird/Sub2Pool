@@ -1,3 +1,6 @@
+export type QuotaProfile = "auto" | "plus" | "pro_5x" | "pro_20x";
+export type EffectiveQuotaProfile = Exclude<QuotaProfile, "auto">;
+
 export interface MonitoredAccount {
   id: number;
   pool_id: number;
@@ -5,6 +8,13 @@ export interface MonitoredAccount {
   name: string;
   enabled: boolean;
   quota_query_mode: "passive" | "direct";
+  quota_profile: QuotaProfile;
+  detected_plan_type: "" | "plus" | "pro";
+  effective_quota_profile: EffectiveQuotaProfile;
+  capacity_min_usd_override: number | null;
+  capacity_max_usd_override: number | null;
+  capacity_min_usd: number;
+  capacity_max_usd: number;
   last_local_check_at: string | null;
   last_upstream_check_at: string | null;
   last_success_at: string | null;

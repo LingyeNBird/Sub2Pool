@@ -73,7 +73,7 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["available"] is True
-    assert data["algorithm"] == "particle_filter_v7"
+    assert data["algorithm"] == "particle_filter_v9"
     assert data["particle_count"] == 480
     assert data["representative_particle_count"] == 96
     assert data["segment"]["observation_count"] == 2
@@ -101,14 +101,17 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
         assert max(point["particles_usd"]) <= point["range_max_usd"]
         assert point["capacity_lower_usd"] <= point["capacity_usd"]
         assert point["capacity_usd"] <= point["capacity_upper_usd"]
-    assert list(
-        Observation.objects.order_by("id").values(
-            "id",
-            "attribution_started_at",
-            "effective_usd_per_percent",
-            "model_diagnostics",
+    assert (
+        list(
+            Observation.objects.order_by("id").values(
+                "id",
+                "attribution_started_at",
+                "effective_usd_per_percent",
+                "model_diagnostics",
+            )
         )
-    ) == stored_before
+        == stored_before
+    )
 
 
 @pytest.mark.django_db
@@ -202,12 +205,10 @@ def test_particle_trajectory_selects_historical_period():
     old_period = historical_data["periods"][0]
     assert old_period["started_at"] == old_start.isoformat()
     assert (
-        old_period["first_observed_at"]
-        == historical_data["points"][0]["observed_at"]
+        old_period["first_observed_at"] == historical_data["points"][0]["observed_at"]
     )
     assert (
-        old_period["last_observed_at"]
-        == historical_data["points"][-1]["observed_at"]
+        old_period["last_observed_at"] == historical_data["points"][-1]["observed_at"]
     )
     assert old_period["first_observed_at"] != old_period["started_at"]
 
@@ -427,9 +428,7 @@ def test_particle_trajectory_uses_only_authorized_accounts(monkeypatch):
         **headers,
     )
     assert selector_response.status_code == 200
-    assert [item["id"] for item in selector_response.json()["data"]] == [
-        allowed.id
-    ]
+    assert [item["id"] for item in selector_response.json()["data"]] == [allowed.id]
 
 
 @pytest.mark.django_db

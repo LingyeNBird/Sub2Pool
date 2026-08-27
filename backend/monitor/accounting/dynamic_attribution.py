@@ -16,6 +16,7 @@ from .model_inputs import (
 from .particle_filter import QUANTIZER_NAMES, ParticleFilterConfig
 from ..fast_correction.prefix import FastCorrectionPrefix
 from ..models import AppSettings, Observation, ParticipantSnapshot
+from ..quota_profiles import CapacityRangeProfile
 
 ZERO = Decimal("0")
 ONE = Decimal("1")
@@ -46,6 +47,7 @@ def _diagnostics(
     total_cost_monotonic_repair: Decimal,
     filter_config: ParticleFilterConfig,
     adaptive: AdaptiveRangeOutput,
+    capacity_profile: CapacityRangeProfile,
 ) -> dict:
     progress_lower = max(
         float(particle.total_percent_lower[row]),
@@ -71,6 +73,7 @@ def _diagnostics(
 
     return {
         "algorithm": ALGORITHM_VERSION,
+        "quota_profile": capacity_profile.code,
         "seed": seed,
         "particles": filter_config.particles,
         "quantizer_probabilities": {
@@ -107,31 +110,22 @@ def _diagnostics(
         ),
         "residual_attributed_interval": [
             round(
-                float(
-                    particle.attributed_percent_lower[row, residual_subject]
-                ),
+                float(particle.attributed_percent_lower[row, residual_subject]),
                 5,
             ),
             round(
-                float(
-                    particle.attributed_percent_upper[row, residual_subject]
-                ),
+                float(particle.attributed_percent_upper[row, residual_subject]),
                 5,
             ),
         ],
-        "aggregate_cost_difference_usd": float(
-            aggregate_cost_difference
-        ),
+        "aggregate_cost_difference_usd": float(aggregate_cost_difference),
         "cost_monotonic_repair_usd": float(cost_monotonic_repair),
         "cost_monotonic_repair_subjects": cost_monotonic_repair_subjects,
-        "total_cost_monotonic_repair_usd": float(
-            total_cost_monotonic_repair
-        ),
+        "total_cost_monotonic_repair_usd": float(total_cost_monotonic_repair),
         "attribution_projection_applied": bool(
             np.max(
                 np.abs(
-                    projected_attribution[row]
-                    - particle.attributed_percent_hat[row]
+                    projected_attribution[row] - particle.attributed_percent_hat[row]
                 )
             )
             > 1e-8
@@ -176,9 +170,7 @@ def _diagnostics(
             "lower": round(float(particle.lower_boundary_mass[row]), 8),
             "upper": round(float(particle.upper_boundary_mass[row]), 8),
         },
-        "balance_interval_inflation": (
-            filter_config.balance_interval_inflation
-        ),
+        "balance_interval_inflation": (filter_config.balance_interval_inflation),
         "prior_capacity_usd": filter_config.initial_capacity_usd,
     }
 
@@ -190,6 +182,7 @@ def replay_dynamic_segment(
     config: AppSettings,
     correction_prefix: FastCorrectionPrefix,
     prior_rate: Decimal | None = None,
+    capacity_profile: CapacityRangeProfile,
 ) -> tuple[int, Decimal | None]:
     """一次运行完整区间，确保同一原始事实始终产生相同派生账本。"""
 
@@ -211,6 +204,7 @@ def replay_dynamic_segment(
         replay_input.model_input,
         seed=seed,
         config=filter_config,
+        capacity_profile=capacity_profile,
     )
     particle = adaptive.particle
     bounds = adaptive.bounds
@@ -225,8 +219,7 @@ def replay_dynamic_segment(
     projected_total = projected_attribution.sum(axis=1)
     projected_balance = (
         np.maximum(
-            replay_input.model_input.rights_percent[None, :]
-            - projected_attribution,
+            replay_input.model_input.rights_percent[None, :] - projected_attribution,
             0.0,
         )
         * particle.capacity_hat_usd[:, None]
@@ -318,6 +311,7 @@ def replay_dynamic_segment(
             ),
             filter_config=filter_config,
             adaptive=adaptive,
+            capacity_profile=capacity_profile,
         )
         raw_window = dict(observation.raw_window)
         raw_window.pop("conservative_percentile", None)
@@ -366,9 +360,7 @@ def replay_dynamic_segment(
                 float(item.share_percent)
                 - projected_attribution[
                     row,
-                    replay_input.participant_subject_indices[
-                        item.participant_id
-                    ],
+                    replay_input.participant_subject_indices[item.participant_id],
                 ]
             )
             > 1e-8
@@ -463,12 +455,12 @@ def replay_dynamic_segment(
                 CENT,
                 rounding=ROUND_HALF_UP,
             )
-            recommended_min = (
-                probability_min * recommendation_factor
-            ).quantize(CENT, rounding=ROUND_HALF_UP)
-            recommended_max = (
-                probability_max * recommendation_factor
-            ).quantize(CENT, rounding=ROUND_HALF_UP)
+            recommended_min = (probability_min * recommendation_factor).quantize(
+                CENT, rounding=ROUND_HALF_UP
+            )
+            recommended_max = (probability_max * recommendation_factor).quantize(
+                CENT, rounding=ROUND_HALF_UP
+            )
             rights_exhausted = remaining <= ZERO
             if rights_exhausted:
                 recommended = ZERO
@@ -508,9 +500,7 @@ def replay_dynamic_segment(
                     else "本上游周期的百分比权益已用尽"
                 )
             elif overused:
-                reason = (
-                    "本上游周期已确认存在合同权益偏差，不再建议补充余额"
-                )
+                reason = "本上游周期已确认存在合同权益偏差，不再建议补充余额"
             elif exhausted:
                 reason = "当前 Sub2API 用户余额接近耗尽，但仍有百分比权益"
             elif snapshot.participant_id == sole_remaining_participant_id:

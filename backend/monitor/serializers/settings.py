@@ -1,4 +1,5 @@
 """Application settings and temporary Sub2API connection serializers."""
+
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -80,6 +81,9 @@ SETTINGS_FIELDS = (
 
 
 class MonitoredAccountSerializer(serializers.ModelSerializer):
+    capacity_min_usd = serializers.SerializerMethodField()
+    capacity_max_usd = serializers.SerializerMethodField()
+
     class Meta:
         model = MonitoredAccount
         fields = (
@@ -89,6 +93,13 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
             "name",
             "enabled",
             "quota_query_mode",
+            "quota_profile",
+            "detected_plan_type",
+            "effective_quota_profile",
+            "capacity_min_usd_override",
+            "capacity_max_usd_override",
+            "capacity_min_usd",
+            "capacity_max_usd",
             "last_local_check_at",
             "last_upstream_check_at",
             "last_success_at",
@@ -99,6 +110,10 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
             "id",
             "pool_id",
             "last_local_check_at",
+            "detected_plan_type",
+            "effective_quota_profile",
+            "capacity_min_usd",
+            "capacity_max_usd",
             "last_upstream_check_at",
             "last_success_at",
             "next_local_check_at",
@@ -111,6 +126,44 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
         if self.instance is not None and value != self.instance.external_account_id:
             raise serializers.ValidationError("已有监控账号不能修改上游账号 ID")
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        capacity_min = attrs.get(
+            "capacity_min_usd_override",
+            (
+                self.instance.capacity_min_usd_override
+                if self.instance is not None
+                else None
+            ),
+        )
+        capacity_max = attrs.get(
+            "capacity_max_usd_override",
+            (
+                self.instance.capacity_max_usd_override
+                if self.instance is not None
+                else None
+            ),
+        )
+        if (capacity_min is None) != (capacity_max is None):
+            raise serializers.ValidationError(
+                {"capacity_range": ("容量范围上下限必须同时设置或同时恢复默认值")}
+            )
+        if (
+            capacity_min is not None
+            and capacity_max is not None
+            and capacity_min >= capacity_max
+        ):
+            raise serializers.ValidationError(
+                {"capacity_range": "容量范围下限必须小于上限"}
+            )
+        return attrs
+
+    def get_capacity_min_usd(self, instance) -> float:
+        return instance.resolved_capacity_profile.capacity_min_usd
+
+    def get_capacity_max_usd(self, instance) -> float:
+        return instance.resolved_capacity_profile.capacity_max_usd
 
     @transaction.atomic
     def create(self, validated_data):
@@ -216,9 +269,7 @@ class AppSettingsSerializer(serializers.ModelSerializer):
         return cached
 
     def get_fast_correction_rebuild_recommended(self, obj) -> bool:
-        return bool(
-            obj.fast_correction_enabled and self._fast_missing_count(obj) > 0
-        )
+        return bool(obj.fast_correction_enabled and self._fast_missing_count(obj) > 0)
 
     def get_fast_correction_missing_intervals(self, obj) -> int:
         return self._fast_missing_count(obj)

@@ -63,17 +63,13 @@ def test_quota_pool_migration_preserves_existing_global_mixed_contract():
 
     pool = QuotaPool.objects.get()
     assert pool.name == "默认混池"
-    assert set(
-        NewAccount.objects.values_list("pool_id", flat=True)
-    ) == {pool.id}
+    assert set(NewAccount.objects.values_list("pool_id", flat=True)) == {pool.id}
     allocation = PoolParticipant.objects.get(
         pool_id=pool.id,
         participant_id=participant.id,
     )
     assert allocation.share_percent == Decimal("40")
-    assert "share_percent" not in {
-        field.name for field in NewParticipant._meta.fields
-    }
+    assert "share_percent" not in {field.name for field in NewParticipant._meta.fields}
 
     migrated_snapshot = NewSnapshot.objects.get(pk=snapshot.id)
     assert migrated_snapshot.quota_pool_id == pool.id
@@ -107,6 +103,10 @@ def test_quota_pool_migration_preserves_contract_without_monitored_accounts():
         pool_id=pool.id,
         participant_id=participant.id,
     ).share_percent == Decimal("37.500")
+    # Runtime serializers use the current model, so restore the schema to the
+    # current migration leaf before exercising post-migration account creation.
+    executor = MigrationExecutor(connection)
+    executor.migrate(executor.loader.graph.leaf_nodes())
 
     from monitor.serializers import MonitoredAccountSerializer
 

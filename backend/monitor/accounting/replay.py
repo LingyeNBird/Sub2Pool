@@ -35,10 +35,9 @@ from ..models import (
     ParticipantUsageSample,
     Sub2APIUserUsageSample,
 )
+from ..quota_profiles import CapacityRangeProfile, PRO_20X_CAPACITY_PROFILE
 
 ZERO = Decimal("0")
-
-
 
 
 def _replay_segment(
@@ -49,6 +48,7 @@ def _replay_segment(
     previous_observation: Observation | None = None,
     rate_history_seed: list[tuple[Decimal, Decimal]] | None = None,
     correction_prefix: FastCorrectionPrefix,
+    capacity_profile: CapacityRangeProfile,
 ) -> tuple[int, Decimal | None]:
     """兼容既有调用边界，内部始终重放完整粒子滤波区间。"""
 
@@ -61,6 +61,7 @@ def _replay_segment(
         config=config,
         correction_prefix=correction_prefix,
         prior_rate=fallback_rate,
+        capacity_profile=capacity_profile,
     )
 
 
@@ -73,9 +74,9 @@ def _replay_usage_samples(
 ) -> None:
     if not segments:
         return
-    queryset = ParticipantUsageSample.objects.select_related(
-        "participant"
-    ).filter(account_id=account_id)
+    queryset = ParticipantUsageSample.objects.select_related("participant").filter(
+        account_id=account_id
+    )
     if replay_from is not None:
         queryset = queryset.filter(observed_at__gte=replay_from)
     samples = list(queryset.order_by("observed_at", "id"))
@@ -145,9 +146,7 @@ def _update_participant_latest(account_id: int) -> None:
         return
     snapshots = list(latest.participant_snapshots.all())
     participant_ids = [snapshot.participant_id for snapshot in snapshots]
-    account = MonitoredAccount.objects.filter(
-        external_account_id=account_id
-    ).first()
+    account = MonitoredAccount.objects.filter(external_account_id=account_id).first()
     memberships = (
         {
             item.participant_id: item
@@ -182,9 +181,7 @@ def _update_participant_latest(account_id: int) -> None:
     ).order_by("-observation__observed_at", "-id")
     participants = list(
         Participant.objects.filter(pk__in=participant_ids).annotate(
-            replay_balance_sample_id=Subquery(
-                latest_balance_sample.values("id")[:1]
-            ),
+            replay_balance_sample_id=Subquery(latest_balance_sample.values("id")[:1]),
             replay_sample_balance=Subquery(
                 latest_balance_sample.values("balance_usd")[:1]
             ),
@@ -235,17 +232,14 @@ def _previous_included(observation: Observation) -> Observation | None:
 def _previous_segment_included(
     observation: Observation,
 ) -> Observation | None:
-    queryset = (
-        Observation.objects.filter(
-            account_id=observation.account_id,
-            excluded_at__isnull=True,
-        )
-        .filter(
-            Q(observed_at__lt=observation.observed_at)
-            | Q(
-                observed_at=observation.observed_at,
-                id__lt=observation.id,
-            )
+    queryset = Observation.objects.filter(
+        account_id=observation.account_id,
+        excluded_at__isnull=True,
+    ).filter(
+        Q(observed_at__lt=observation.observed_at)
+        | Q(
+            observed_at=observation.observed_at,
+            id__lt=observation.id,
         )
     )
     if observation.attribution_started_at is not None:
@@ -266,13 +260,10 @@ def _replay_anchor(
     if merge_previous:
         if previous is None:
             return _official_start(observation)
-        return (
-            previous.attribution_started_at
-            or (
-                previous.observed_at
-                if previous.is_manual_start
-                else _official_start(previous)
-            )
+        return previous.attribution_started_at or (
+            previous.observed_at
+            if previous.is_manual_start
+            else _official_start(previous)
         )
     if observation.is_manual_start:
         return observation.observed_at
@@ -289,13 +280,10 @@ def _replay_anchor(
         ):
             previous_segment = _previous_segment_included(previous)
             if previous_segment is not None:
-                return (
-                    previous_segment.attribution_started_at
-                    or (
-                        previous_segment.observed_at
-                        if previous_segment.is_manual_start
-                        else _official_start(previous_segment)
-                    )
+                return previous_segment.attribution_started_at or (
+                    previous_segment.observed_at
+                    if previous_segment.is_manual_start
+                    else _official_start(previous_segment)
                 )
         return previous.attribution_started_at or previous.observed_at
     if previous is not None and _same_official_reset(
@@ -331,6 +319,14 @@ def rebuild_account(
         _assert_replay_guard(guard)
 
     config = config or AppSettings.load()
+    monitored_account = MonitoredAccount.objects.filter(
+        external_account_id=account_id
+    ).first()
+    range_profile = (
+        monitored_account.resolved_capacity_profile
+        if monitored_account is not None
+        else PRO_20X_CAPACITY_PROFILE
+    )
     all_observations = list(
         Observation.objects.select_for_update()
         .select_related("sample_point", "manual_start_end")
@@ -427,6 +423,7 @@ def rebuild_account(
             config,
             latest_rate,
             correction_prefix=correction_prefix,
+            capacity_profile=range_profile,
         )
         rebuilt += count
 
@@ -455,10 +452,6 @@ def rebuild_account(
     )
 
 
-
-
-
-
 @transaction.atomic
 def rebuild_observation_suffix(
     observation: Observation,
@@ -469,14 +462,10 @@ def rebuild_observation_suffix(
     """粒子状态依赖完整区间；新增、插入和恢复都从当前区间起点重放。"""
 
     config = config or AppSettings.load()
-    observation = Observation.objects.select_for_update().get(
-        pk=observation.pk
-    )
+    observation = Observation.objects.select_for_update().get(pk=observation.pk)
     return rebuild_account(
         observation.account_id,
         config,
         replay_from=_replay_anchor(observation),
         guard=guard,
     )
-
-

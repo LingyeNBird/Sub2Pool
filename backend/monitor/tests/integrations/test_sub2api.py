@@ -54,6 +54,7 @@ from monitor.tests.helpers import (
     jwt_login,
 )
 
+
 @pytest.mark.django_db
 def test_default_query_mode_is_passive():
     account = MonitoredAccount.objects.create(
@@ -61,6 +62,7 @@ def test_default_query_mode_is_passive():
         name="主账号",
     )
     assert account.quota_query_mode == "passive"
+
 
 @pytest.mark.django_db
 def test_passive_quota_reads_account_snapshot_without_official_quota_endpoint():
@@ -91,12 +93,125 @@ def test_passive_quota_reads_account_snapshot_without_official_quota_endpoint():
 
     with Sub2APIClient(config) as client:
         client.client.close()
-        client.client = httpx.Client(transport=httpx.MockTransport(handler), headers={"x-api-key": "admin-secret"})
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"x-api-key": "admin-secret"},
+        )
         window = client.query_weekly_window(42, "passive")
 
     assert window.used_percent == Decimal("37.5")
     assert requested_paths == ["/api/v1/admin/accounts/42"]
     assert not any("/openai/" in path for path in requested_paths)
+
+
+@pytest.mark.django_db
+def test_direct_quota_exposes_upstream_plan_type():
+    config = AppSettings.load()
+    config.sub2api_base_url = "https://sub2api.example/"
+    config.sub2api_admin_token_encrypted = encrypt_secret("admin-secret")
+    config.save()
+    reset_at = int((timezone.now() + timedelta(days=3)).timestamp())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/admin/openai/accounts/42/quota"
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "message": "success",
+                "data": {
+                    "plan_type": "chatgptplus",
+                    "rate_limit": {
+                        "primary_window": {
+                            "used_percent": 44,
+                            "limit_window_seconds": 604800,
+                            "reset_after_seconds": 259200,
+                            "reset_at": reset_at,
+                        }
+                    },
+                },
+            },
+        )
+
+    with Sub2APIClient(config) as client:
+        client.client.close()
+        client.client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"x-api-key": "admin-secret"},
+        )
+        window = client.query_weekly_window(42, "direct")
+
+    assert window.plan_type == "chatgptplus"
+    assert window.used_percent == Decimal("44")
+
+
+@pytest.mark.django_db
+def test_direct_sampling_detects_plus_and_replays_with_plus_profile(
+    monkeypatch,
+):
+    config = AppSettings.load()
+    account = create_monitored_account(
+        42,
+        quota_query_mode="direct",
+        quota_profile="auto",
+    )
+    create_participant(
+        name="Plus 车主",
+        sub2api_user_id=1,
+        share_percent=100,
+        is_owner=True,
+        account=account,
+    )
+    reset_at = int((timezone.now() + timedelta(days=3)).timestamp())
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def query_weekly_window(self, _account_id, _mode):
+            return WeeklyWindow(
+                used_percent=Decimal("44"),
+                window_seconds=604800,
+                reset_after_seconds=259200,
+                reset_at=reset_at,
+                slot="primary_window",
+                plan_type="chatgptplus",
+            )
+
+        def usage_stats(self, **_kwargs):
+            return UsageStats(Decimal("65"), Decimal("65"))
+
+        def user_balance(self, _user_id):
+            return UserBalance(Decimal("100"), Decimal("0"))
+
+    monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
+
+    result = run_monitor(
+        account_id=account.id,
+        force_upstream=True,
+        source="manual",
+    )
+
+    account.refresh_from_db()
+    observation = Observation.objects.get(account_id=42)
+    snapshot = ParticipantSnapshot.objects.get(observation=observation)
+    assert result["status"] == "calibrated"
+    assert account.detected_plan_type == "plus"
+    assert account.effective_quota_profile == "plus"
+    assert observation.model_diagnostics["quota_profile"] == "plus"
+    assert observation.model_diagnostics["capacity_range_usd"] == [
+        100.0,
+        200.0,
+    ]
+    assert Decimal("1") <= observation.effective_usd_per_percent <= Decimal("2")
+    assert Decimal("60") <= snapshot.recommended_balance_usd <= Decimal("100")
+
 
 @pytest.mark.django_db
 def test_openai_account_discovery_uses_filtered_paginated_admin_api():
@@ -233,7 +348,7 @@ def test_account_status_resources_normalize_safe_runtime_usage_and_stats():
                         "requests": 42,
                         "tokens": 123456,
                     },
-                }
+                },
             }
         else:
             data = {
@@ -307,6 +422,7 @@ def test_account_status_resources_normalize_safe_runtime_usage_and_stats():
         ("/api/v1/admin/accounts/42/stats", {"days": "30"}),
     ]
 
+
 @pytest.mark.django_db
 def test_sub2api_user_discovery_includes_admin_accounts():
     config = AppSettings.load()
@@ -359,6 +475,7 @@ def test_sub2api_user_discovery_includes_admin_accounts():
         }
     ]
 
+
 @pytest.mark.django_db
 def test_all_user_usage_uses_read_only_breakdown_and_keeps_zero_users():
     config = AppSettings.load()
@@ -393,10 +510,7 @@ def test_all_user_usage_uses_read_only_breakdown_and_keeps_zero_users():
                 "pages": 1,
             }
         else:
-            assert (
-                request.url.path
-                == "/api/v1/admin/dashboard/user-breakdown"
-            )
+            assert request.url.path == "/api/v1/admin/dashboard/user-breakdown"
             assert request.url.params["account_id"] == "7"
             assert request.url.params["limit"] == "200"
             data = {
@@ -436,6 +550,7 @@ def test_all_user_usage_uses_read_only_breakdown_and_keeps_zero_users():
         (52, UsageStats(Decimal("0"), Decimal("0"))),
     ]
 
+
 @pytest.mark.django_db
 def test_user_balance_reads_user_detail_without_platform_quota_endpoint():
     config = AppSettings.load()
@@ -473,6 +588,7 @@ def test_user_balance_reads_user_detail_without_platform_quota_endpoint():
         frozen_balance=Decimal("2.5"),
     )
     assert requested_paths == ["/api/v1/admin/users/51"]
+
 
 @pytest.mark.django_db
 def test_recommendation_balance_write_uses_dedicated_sub2api_endpoint():
@@ -587,6 +703,7 @@ def test_zero_recommendation_atomically_subtracts_current_balance():
     ]
     assert requested[1]["idempotency_key"]
 
+
 @pytest.mark.django_db
 def test_connection_test_uses_unsaved_form_without_persisting(monkeypatch):
     get_user_model().objects.create_superuser(
@@ -641,6 +758,7 @@ def test_connection_test_uses_unsaved_form_without_persisting(monkeypatch):
     }
     assert not MonitoredAccount.objects.exists()
 
+
 @pytest.mark.django_db
 def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch):
     get_user_model().objects.create_superuser(
@@ -650,13 +768,17 @@ def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch)
     )
     client = Client()
     headers, _ = jwt_login(client)
-    participant = create_participant(name="测试车友",
-    sub2api_user_id=51,
-    share_percent=Decimal("50"),)
-    blank_name_participant = create_participant(name="不应作为账号身份",
-    sub2api_user_id=52,
-    sub2api_username="错误的旧缓存",
-    share_percent=Decimal("50"),)
+    participant = create_participant(
+        name="测试车友",
+        sub2api_user_id=51,
+        share_percent=Decimal("50"),
+    )
+    blank_name_participant = create_participant(
+        name="不应作为账号身份",
+        sub2api_user_id=52,
+        sub2api_username="错误的旧缓存",
+        share_percent=Decimal("50"),
+    )
 
     class FakeClient:
         def __init__(self, _config):
@@ -702,6 +824,7 @@ def test_participant_user_list_endpoint_uses_saved_admin_connection(monkeypatch)
         item for item in participants if item["id"] == blank_name_participant.id
     )
     assert blank_name_data["sub2api_identity"] == "blank-name@example.com"
+
 
 @pytest.mark.django_db
 def test_observation_records_paginate_and_filter_server_side():
