@@ -12,6 +12,8 @@ import {
   type DemoState,
 } from "../state";
 
+const DAY_MS = 86_400_000;
+
 function notificationsData(context: DemoRequestContext): NotificationListData {
   const { state, url, paginate } = context;
   let items = [...state.notifications];
@@ -306,6 +308,30 @@ function accountStatusData(state: DemoState): AccountStatusData {
       const resetAt = new Date(
         sampledAt + (index === 0 ? 52 : 91) * 3_600_000,
       ).toISOString();
+      const cycleCapacity =
+        (account.capacity_min_usd + account.capacity_max_usd) / 2;
+      const cycles = Array.from({ length: 12 }, (_, cycleIndex) => {
+        const endedAt =
+          new Date(resetAt).getTime() - (11 - cycleIndex) * 7 * DAY_MS;
+        const usedPercent =
+          cycleIndex === 11
+            ? fixture.usedPercent
+            : Number(
+                (
+                  38 +
+                  ((cycleIndex * 17 + index * 11) % 54) +
+                  (cycleIndex % 3) * 0.37
+                ).toFixed(2),
+              );
+        return {
+          sequence: cycleIndex + 1,
+          started_at: new Date(endedAt - 7 * DAY_MS).toISOString(),
+          ended_at: new Date(endedAt).toISOString(),
+          used_percent: usedPercent,
+          used_usd: Number(((cycleCapacity * usedPercent) / 100).toFixed(2)),
+          is_current: cycleIndex === 11,
+        };
+      });
       const statsAccountCost = Number((fixture.accountCost * 3.6).toFixed(2));
       return {
         id: account.id,
@@ -313,6 +339,7 @@ function accountStatusData(state: DemoState): AccountStatusData {
         name: account.name,
         enabled: account.enabled,
         quota_query_mode: account.quota_query_mode,
+        cycles,
         runtime: {
           name: account.name,
           account_type: "oauth",

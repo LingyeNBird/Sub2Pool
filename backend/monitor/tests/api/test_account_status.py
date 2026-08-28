@@ -38,6 +38,86 @@ def test_account_status_rejects_invalid_fallback_window(
 
 
 @pytest.mark.django_db
+def test_account_status_returns_persisted_cycle_history_without_admin_token():
+    get_user_model().objects.create_superuser(
+        username="owner",
+        password="very-strong-password",
+        email="owner@example.com",
+    )
+    account = create_monitored_account(7, name="主账号")
+    started_at = timezone.now() - timedelta(days=14)
+
+    def observation(
+        *,
+        observed_at,
+        attribution_started_at,
+        resets_at,
+        used_percent,
+        used_usd,
+    ):
+        return Observation.objects.create(
+            account_id=account.external_account_id,
+            observed_at=observed_at,
+            window_seconds=604800,
+            upstream_resets_at=resets_at,
+            attribution_started_at=attribution_started_at,
+            upstream_used_percent=Decimal(used_percent),
+            estimated_used_percent=Decimal(used_percent),
+            raw_selected_total_cost=Decimal(used_usd),
+            selected_total_cost=Decimal(used_usd),
+            total_standard_cost=Decimal(used_usd),
+            total_actual_cost=Decimal(used_usd),
+            effective_usd_per_percent=Decimal("16"),
+        )
+
+    observation(
+        observed_at=started_at + timedelta(days=1),
+        attribution_started_at=started_at,
+        resets_at=started_at + timedelta(days=7),
+        used_percent="10",
+        used_usd="100",
+    )
+    observation(
+        observed_at=started_at + timedelta(days=6),
+        attribution_started_at=started_at,
+        resets_at=started_at + timedelta(days=7),
+        used_percent="25.5",
+        used_usd="255.75",
+    )
+    current = observation(
+        observed_at=started_at + timedelta(days=8),
+        attribution_started_at=started_at + timedelta(days=7),
+        resets_at=started_at + timedelta(days=14),
+        used_percent="40.25",
+        used_usd="402.5",
+    )
+
+    client = Client()
+    headers, _response = jwt_login(client)
+    response = client.get("/api/account-status", **headers)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["accounts"][0]["cycles"] == [
+        {
+            "sequence": 1,
+            "started_at": started_at.isoformat(),
+            "ended_at": current.observed_at.isoformat(),
+            "used_percent": 25.5,
+            "used_usd": 255.75,
+            "is_current": False,
+        },
+        {
+            "sequence": 2,
+            "started_at": (started_at + timedelta(days=7)).isoformat(),
+            "ended_at": (started_at + timedelta(days=14)).isoformat(),
+            "used_percent": 40.25,
+            "used_usd": 402.5,
+            "is_current": True,
+        },
+    ]
+
+
+@pytest.mark.django_db
 def test_account_status_returns_each_account_and_isolates_upstream_failures(
     monkeypatch,
 ):

@@ -11,6 +11,7 @@ from ..access import visible_accounts_for
 from ..api_auth import APIKeyAuthentication
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError, WeeklyWindow
 from ..models import AppSettings, MonitoredAccount, Observation, PagePermission
+from ..particle_trajectory import cycle_usage_history
 
 
 STATS_DAYS = 30
@@ -49,6 +50,7 @@ def _base_account_row(account: MonitoredAccount) -> dict[str, Any]:
         "name": account.name,
         "enabled": account.enabled,
         "quota_query_mode": account.quota_query_mode,
+        "cycles": cycle_usage_history(account.external_account_id),
         "runtime": None,
         "usage": None,
         "stats": None,

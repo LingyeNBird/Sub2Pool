@@ -42,6 +42,9 @@ def _trajectory_periods(account_id: int) -> list[dict]:
             "observed_at",
             "attribution_started_at",
             "upstream_resets_at",
+            "estimated_used_percent",
+            "upstream_used_percent",
+            "selected_total_cost",
         )
     )
     grouped: dict[datetime, dict] = {}
@@ -55,11 +58,17 @@ def _trajectory_periods(account_id: int) -> list[dict]:
                 "first_observed_at": row["observed_at"],
                 "last_observed_at": row["observed_at"],
                 "resets_at": row["upstream_resets_at"],
+                "estimated_used_percent": row["estimated_used_percent"],
+                "displayed_used_percent": row["upstream_used_percent"],
+                "used_usd": row["selected_total_cost"],
                 "observation_count": 1,
             }
             continue
         period["last_observed_at"] = row["observed_at"]
         period["resets_at"] = row["upstream_resets_at"]
+        period["estimated_used_percent"] = row["estimated_used_percent"]
+        period["displayed_used_percent"] = row["upstream_used_percent"]
+        period["used_usd"] = row["selected_total_cost"]
         period["observation_count"] += 1
 
     periods = sorted(
@@ -81,6 +90,22 @@ def _trajectory_periods(account_id: int) -> list[dict]:
             else period["resets_at"]
         )
     return periods
+
+
+def cycle_usage_history(account_id: int) -> list[dict]:
+    """Return each inferred cycle's persisted final usage summary."""
+
+    return [
+        {
+            "sequence": period["sequence"],
+            "started_at": iso(period["started_at"]),
+            "ended_at": iso(period["ended_at"]),
+            "used_percent": float(period["estimated_used_percent"]),
+            "used_usd": float(period["used_usd"]),
+            "is_current": period["is_current"],
+        }
+        for period in _trajectory_periods(account_id)
+    ]
 
 
 def _segment_for_period(

@@ -556,7 +556,7 @@ export const tutorialGroups: TutorialGroup[] = [
             paragraphs: [
               "GET /api/v1/accounts 只在当前 Key 拥有“账号状态”页面权限时出现，并只返回该系统用户获准查看的监控账号。其他按账号查询的接口使用这里的 id 作为 account_id；external_account_id 才是 Sub2API 上游账号 ID。",
               "GET /api/v1/dashboard 返回额度总览、当前周期、待处理建议和授权账号摘要。account_id 可选；省略时选择第一个已授权且启用的账号。",
-              "GET /api/v1/account-status 会对授权范围内的监控账号执行 Sub2API 只读查询，返回运行状态、额度窗口和 30 天统计；FAST 修正总额来自本地已持久化事实。单个账号失败会写入该账号的 warnings，不会中断其他账号。",
+              "GET /api/v1/account-status 会对授权范围内的监控账号执行 Sub2API 只读查询，返回运行状态、额度窗口、历史周期消耗和 30 天统计；周期消耗使用本地已持久化的粒子估计百分比与折算额度，FAST 修正总额也来自本地已持久化事实。单个账号失败会写入该账号的 warnings，不会中断其他账号。",
             ],
             codeBlocks: [
               {

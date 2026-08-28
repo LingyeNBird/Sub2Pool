@@ -202,6 +202,7 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "name",
                 "enabled",
                 "quota_query_mode",
+                "cycles",
                 "runtime",
                 "usage",
                 "stats",
@@ -215,6 +216,12 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "quota_query_mode": {
                     "type": "string",
                     "enum": ["passive", "direct"],
+                },
+                "cycles": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/components/schemas/AccountCycleUsage"
+                    },
                 },
                 "runtime": {
                     "oneOf": [
@@ -238,6 +245,25 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                     "type": "array",
                     "items": {"type": "string"},
                 },
+            },
+        },
+        "AccountCycleUsage": {
+            "type": "object",
+            "required": [
+                "sequence",
+                "started_at",
+                "ended_at",
+                "used_percent",
+                "used_usd",
+                "is_current",
+            ],
+            "properties": {
+                "sequence": {"type": "integer"},
+                "started_at": {"type": "string", "format": "date-time"},
+                "ended_at": {"type": "string", "format": "date-time"},
+                "used_percent": {"type": "number"},
+                "used_usd": {"type": "number"},
+                "is_current": {"type": "boolean"},
             },
         },
         "AccountRuntimeStatus": {

@@ -80,12 +80,21 @@ export interface AccountUsageStats {
     token_count: number | null;
   } | null;
 }
+export interface AccountCycleUsage {
+  sequence: number;
+  started_at: string;
+  ended_at: string;
+  used_percent: number;
+  used_usd: number;
+  is_current: boolean;
+}
 export interface AccountStatusAccount {
   id: number;
   external_account_id: number;
   name: string;
   enabled: boolean;
   quota_query_mode: "passive" | "direct";
+  cycles: AccountCycleUsage[];
   runtime: AccountRuntimeStatus | null;
   usage: AccountUsageStatus | null;
   stats: AccountUsageStats | null;

@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
+import AccountCycleUsageChart from "./components/AccountCycleUsageChart.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
@@ -239,7 +240,7 @@ onMounted(load);
         v-if="account.usage?.seven_day"
         class="grid gap-4 lg:grid-cols-12"
       >
-        <div class="rounded-box bg-base-200 p-5 lg:col-span-4">
+        <div class="self-start rounded-box bg-base-200 p-5 lg:col-span-4">
           <div class="flex items-end justify-between gap-4">
             <div>
               <div class="text-xs font-medium tracking-wide opacity-55">
@@ -276,46 +277,79 @@ onMounted(load);
           </div>
         </div>
 
-        <div
-          class="grid gap-3 sm:grid-cols-3 lg:col-span-8"
-          aria-label="七天窗口用量"
-        >
-          <div
-            v-if="account.usage.seven_day.account_cost_usd != null"
-            class="rounded-box border border-base-300 p-4"
-          >
-            <div class="text-xs opacity-55">周期已用金额</div>
-            <div class="mt-2 text-2xl font-semibold tabular-nums">
-              {{ formatCurrency(account.usage.seven_day.account_cost_usd) }}
-            </div>
-            <div class="mt-1 space-y-0.5 text-xs opacity-45">
-              <div>账号成本口径</div>
-              <div v-if="account.usage.seven_day.standard_cost_usd != null">
-                标准成本
-                {{ formatCurrency(account.usage.seven_day.standard_cost_usd) }}
-              </div>
-              <div v-if="account.usage.seven_day.user_cost_usd != null">
-                用户扣费
-                {{ formatCurrency(account.usage.seven_day.user_cost_usd) }}
+        <div class="min-w-0 space-y-3 lg:col-span-8">
+          <div class="rounded-box border border-base-300 p-3 sm:p-4">
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h3 class="text-sm font-semibold">历史周期消耗</h3>
+              <div class="flex items-center gap-4 text-xs opacity-60">
+                <span class="inline-flex items-center gap-1.5">
+                  <i class="size-2 rounded-sm bg-success"></i>已使用
+                </span>
+                <span class="inline-flex items-center gap-1.5">
+                  <i class="size-2 rounded-sm bg-orange-500"></i>未使用
+                </span>
               </div>
             </div>
-          </div>
-          <div
-            v-if="account.usage.seven_day.request_count != null"
-            class="rounded-box border border-base-300 p-4"
-          >
-            <div class="text-xs opacity-55">周期请求数</div>
-            <div class="mt-2 text-2xl font-semibold tabular-nums">
-              {{ formatCount(account.usage.seven_day.request_count) }}
+            <AccountCycleUsageChart
+              v-if="account.cycles.length"
+              :items="account.cycles"
+            />
+            <div
+              v-else
+              class="flex h-64 items-center justify-center text-sm opacity-50"
+            >
+              暂无可展示的历史周期
             </div>
           </div>
+
           <div
-            v-if="account.usage.seven_day.token_count != null"
-            class="rounded-box border border-base-300 p-4"
+            v-if="
+              account.usage.seven_day.account_cost_usd != null ||
+              account.usage.seven_day.request_count != null ||
+              account.usage.seven_day.token_count != null
+            "
+            class="grid gap-3 sm:grid-cols-3"
+            aria-label="七天窗口用量"
           >
-            <div class="text-xs opacity-55">周期 Token</div>
-            <div class="mt-2 text-2xl font-semibold tabular-nums">
-              {{ formatCount(account.usage.seven_day.token_count) }}
+            <div
+              v-if="account.usage.seven_day.account_cost_usd != null"
+              class="rounded-box border border-base-300 p-4"
+            >
+              <div class="text-xs opacity-55">周期已用金额</div>
+              <div class="mt-2 text-2xl font-semibold tabular-nums">
+                {{ formatCurrency(account.usage.seven_day.account_cost_usd) }}
+              </div>
+              <div class="mt-1 space-y-0.5 text-xs opacity-45">
+                <div>账号成本口径</div>
+                <div v-if="account.usage.seven_day.standard_cost_usd != null">
+                  标准成本
+                  {{
+                    formatCurrency(account.usage.seven_day.standard_cost_usd)
+                  }}
+                </div>
+                <div v-if="account.usage.seven_day.user_cost_usd != null">
+                  用户扣费
+                  {{ formatCurrency(account.usage.seven_day.user_cost_usd) }}
+                </div>
+              </div>
+            </div>
+            <div
+              v-if="account.usage.seven_day.request_count != null"
+              class="rounded-box border border-base-300 p-4"
+            >
+              <div class="text-xs opacity-55">周期请求数</div>
+              <div class="mt-2 text-2xl font-semibold tabular-nums">
+                {{ formatCount(account.usage.seven_day.request_count) }}
+              </div>
+            </div>
+            <div
+              v-if="account.usage.seven_day.token_count != null"
+              class="rounded-box border border-base-300 p-4"
+            >
+              <div class="text-xs opacity-55">周期 Token</div>
+              <div class="mt-2 text-2xl font-semibold tabular-nums">
+                {{ formatCount(account.usage.seven_day.token_count) }}
+              </div>
             </div>
           </div>
         </div>
