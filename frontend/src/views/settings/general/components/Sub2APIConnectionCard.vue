@@ -352,7 +352,7 @@ function addSelectedAccount() {
                 type="range"
                 aria-label="基础容量下限"
                 :min="capacityDomain(account).min"
-                :max="capacityMax(account) - capacityDomain(account).step"
+                :max="capacityDomain(account).max"
                 :step="capacityDomain(account).step"
                 :value="capacityMin(account)"
                 @input="
@@ -367,7 +367,7 @@ function addSelectedAccount() {
               <input
                 type="range"
                 aria-label="基础容量上限"
-                :min="capacityMin(account) + capacityDomain(account).step"
+                :min="capacityDomain(account).min"
                 :max="capacityDomain(account).max"
                 :step="capacityDomain(account).step"
                 :value="capacityMax(account)"
@@ -551,8 +551,8 @@ function addSelectedAccount() {
 .capacity-range__track {
   position: absolute;
   top: 50%;
-  right: 0.375rem;
-  left: 0.375rem;
+  right: 0.5rem;
+  left: 0.5rem;
   height: 0.3rem;
   overflow: hidden;
   border-radius: 999px;
