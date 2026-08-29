@@ -71,7 +71,7 @@ const dateTime = useDateTime();
           ></progress>
           <div class="stat-desc">
             {{ dateTime(schedule.next_local_check_at) }} ·
-            全局探测全部启用参与者
+            全局探测全部启用监控账号
           </div>
         </div>
         <AppIcon name="clock" class="size-7 shrink-0 opacity-40" />

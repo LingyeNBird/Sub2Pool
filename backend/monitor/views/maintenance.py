@@ -29,7 +29,11 @@ class HistoricalRebuildPlanListView(AdminAPIView):
             account_id = int(request.data.get("account_id"))
         except (TypeError, ValueError):
             return error("监控账号参数无效", 400)
-        account = get_object_or_404(MonitoredAccount, pk=account_id)
+        account = get_object_or_404(
+            MonitoredAccount,
+            pk=account_id,
+            provider="sub2api",
+        )
         try:
             plan = create_rebuild_plan(AppSettings.load(), account)
         except (HistoricalRebuildError, ValueError) as exc:

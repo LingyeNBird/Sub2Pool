@@ -6,6 +6,32 @@ python manage.py migrate --noinput
 python manage.py replayobservations
 python manage.py bootstrap_admin
 
-# 轮询器与 Web 共用 SQLite 和业务代码。无需 Redis/Celery；容器停止时 Docker 会终止整个进程组。
+# PID 1 forwards SIGTERM to every child. The CPA collector handles it
+# explicitly so it can flush its durable spool and record the closing boundary.
 python manage.py runmonitor &
-exec gunicorn pinche.wsgi:application --bind 0.0.0.0:8000 --workers 1 --threads 4 --timeout 120 --access-logfile - --error-logfile -
+monitor_pid=$!
+python manage.py runcpacollector &
+collector_pid=$!
+gunicorn pinche.wsgi:application --bind 0.0.0.0:8000 --workers 1 --threads 4 --timeout 120 --access-logfile - --error-logfile - &
+web_pid=$!
+
+shutdown() {
+    trap - TERM INT
+    kill -TERM "$monitor_pid" "$collector_pid" "$web_pid" 2>/dev/null || true
+    wait "$monitor_pid" 2>/dev/null || true
+    wait "$collector_pid" 2>/dev/null || true
+    wait "$web_pid" 2>/dev/null || true
+}
+
+on_signal() {
+    shutdown
+    exit 0
+}
+
+trap on_signal TERM INT
+set +e
+wait "$web_pid"
+status=$?
+set -e
+shutdown
+exit "$status"

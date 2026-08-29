@@ -56,7 +56,7 @@ const dateTime = useDateTime();
         <AppIcon name="banknotes" class="size-7 shrink-0 opacity-40" />
       </div>
     </div>
-    <div class="stat">
+    <div v-if="data.selected_provider === 'sub2api'" class="stat">
       <div class="flex h-full items-center justify-between gap-4">
         <div class="min-w-0">
           <div class="stat-title">需要手动调整</div>

@@ -6,6 +6,7 @@ import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import type { DashboardData } from "@/types/dashboard";
 import type { Participant } from "@/types/participants";
+import { monitoredAccountLabel } from "@/utils/accounts";
 
 import AccountExplanationCard from "./components/AccountExplanationCard.vue";
 import CollectionStatusCard from "./components/CollectionStatusCard.vue";
@@ -141,7 +142,7 @@ onMounted(load);
           :key="account.id"
           :value="account.id"
         >
-          {{ account.name }}
+          {{ monitoredAccountLabel(account) }}
         </option>
       </select>
       <button
@@ -188,8 +189,9 @@ onMounted(load);
   <div v-if="data && !data.configured" class="col-span-12 alert alert-warning">
     <AppIcon name="exclamation-triangle" class="size-5" />
     <span>
-      尚未完成 Sub2API 连接配置。请先在系统设置中填写地址、Admin Token
-      并添加至少一个 OpenAI 监控账号。
+      尚未完成{{
+        data.selected_provider === "cpa" ? " CPA" : " Sub2API"
+      }}连接配置。请先在系统设置中填写连接信息并添加监控账号。
     </span>
   </div>
 
@@ -204,7 +206,7 @@ onMounted(load);
     </div>
   </section>
   <RecommendationList
-    v-if="data"
+    v-if="data?.selected_provider === 'sub2api'"
     :participants="data.participants"
     :applied-participant-ids="appliedParticipantIds"
     :read-only="!auth.isStaff"
@@ -214,9 +216,9 @@ onMounted(load);
   <AccountExplanationCard v-if="data" :data="data" />
 
   <RecommendationActionDialog
-    v-if="data && auth.isStaff"
+    v-if="data?.selected_provider === 'sub2api' && auth.isStaff"
     ref="actionDialog"
-    :admin-url="data.sub2api_admin_url"
+    :admin-url="data.upstream_admin_url"
     :applying-participant-id="applyingParticipantId"
     @open-admin="openAdminApi"
     @apply="applyRecommendation"

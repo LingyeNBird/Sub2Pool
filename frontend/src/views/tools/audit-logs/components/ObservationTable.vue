@@ -20,6 +20,7 @@ defineProps<{
   fastCorrectionPendingIds: Set<number>;
   fastCorrectionActiveId: number | null;
   editable: boolean;
+  manualRangeEditable: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -47,6 +48,8 @@ function sourceLabel(value: string) {
       scheduled: "定时",
       exhausted: "额度耗尽",
       reset: "临近重置",
+      cpa_subscription_opened: "CPA 订阅后采样",
+      cpa_subscription_closed: "CPA 关闭前采样",
     }[value] ?? value
   );
 }
@@ -80,7 +83,10 @@ function isAtOrAfter(row: Observation, start: Observation) {
           {{ rebuilding ? "重建中" : "重建计算" }}
         </button>
       </div>
-      <div v-if="editable && manualRangeStart" class="alert py-3 alert-info">
+      <div
+        v-if="manualRangeEditable && manualRangeStart"
+        class="alert py-3 alert-info"
+      >
         <AppIcon name="arrows-right-left" class="size-5" />
         <div class="grow text-sm">
           <div class="font-medium">已选择开始记录</div>
@@ -271,7 +277,7 @@ function isAtOrAfter(row: Observation, start: Observation) {
                       详情
                     </button>
                     <template v-if="editable">
-                      <template v-if="manualRangeStart">
+                      <template v-if="manualRangeEditable && manualRangeStart">
                         <button
                           v-if="isAtOrAfter(row, manualRangeStart)"
                           class="btn btn-ghost text-primary btn-xs"
@@ -302,13 +308,14 @@ function isAtOrAfter(row: Observation, start: Observation) {
                       </template>
                       <template v-else>
                         <button
+                          v-if="manualRangeEditable"
                           class="btn btn-ghost text-primary btn-xs"
                           @click="emit('beginManualRange', row)"
                         >
                           {{ row.is_manual_start ? "调整区间" : "设置区间" }}
                         </button>
                         <button
-                          v-if="row.is_manual_start"
+                          v-if="manualRangeEditable && row.is_manual_start"
                           class="btn btn-ghost text-primary btn-xs"
                           :disabled="manualStartId === row.id"
                           @click="emit('clearManualStart', row)"

@@ -27,6 +27,7 @@ from ..models import (
     AccountParticipant,
     AppSettings,
     HistoryMaintenanceState,
+    CPAAccountCollectionInterval,
     MonitoredAccount,
     Observation,
     Participant,
@@ -107,7 +108,11 @@ def _replay_usage_samples(
             sample.participant_id,
             ZERO,
         )
-        if segment.reason in {"manual_override", "official_zero_observation"}:
+        if segment.reason in {
+            "manual_override",
+            "official_zero_observation",
+            "provider_collection_baseline",
+        }:
             baseline = normalized_by_key.get(
                 (
                     sample.participant.sub2api_user_id,
@@ -319,14 +324,25 @@ def rebuild_account(
         _assert_replay_guard(guard)
 
     config = config or AppSettings.load()
-    monitored_account = MonitoredAccount.objects.filter(
-        external_account_id=account_id
-    ).first()
+    monitored_account = (
+        MonitoredAccount.objects.filter(pk=-account_id, provider="cpa").first()
+        if account_id < 0
+        else MonitoredAccount.objects.filter(
+            external_account_id=account_id,
+            provider="sub2api",
+        ).first()
+    )
     range_profile = (
         monitored_account.resolved_capacity_profile
         if monitored_account is not None
         else PRO_20X_CAPACITY_PROFILE
     )
+    collection_intervals: list[CPAAccountCollectionInterval] | None = None
+    if monitored_account is not None and monitored_account.provider == "cpa":
+        collection_intervals = list(
+            CPAAccountCollectionInterval.objects.filter(account=monitored_account)
+            .order_by("connected_at", "id")
+        )
     all_observations = list(
         Observation.objects.select_for_update()
         .select_related("sample_point", "manual_start_end")
@@ -383,14 +399,11 @@ def rebuild_account(
             ["excluded_at", "exclusion_source", "exclusion_reason"],
         )
 
-    candidates = [
-        observation
-        for observation in observations
-        if observation.exclusion_source != "manual"
-    ]
     segments, automatic = _infer_segments(
-        candidates,
+        observations,
         config.cost_basis,
+        collection_intervals=collection_intervals,
+        collection_history=all_observations,
     )
     if automatic:
         Observation.objects.bulk_update(

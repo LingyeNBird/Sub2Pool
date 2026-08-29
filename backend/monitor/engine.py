@@ -12,6 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .accounting.boundaries import same_official_reset as _same_official_reset
+from .cpa.monitoring import run_cpa_monitor
 from .integrations.sub2api import Sub2APIClient, Sub2APIError
 from .history_state import LeaseBusyError, LeaseGuard
 from .models import (
@@ -72,7 +73,7 @@ def _rebuild_capture(
             )
         if account.effective_quota_profile != previous_profile:
             rebuild_account(
-                account.external_account_id,
+                account.fact_key,
                 config,
                 guard=guard,
             )
@@ -143,6 +144,13 @@ def _run_monitor_locked(
 ) -> dict:
     if not config.monitoring_enabled and not force_upstream:
         return {"status": "disabled", "message": "监控已停用"}
+    if account.provider == "cpa":
+        return run_cpa_monitor(
+            config,
+            account,
+            requested_source,
+            guard,
+        )
     allocations = list(
         PoolParticipant.objects.select_related("participant", "pool")
         .filter(
@@ -405,7 +413,7 @@ def _run_account_monitor(
     source: str,
 ) -> dict:
     try:
-        guard = LeaseGuard.acquire(account.external_account_id)
+        guard = LeaseGuard.acquire(account.fact_key)
     except LeaseBusyError:
         return {
             "status": "busy",
@@ -429,7 +437,7 @@ def _run_account_monitor(
         )
         notify_collection_error(
             config,
-            f"{account.name}（{account.external_account_id}）：{message}",
+            f"{account.name}（{account.provider}:{account.source_account_id}）：{message}",
         )
         raise
     finally:

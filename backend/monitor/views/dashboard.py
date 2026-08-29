@@ -53,6 +53,8 @@ def _admin_url(value: str) -> str:
 def _account_data(account: MonitoredAccount) -> dict:
     return {
         "id": account.id,
+        "provider": account.provider,
+        "source_account_id": account.source_account_id,
         "external_account_id": account.external_account_id,
         "name": account.name,
         "enabled": account.enabled,
@@ -71,7 +73,12 @@ def _selected_account(
     accounts = list(
         visible_accounts_for(
             request.user,
-            MonitoredAccount.objects.order_by("name", "external_account_id"),
+            MonitoredAccount.objects.order_by(
+                "name",
+                "provider",
+                "external_account_id",
+                "cpa_auth_index",
+            ),
         )
     )
     raw_account_id = request.query_params.get("account_id")
@@ -128,10 +135,10 @@ class DashboardView(PageAccessAPIView):
             accounts, account = _selected_account(request)
         except ValueError as exc:
             return error(str(exc), 400)
-        external_account_id = account.external_account_id if account else None
+        fact_account_id = account.fact_key if account else None
         cost_breakdowns = FastCorrectionBreakdownPresenter(
             config,
-            external_account_id,
+            fact_account_id,
         )
         snapshot_stale = bool(
             account
@@ -141,19 +148,20 @@ class DashboardView(PageAccessAPIView):
         )
         observation = (
             Observation.objects.filter(
-                account_id=external_account_id,
+                account_id=fact_account_id,
                 excluded_at__isnull=True,
                 attribution_started_at__isnull=False,
             )
             .prefetch_related("participant_snapshots__participant")
             .order_by("-observed_at", "-id")
             .first()
-            if external_account_id is not None
+            if fact_account_id is not None
             else None
         )
-        all_participant_rows, participant_rows = _participant_rows(
-            config,
-            request.user,
+        all_participant_rows, participant_rows = (
+            _participant_rows(config, request.user)
+            if account is None or account.provider == "sub2api"
+            else ([], [])
         )
         selected_snapshots = []
         if account is not None:
@@ -203,14 +211,24 @@ class DashboardView(PageAccessAPIView):
                     presented_estimated_percent - total_charged,
                 )
 
-        actionable = _actionable_recommendations(participant_rows)
+        actionable = (
+            _actionable_recommendations(participant_rows)
+            if account is None or account.provider == "sub2api"
+            else []
+        )
         data = {
             "configured": bool(
-                config.sub2api_admin_token_encrypted and accounts
+                account
+                and (
+                    config.cpa_management_key_encrypted
+                    if account.provider == "cpa"
+                    else config.sub2api_admin_token_encrypted
+                )
             ),
             "monitoring_enabled": config.monitoring_enabled,
             "accounts": [_account_data(item) for item in accounts],
             "selected_account_id": account.id if account else None,
+            "selected_provider": account.provider if account else None,
             "last_local_check_at": iso(
                 account.last_local_check_at if account else config.last_local_check_at
             ),
@@ -226,7 +244,16 @@ class DashboardView(PageAccessAPIView):
             "last_error": account.last_error if account else config.last_error,
             "quota_query_mode": account.quota_query_mode if account else None,
             "sub2api_admin_url": _admin_url(config.sub2api_base_url),
-            "fast_correction_enabled": config.fast_correction_enabled,
+            "upstream_admin_url": _admin_url(
+                config.cpa_base_url
+                if account is not None and account.provider == "cpa"
+                else config.sub2api_base_url
+            ),
+            "fast_correction_enabled": bool(
+                config.fast_correction_enabled
+                and account is not None
+                and account.provider == "sub2api"
+            ),
             "weekly_quota_model": config.weekly_quota_model,
             "cycle": None,
             "participants": actionable,

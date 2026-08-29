@@ -20,6 +20,7 @@ function observationsData(context: DemoRequestContext): ObservationListData {
     ...item,
     account_id: account?.external_account_id ?? item.account_id,
   }));
+  if (account?.provider === "cpa") items = [];
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
   const source = url.searchParams.get("source");
@@ -34,11 +35,15 @@ function observationsData(context: DemoRequestContext): ObservationListData {
     account: account
       ? {
           id: account.id,
+          provider: account.provider,
+          source_account_id: account.source_account_id,
           external_account_id: account.external_account_id,
           name: account.name,
         }
       : null,
-    fast_correction_enabled: Boolean(state.settings.fast_correction_enabled),
+    fast_correction_enabled:
+      account?.provider === "sub2api" &&
+      Boolean(state.settings.fast_correction_enabled),
     summary: {
       total: items.length,
       valid_count: items.filter((item) => item.valid_sample).length,

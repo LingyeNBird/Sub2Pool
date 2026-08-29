@@ -65,9 +65,11 @@ defineExpose({ open, close });
               : '时变容量模型依据'
           "
           :help="
-            data.weekly_quota_model === 'constant_average'
-              ? '平均恒定模式直接使用周期起点至当前观测的累计成本和已用百分比。'
-              : '时变模式同时估计连续容量路径、整数显示规则和各账号归属；确定性边界用于阻止概率估计越过硬约束。'
+            data.selected_provider === 'cpa'
+              ? 'CPA 使用独立保存的采集区间、本地估算成本和上游整数进度；区间首条未排除观测作为数值基线，不把百分比记录当作连接状态，也不补造区间外用量。'
+              : data.weekly_quota_model === 'constant_average'
+                ? '平均恒定模式直接使用周期起点至当前观测的累计成本和已用百分比。'
+                : '时变模式同时估计连续容量路径、整数显示规则和各账号归属；确定性边界用于阻止概率估计越过硬约束。'
           "
         />
         <CalculationBasisTimeline
@@ -233,7 +235,11 @@ defineExpose({ open, close });
             v-if="Math.abs(diagnostics.aggregate_cost_difference_usd) >= 0.01"
             class="text-xs opacity-60"
           >
-            总成本与用户成本合计差额：
+            {{
+              data.selected_provider === "cpa"
+                ? "总成本聚合差额"
+                : "总成本与用户成本合计差额"
+            }}：
             {{ formatCurrency(diagnostics.aggregate_cost_difference_usd) }}。
           </p>
         </div>

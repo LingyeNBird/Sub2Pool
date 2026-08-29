@@ -17,8 +17,11 @@ function baseMonitoredAccounts(): MonitoredAccount[] {
   return [
     {
       id: 1,
+      provider: "sub2api",
+      source_account_id: "8801",
       pool_id: 1,
       external_account_id: 8801,
+      cpa_auth_index: null,
       name: "主力账号",
       enabled: true,
       quota_query_mode: "passive",
@@ -37,8 +40,11 @@ function baseMonitoredAccounts(): MonitoredAccount[] {
     },
     {
       id: 2,
+      provider: "sub2api",
+      source_account_id: "8802",
       pool_id: 1,
       external_account_id: 8802,
+      cpa_auth_index: null,
       name: "备用账号",
       enabled: true,
       quota_query_mode: "direct",
@@ -60,6 +66,9 @@ function baseMonitoredAccounts(): MonitoredAccount[] {
 
 function baseParticipants(accounts: MonitoredAccount[]): Participant[] {
   const poolName = "默认混池";
+  const sub2Accounts = accounts.filter(
+    (account) => account.provider === "sub2api",
+  );
   const rows = [
     {
       id: 1,
@@ -108,8 +117,8 @@ function baseParticipants(accounts: MonitoredAccount[]): Participant[] {
         pool_id: 1,
         pool_name: poolName,
         share_percent: row.sharePercent,
-        account_ids: accounts.map((account) => account.id),
-        account_count: accounts.length,
+        account_ids: sub2Accounts.map((account) => account.id),
+        account_count: sub2Accounts.length,
       },
     ],
     is_owner: row.is_owner,
@@ -117,10 +126,10 @@ function baseParticipants(accounts: MonitoredAccount[]): Participant[] {
     notes: row.notes,
     latest_balance_usd: null,
     last_checked_at: null,
-    account_breakdowns: accounts.map((account) => ({
+    account_breakdowns: sub2Accounts.map((account) => ({
       id: row.id * 10 + account.id,
       account_id: account.id,
-      external_account_id: account.external_account_id,
+      external_account_id: account.external_account_id!,
       account_name: account.name,
       account_enabled: account.enabled,
       pool_id: 1,
@@ -209,6 +218,31 @@ function baseSettings(): AppSettingsData {
   return {
     monitoring_enabled: true,
     sub2api_base_url: "https://demo.example.test",
+    cpa_base_url: "https://cpa.demo.example.test",
+    cpa_management_key_configured: false,
+    cpa_fast_multiplier: 2.5,
+    cpa_double_billing_enabled: false,
+    cpa_double_billing_threshold_tokens: 272000,
+    cpa_double_billing_multiplier: 2,
+    cpa_model_pricing: {
+      "gpt-5-codex": {
+        input: "1.25",
+        cached_input: "0.125",
+        output: "10",
+      },
+    },
+    cpa_collector_status: {
+      state: "connected",
+      connected: true,
+      stale: false,
+      connected_at: iso(DEMO_ANCHOR - 30 * 60_000),
+      heartbeat_at: iso(DEMO_ANCHOR - 3_000),
+      last_message_at: iso(DEMO_ANCHOR - 20_000),
+      last_persisted_at: iso(DEMO_ANCHOR - 20_000),
+      pending_count: 0,
+      last_error: "",
+      last_error_at: null,
+    },
     request_timeout_seconds: 20,
     verify_tls: true,
     timezone: "Asia/Shanghai",

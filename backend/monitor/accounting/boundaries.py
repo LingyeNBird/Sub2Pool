@@ -6,7 +6,11 @@ from decimal import Decimal
 from django.utils import timezone
 
 from .contracts import ALGORITHM_VERSION, ReplaySegment
-from ..models import Observation, ParticipantSnapshot
+from ..models import (
+    CPAAccountCollectionInterval,
+    Observation,
+    ParticipantSnapshot,
+)
 
 ZERO = Decimal("0")
 RATE_METHOD = ALGORITHM_VERSION
@@ -79,7 +83,12 @@ def manual_start_interval_end_key(
 
 def waiting_for_first_use(segment: ReplaySegment) -> bool:
     return (
-        segment.reason in {"official_zero_observation", "manual_override"}
+        segment.reason
+        in {
+            "official_zero_observation",
+            "manual_override",
+            "provider_collection_baseline",
+        }
         and all(
             observation.upstream_used_percent == ZERO
             for observation in segment.observations
@@ -87,7 +96,12 @@ def waiting_for_first_use(segment: ReplaySegment) -> bool:
     )
 
 
-def official_segment(observation: Observation, cost_basis: str) -> ReplaySegment:
+def official_segment(
+    observation: Observation,
+    cost_basis: str,
+    *,
+    collection_baseline: bool = False,
+) -> ReplaySegment:
     """建立官方窗口区间，并优先采用首个 0% 观测的累计成本基线。
 
     Sub2API 的聚合用量接口按自然日统计。官方窗口若在当天零点之后重置，
@@ -95,6 +109,13 @@ def official_segment(observation: Observation, cost_basis: str) -> ReplaySegment
     直接确认的新周期零点，因此必须扣除它当时的累计成本；否则这段旧周期
     成本会被错误折算进新周期容量。
     """
+    if collection_baseline:
+        return observed_baseline_segment(
+            observation,
+            reason="provider_collection_baseline",
+            percent_baseline=observation.upstream_used_percent,
+            cost_basis=cost_basis,
+        )
 
     if observation.upstream_used_percent == ZERO:
         return observed_baseline_segment(
@@ -201,6 +222,9 @@ def mark_automatic_exclusion(
 def infer_segments(
     observations: list[Observation],
     cost_basis: str,
+    *,
+    collection_intervals: list[CPAAccountCollectionInterval] | None = None,
+    collection_history: list[Observation] | None = None,
 ) -> tuple[list[ReplaySegment], list[Observation]]:
     """按“管理员起点区间 > 官方窗口 > 异常检测”识别派生区间。
 
@@ -219,11 +243,65 @@ def infer_segments(
 
     官方重置时间没有变化时，百分比回退与七天窗口证据矛盾，不能再凭
     连续低点擅自建立新区间。此类低点保持自动排除，直到 reset_at
-    变化或管理员明确设置起点区间。
+    变化或管理员明确设置起点区间。CPA 百分比观测是否处于连续采集覆盖内，
+    由独立持久化的账号采集区间决定；百分比记录本身不再承担 RESP 连接状态。
     """
 
-    segments: list[ReplaySegment] = []
     automatic: list[Observation] = []
+    covered_observations: list[Observation] = []
+    collection_baseline_ids: set[int] = set()
+    if collection_intervals is None:
+        covered_observations = [
+            observation
+            for observation in observations
+            if observation.exclusion_source != "manual"
+        ]
+    else:
+        intervals = sorted(
+            collection_intervals,
+            key=lambda interval: (interval.connected_at, interval.id),
+        )
+
+        def covering_interval(
+            observation: Observation,
+        ) -> CPAAccountCollectionInterval | None:
+            return next(
+                (
+                    candidate
+                    for candidate in reversed(intervals)
+                    if candidate.connected_at <= observation.observed_at
+                    and (
+                        candidate.disconnected_at is None
+                        or observation.observed_at <= candidate.disconnected_at
+                    )
+                ),
+                None,
+            )
+
+        seen_intervals: set[int] = set()
+        for observation in collection_history or observations:
+            if observation.exclusion_source == "manual":
+                continue
+            interval = covering_interval(observation)
+            if interval is not None and interval.id not in seen_intervals:
+                collection_baseline_ids.add(observation.id)
+                seen_intervals.add(interval.id)
+
+        for observation in observations:
+            if observation.exclusion_source == "manual":
+                continue
+            interval = covering_interval(observation)
+            if interval is None:
+                mark_automatic_exclusion(
+                    [observation],
+                    "CPA usage 采集区间未覆盖该百分比观测",
+                )
+                automatic.append(observation)
+                continue
+            covered_observations.append(observation)
+
+    observations = covered_observations
+    segments: list[ReplaySegment] = []
     current: ReplaySegment | None = None
     active_manual_end: tuple[datetime, int] | None = None
     index = 0
@@ -249,10 +327,26 @@ def infer_segments(
             index += 1
             continue
 
+        if observation.id in collection_baseline_ids:
+            if current is not None and current.observations:
+                segments.append(current)
+            current = official_segment(
+                observation,
+                cost_basis,
+                collection_baseline=True,
+            )
+            current.observations.append(observation)
+            index += 1
+            continue
+
         if current is not None and waiting_for_first_use(current):
             transient_reversion: list[Observation] = []
             if (
-                current.reason == "official_zero_observation"
+                current.reason
+                in {
+                    "official_zero_observation",
+                    "provider_collection_baseline",
+                }
                 and not same_official_reset(
                     observation.upstream_resets_at,
                     current.resets_at,
@@ -287,7 +381,11 @@ def infer_segments(
                     continue
             previous_segment = segments[-1] if segments else None
             restored_previous_window = (
-                current.reason == "official_zero_observation"
+                current.reason
+                in {
+                    "official_zero_observation",
+                    "provider_collection_baseline",
+                }
                 and previous_segment is not None
                 and bool(previous_segment.observations)
                 and same_official_reset(

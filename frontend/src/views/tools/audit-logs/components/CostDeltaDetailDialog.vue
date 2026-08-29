@@ -47,7 +47,10 @@ defineExpose<DialogController<[Observation]>>({ open, close });
       <p v-if="observation" class="mt-1 text-sm opacity-60">
         {{ dateTime(observation.observed_at) }} 相对上一条有效观测
       </p>
-      <div class="mt-4 overflow-x-auto">
+      <div
+        v-if="observation?.provider === 'sub2api'"
+        class="mt-4 overflow-x-auto"
+      >
         <table class="table table-sm">
           <thead>
             <tr>
@@ -104,6 +107,18 @@ defineExpose<DialogController<[Observation]>>({ open, close });
             </tr>
           </tfoot>
         </table>
+      </div>
+      <div
+        v-if="observation?.provider === 'cpa'"
+        class="stats mt-4 w-full bg-base-200"
+      >
+        <div class="stat">
+          <div class="stat-title">账号总成本增量</div>
+          <div class="stat-value text-2xl">
+            {{ formatCurrency(observation.delta_cost) }}
+          </div>
+          <div class="stat-desc">来自连接后采集的 CPA usage 事件</div>
+        </div>
       </div>
       <div
         v-if="

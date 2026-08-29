@@ -51,7 +51,7 @@ def latest_cycle_observation(
 ) -> Observation | None:
     return (
         Observation.objects.filter(
-            account_id=account.external_account_id,
+            account_id=account.fact_key,
             excluded_at__isnull=True,
             attribution_started_at__isnull=False,
         )
@@ -220,7 +220,10 @@ def refresh_due_api_usage_snapshots(config: AppSettings) -> dict[str, int]:
     now = timezone.now()
     due: list[tuple[Participant, Observation]] = []
     skipped = 0
-    for account in MonitoredAccount.objects.filter(enabled=True):
+    for account in MonitoredAccount.objects.filter(
+        enabled=True,
+        provider="sub2api",
+    ):
         observation = latest_cycle_observation(account)
         if observation is None:
             continue

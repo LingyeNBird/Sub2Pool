@@ -6,7 +6,14 @@ from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import AbstractBaseUser
 
-from ..models import MonitoredAccount, Participant, ParticipantUsageSample
+from ..cpa.usage import cpa_event_cost
+from ..models import (
+    AppSettings,
+    CPAUsageEvent,
+    MonitoredAccount,
+    Participant,
+    ParticipantUsageSample,
+)
 
 
 def participant_usage_series(
@@ -26,7 +33,7 @@ def participant_usage_series(
     samples = (
         ParticipantUsageSample.objects.filter(
             observed_at__gte=now - timedelta(days=usage_days),
-            account_id=account.external_account_id,
+            account_id=account.fact_key,
             participant__in=participants,
         )
         .select_related("participant")
@@ -71,3 +78,80 @@ def participant_usage_series(
         }
         for participant in participants
     ]
+
+def cpa_api_key_usage_series(
+    *,
+    config: AppSettings,
+    account: MonitoredAccount,
+    location: ZoneInfo,
+    now: datetime,
+    usage_days: int,
+    usage_precision: str,
+) -> list[dict]:
+    events = CPAUsageEvent.objects.filter(
+        account=account,
+        occurred_at__gte=now - timedelta(days=usage_days),
+        occurred_at__lte=now,
+    ).order_by("occurred_at", "id")
+    series: dict[str, dict] = {}
+    for event in events:
+        key = event.api_key_hash or "unattributed"
+        item = series.setdefault(
+            key,
+            {
+                "api_key_id": key[:12],
+                "api_key_name": (
+                    f"API Key ····{event.api_key_hint}"
+                    if event.api_key_hint
+                    else "未提供 API Key"
+                ),
+                "total_usage_usd": 0.0,
+                "request_count": 0,
+                "token_count": 0,
+                "unpriced_request_count": 0,
+                "_buckets": {},
+            },
+        )
+        local = event.occurred_at.astimezone(location)
+        if usage_precision == "raw":
+            bucket = f"{event.occurred_at.isoformat()}-{event.id}"
+            label = local.strftime("%m-%d %H:%M:%S")
+        elif usage_precision == "hour":
+            bucket = local.replace(
+                minute=0,
+                second=0,
+                microsecond=0,
+            ).isoformat()
+            label = local.strftime("%m-%d %H:00")
+        else:
+            bucket = local.date().isoformat()
+            label = local.strftime("%m-%d")
+        point = item["_buckets"].setdefault(
+            bucket,
+            {
+                "observed_at": event.occurred_at.isoformat(),
+                "label": label,
+                "usage_usd": 0.0,
+                "request_count": 0,
+                "token_count": 0,
+            },
+        )
+        estimated_cost, unknown_model = cpa_event_cost(event, config)
+        cost = float(estimated_cost)
+        point["usage_usd"] += cost
+        point["request_count"] += 1
+        point["token_count"] += event.total_tokens
+        item["total_usage_usd"] += cost
+        item["request_count"] += 1
+        item["token_count"] += event.total_tokens
+        if unknown_model:
+            item["unpriced_request_count"] += 1
+    result = []
+    for item in series.values():
+        buckets = item.pop("_buckets")
+        item["points"] = list(buckets.values())
+        result.append(item)
+    return sorted(
+        result,
+        key=lambda item: (-item["total_usage_usd"], item["api_key_name"]),
+    )

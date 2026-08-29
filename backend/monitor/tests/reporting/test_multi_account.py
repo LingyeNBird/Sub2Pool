@@ -281,7 +281,7 @@ def test_account_capacity_range_requires_two_ordered_bounds():
 
 
 @pytest.mark.django_db
-def test_deleting_one_mixed_pool_account_bumps_remaining_contract_revision():
+def test_monitored_accounts_cannot_be_hard_deleted():
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
@@ -298,12 +298,13 @@ def test_deleting_one_mixed_pool_account_bumps_remaining_contract_revision():
         **headers,
     )
 
-    assert response.status_code == 200, response.json()
+    assert response.status_code == 405, response.json()
     pool.refresh_from_db()
+    first.refresh_from_db()
     second.refresh_from_db()
-    assert pool.contract_revision == 2
+    assert pool.contract_revision == 1
+    assert first.pool_id == pool.id
     assert second.pool_id == pool.id
-    assert not MonitoredAccount.objects.filter(pk=first.pk).exists()
 
 
 @pytest.mark.django_db

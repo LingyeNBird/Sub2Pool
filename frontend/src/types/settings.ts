@@ -3,10 +3,44 @@ export interface FastCorrectionRule {
   source_multiplier: string | number;
   target_multiplier: string | number;
 }
+export interface CPAModelPrice {
+  input: string | number;
+  cached_input: string | number;
+  output: string | number;
+}
+export type CPAModelPricing = Record<string, CPAModelPrice>;
+export interface CPACollectorStatus {
+  state: "connected" | "stale" | "error" | "idle";
+  connected: boolean;
+  stale: boolean;
+  connected_at: string | null;
+  heartbeat_at: string | null;
+  last_message_at: string | null;
+  last_persisted_at: string | null;
+  pending_count: number;
+  last_error: string;
+  last_error_at: string | null;
+}
+
 export interface AppSettingsData {
-  [key: string]: string | number | boolean | null | FastCorrectionRule[];
+  [key: string]:
+    | string
+    | number
+    | boolean
+    | null
+    | FastCorrectionRule[]
+    | CPAModelPricing
+    | CPACollectorStatus;
   monitoring_enabled: boolean;
   sub2api_base_url: string;
+  cpa_base_url: string;
+  cpa_management_key_configured: boolean;
+  cpa_fast_multiplier: number;
+  cpa_double_billing_enabled: boolean;
+  cpa_double_billing_threshold_tokens: number;
+  cpa_double_billing_multiplier: number;
+  cpa_model_pricing: CPAModelPricing;
+  cpa_collector_status: CPACollectorStatus;
   request_timeout_seconds: number;
   verify_tls: boolean;
   timezone: string;

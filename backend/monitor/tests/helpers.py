@@ -79,6 +79,28 @@ def create_monitored_account(
         account.save()
     return account
 
+def create_cpa_account(
+    auth_index: str = "codex-auth-1",
+    *,
+    name: str = "CPA Codex 账号",
+    enabled: bool = True,
+    quota_profile: str = "auto",
+    detected_plan_type: str = "",
+) -> MonitoredAccount:
+    account, _created = MonitoredAccount.objects.update_or_create(
+        provider="cpa",
+        cpa_auth_index=auth_index,
+        defaults={
+            "external_account_id": None,
+            "name": name,
+            "enabled": enabled,
+            "quota_query_mode": "direct",
+            "quota_profile": quota_profile,
+            "detected_plan_type": detected_plan_type,
+        },
+    )
+    return account
+
 
 def create_participant(
     *,

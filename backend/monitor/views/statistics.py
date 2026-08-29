@@ -23,6 +23,7 @@ from ..models import AppSettings, PagePermission, Participant
 from ..reporting import (
     FastCorrectionBreakdownPresenter,
     capacity_series,
+    cpa_api_key_usage_series,
     capacity_summary,
     participant_usage_series,
 )
@@ -41,7 +42,7 @@ class StatisticsView(PageAccessAPIView):
             return error("尚未配置启用的监控账号", status.HTTP_409_CONFLICT)
         cost_breakdowns = FastCorrectionBreakdownPresenter(
             config,
-            account.external_account_id,
+            account.fact_key,
         )
         capacity_period = request.query_params.get("capacity_period", "day")
         if capacity_period not in {"day", "month"}:
@@ -66,6 +67,8 @@ class StatisticsView(PageAccessAPIView):
             {
                 "account": {
                     "id": account.id,
+                    "provider": account.provider,
+                    "source_account_id": account.source_account_id,
                     "external_account_id": account.external_account_id,
                     "name": account.name,
                 },
@@ -79,7 +82,10 @@ class StatisticsView(PageAccessAPIView):
                     capacity_period=capacity_period,
                     cost_breakdowns=cost_breakdowns,
                 ),
-                "fast_correction_enabled": config.fast_correction_enabled,
+                "fast_correction_enabled": bool(
+                    account.provider == "sub2api"
+                    and config.fast_correction_enabled
+                ),
                 "capacity_summary": capacity_summary(
                     config,
                     account,
@@ -90,13 +96,29 @@ class StatisticsView(PageAccessAPIView):
                 "usage_days": usage_days,
                 "usage_precision": usage_precision,
                 "sample_interval_minutes": config.local_poll_minutes,
-                "participant_series": participant_usage_series(
-                    user=request.user,
-                    account=account,
-                    location=location,
-                    now=now,
-                    usage_days=usage_days,
-                    usage_precision=usage_precision,
+                "participant_series": (
+                    participant_usage_series(
+                        user=request.user,
+                        account=account,
+                        location=location,
+                        now=now,
+                        usage_days=usage_days,
+                        usage_precision=usage_precision,
+                    )
+                    if account.provider == "sub2api"
+                    else []
+                ),
+                "cpa_api_key_series": (
+                    cpa_api_key_usage_series(
+                        config=config,
+                        account=account,
+                        location=location,
+                        now=now,
+                        usage_days=usage_days,
+                        usage_precision=usage_precision,
+                    )
+                    if account.provider == "cpa"
+                    else []
                 ),
             }
         )
@@ -136,6 +158,8 @@ class ParticipantAPIUsageView(PageAccessAPIView):
             return error(str(exc), status.HTTP_400_BAD_REQUEST)
         if account is None:
             return error("尚未配置启用的监控账号", status.HTTP_409_CONFLICT)
+        if account.provider != "sub2api":
+            return error("CPA 账号不使用参与者 API 用量接口", 400)
 
         observation = latest_cycle_observation(account)
         if observation is None or observation.attribution_started_at is None:

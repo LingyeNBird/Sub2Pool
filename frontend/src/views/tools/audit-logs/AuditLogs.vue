@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
@@ -15,6 +15,7 @@ import type {
   ObservationRebuildResult,
   ObservationListData,
 } from "@/types/observations";
+import { monitoredAccountLabel } from "@/utils/accounts";
 
 import CostDeltaDetailDialog from "./components/CostDeltaDetailDialog.vue";
 import FastCorrectionDetailDialog from "./components/FastCorrectionDetailDialog.vue";
@@ -36,6 +37,9 @@ const toIso = useZonedDateTimeIso();
 const rows = ref<Observation[]>([]);
 const accounts = ref<MonitoredAccount[]>([]);
 const selectedAccountId = ref<number | null>(null);
+const selectedAccount = computed(() =>
+  accounts.value.find((account) => account.id === selectedAccountId.value),
+);
 const summary = reactive<ObservationSummary>({
   total: 0,
   valid_count: 0,
@@ -289,7 +293,9 @@ async function rebuildCalculations() {
     !(await confirmDialog.value?.open({
       title: "重建当前区间计算？",
       message:
-        "系统会保留全部原始采样、排除记录和管理员起点区间，从当前区间起点重新计算成本增量、百分比增量、折算率与参与者归属。",
+        selectedAccount.value?.provider === "cpa"
+          ? "系统会保留全部原始采样、usage 事实、采集区间、排除记录和管理员起点区间，并基于这些本地事实重新计算；不会补取连接前或断线期间的调用。"
+          : "系统会保留全部原始采样、排除记录和管理员起点区间，从当前区间起点重新计算成本增量、百分比增量、折算率与参与者归属。",
       confirmLabel: "开始重建",
       tone: "warning",
     }))
@@ -375,7 +381,7 @@ onMounted(initialize);
       @change="selectAccount"
     >
       <option v-for="account in accounts" :key="account.id" :value="account.id">
-        {{ account.name }}
+        {{ monitoredAccountLabel(account) }}
       </option>
     </select>
     <button
@@ -418,6 +424,9 @@ onMounted(initialize);
     :rebuilding="rebuilding"
     :fast-correction-enabled="fastCorrectionEnabled"
     :editable="auth.isStaff"
+    :manual-range-editable="
+      auth.isStaff && selectedAccount?.provider === 'sub2api'
+    "
     :fast-correction-pending-ids="fastCorrectionPendingIds"
     :fast-correction-active-id="fastCorrectionActiveId"
     @filter="openFilter"

@@ -91,6 +91,8 @@ defineExpose<DialogController<[ObservationFilterKind, ObservationFilters]>>({
           <option value="scheduled">定时</option>
           <option value="exhausted">额度耗尽</option>
           <option value="reset">临近重置</option>
+          <option value="cpa_subscription_opened">CPA 订阅后采样</option>
+          <option value="cpa_subscription_closed">CPA 关闭前采样</option>
         </select>
       </fieldset>
       <fieldset v-else class="mt-4 fieldset">

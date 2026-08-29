@@ -16,6 +16,7 @@ from .record_helpers import paginated_rows, query_datetime
 from ..models import (
     AppSettings,
     Observation,
+    MonitoredAccount,
     PagePermission,
     Participant,
     Sub2APIUserUsageSample,
@@ -43,7 +44,7 @@ class ObservationListView(PageAccessAPIView):
             "manual_start_end"
         ).prefetch_related("participant_snapshots__participant")
         if account is not None:
-            queryset = queryset.filter(account_id=account.external_account_id)
+            queryset = queryset.filter(account_id=account.fact_key)
         elif not request.user.is_staff:
             queryset = queryset.none()
         try:
@@ -88,6 +89,7 @@ class ObservationListView(PageAccessAPIView):
                     "id": item.id,
                     "observed_at": iso(item.observed_at),
                     "source": item.source,
+                    "provider": item.raw_window.get("provider", "sub2api"),
                     "account_id": item.account_id,
                     "attribution_started_at": iso(item.attribution_started_at),
                     "upstream_resets_at": iso(item.upstream_resets_at),
@@ -197,6 +199,8 @@ class ObservationListView(PageAccessAPIView):
                 "account": (
                     {
                         "id": account.id,
+                        "provider": account.provider,
+                        "source_account_id": account.source_account_id,
                         "external_account_id": account.external_account_id,
                         "name": account.name,
                     }
@@ -204,7 +208,13 @@ class ObservationListView(PageAccessAPIView):
                     else None
                 ),
                 "items": result,
-                "fast_correction_enabled": config.fast_correction_enabled,
+                "fast_correction_enabled": bool(
+                    account is None
+                    or (
+                        account.provider == "sub2api"
+                        and config.fast_correction_enabled
+                    )
+                ),
                 "pagination": pagination,
                 "summary": {
                     "total": total,
@@ -233,11 +243,15 @@ class ObservationFastCorrectionDetailView(PageAccessAPIView):
         observations = Observation.objects.prefetch_related("fast_corrections")
         if not request.user.is_staff:
             observations = observations.filter(
-                account_id__in=visible_accounts_for(
-                    request.user
-                ).values_list("external_account_id", flat=True)
+                account_id__in=[
+                    item.fact_key
+                    for item in visible_accounts_for(request.user)
+                ]
             )
         observation = get_object_or_404(observations, pk=observation_id)
+        source_account = MonitoredAccount.for_fact_key(observation.account_id)
+        if source_account is not None and source_account.provider == "cpa":
+            return error("CPA 观测不使用 Sub2API FAST 修正明细", 400)
         details = list(observation.fast_corrections.all())
         visible_ids = visible_participant_ids(request.user)
         participant_queryset = Participant.objects.filter(
@@ -379,6 +393,9 @@ class ObservationFastCorrectionCalculateView(AdminAPIView):
     def post(self, _request, observation_id: int):
         config = AppSettings.load()
         observation = get_object_or_404(Observation, pk=observation_id)
+        account = MonitoredAccount.for_fact_key(observation.account_id)
+        if account is not None and account.provider == "cpa":
+            return error("CPA 请求成本已在采集时按服务档位计价", 400)
         try:
             result = calculate_missing_fast_correction(observation, config)
         except ValueError as exc:
@@ -400,7 +417,7 @@ class ObservationRebuildView(AdminAPIView):
         if account is None:
             return error("尚未配置启用的监控账号", 400)
         replay, replay_from = rebuild_current_interval(
-            account.external_account_id,
+            account.fact_key,
             config,
         )
         return ok(

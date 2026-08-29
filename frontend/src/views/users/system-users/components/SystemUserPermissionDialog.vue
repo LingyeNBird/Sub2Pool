@@ -70,7 +70,7 @@ const filteredAccounts = computed(() => {
   const query = accountQuery.value.trim().toLocaleLowerCase();
   if (!query) return props.accounts;
   return props.accounts.filter((account) =>
-    [account.name, String(account.external_account_id)].some((value) =>
+    [account.name, account.source_account_id, account.provider].some((value) =>
       value.toLocaleLowerCase().includes(query),
     ),
   );
@@ -317,7 +317,7 @@ defineExpose({ open, close, showApiError });
               v-model="accountQuery"
               type="search"
               class="grow"
-              placeholder="搜索账号名称或 Sub2API 账号 ID"
+              placeholder="搜索账号名称或上游账号 ID"
             />
           </label>
           <div
@@ -336,11 +336,21 @@ defineExpose({ open, close, showApiError });
                 :value="account.id"
               />
               <span class="min-w-0">
-                <span class="block truncate text-sm font-medium">
-                  {{ account.name }}
+                <span class="flex items-center gap-2 text-sm font-medium">
+                  <span class="truncate">{{ account.name }}</span>
+                  <span
+                    v-if="account.provider === 'cpa'"
+                    class="badge badge-xs badge-info"
+                  >
+                    CPA
+                  </span>
                 </span>
                 <span class="block truncate text-xs opacity-60">
-                  Sub2API #{{ account.external_account_id }}
+                  {{
+                    account.provider === "cpa"
+                      ? `CPA ${account.source_account_id}`
+                      : `Sub2API #${account.external_account_id}`
+                  }}
                 </span>
               </span>
             </label>

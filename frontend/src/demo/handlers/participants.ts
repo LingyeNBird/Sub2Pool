@@ -15,33 +15,35 @@ export function participantBreakdowns(
   participantId: number,
   existing: Participant["account_breakdowns"] = [],
 ): Participant["account_breakdowns"] {
-  return state.monitoredAccounts.map((account) => {
-    const previous = existing.find((item) => item.account_id === account.id);
-    const pool = state.quotaPools.find((item) => item.id === account.pool_id);
-    const allocation = pool?.allocations.find(
-      (item) => item.participant_id === participantId,
-    );
-    const contractShare = allocation?.share_percent ?? 0;
-    const sourceUserId = state.participants.find(
-      (item) => item.id === participantId,
-    )?.sub2api_user_id;
-    const snapshotCurrent =
-      previous?.snapshot?.source_sub2api_user_id === sourceUserId;
-    return {
-      id: previous?.id ?? null,
-      account_id: account.id,
-      external_account_id: account.external_account_id,
-      account_name: account.name,
-      account_enabled: account.enabled,
-      pool_id: account.pool_id,
-      pool_name: pool?.name ?? `额度池 ${account.pool_id}`,
-      contract_share_percent: contractShare,
-      allocated: contractShare > 0,
-      latest_selected_cost: previous?.latest_selected_cost ?? null,
-      last_checked_at: previous?.last_checked_at ?? null,
-      snapshot: snapshotCurrent ? (previous?.snapshot ?? null) : null,
-    };
-  });
+  return state.monitoredAccounts
+    .filter((account) => account.provider === "sub2api")
+    .map((account) => {
+      const previous = existing.find((item) => item.account_id === account.id);
+      const pool = state.quotaPools.find((item) => item.id === account.pool_id);
+      const allocation = pool?.allocations.find(
+        (item) => item.participant_id === participantId,
+      );
+      const contractShare = allocation?.share_percent ?? 0;
+      const sourceUserId = state.participants.find(
+        (item) => item.id === participantId,
+      )?.sub2api_user_id;
+      const snapshotCurrent =
+        previous?.snapshot?.source_sub2api_user_id === sourceUserId;
+      return {
+        id: previous?.id ?? null,
+        account_id: account.id,
+        external_account_id: account.external_account_id!,
+        account_name: account.name,
+        account_enabled: account.enabled,
+        pool_id: account.pool_id,
+        pool_name: pool?.name ?? `额度池 ${account.pool_id}`,
+        contract_share_percent: contractShare,
+        allocated: contractShare > 0,
+        latest_selected_cost: previous?.latest_selected_cost ?? null,
+        last_checked_at: previous?.last_checked_at ?? null,
+        snapshot: snapshotCurrent ? (previous?.snapshot ?? null) : null,
+      };
+    });
 }
 
 export function handleParticipants({

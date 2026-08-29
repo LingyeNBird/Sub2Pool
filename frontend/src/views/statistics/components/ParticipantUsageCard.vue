@@ -40,6 +40,20 @@ const participantCharts = computed(() =>
   })),
 );
 
+const cpaApiKeyCharts = computed(() =>
+  (props.data?.cpa_api_key_series ?? []).map((series) => ({
+    ...series,
+    usagePoints: series.points.map((point) => ({
+      label: point.label,
+      value: point.usage_usd,
+    })),
+  })),
+);
+
+function formatCount(value: number): string {
+  return new Intl.NumberFormat("zh-CN").format(value);
+}
+
 const usageIntervalLabel = computed(
   () =>
     ({
@@ -56,10 +70,18 @@ const usageIntervalLabel = computed(
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 class="card-title">
-            <AppIcon name="chart-bar" class="size-5" />参与者账号用量
+            <AppIcon name="chart-bar" class="size-5" />{{
+              data?.account.provider === "cpa"
+                ? "CPA API 密钥用量"
+                : "参与者账号用量"
+            }}
             <span
               class="responsive-help-tooltip tooltip tooltip-bottom"
-              :data-tip="`柱状图和热力图都使用相邻累计值相减，展示所选时间粒度内的新增用量；首个数据点没有前序基线，累计值回落的跨周期区间也不会绘制。热力图按当前范围内的最大增量动态划分主题色深浅。后台当前每 ${data?.sample_interval_minutes ?? '—'} 分钟探测一次。`"
+              :data-tip="
+                data?.account.provider === 'cpa'
+                  ? '按 CPA usage 队列事件携带的 API Key 本地哈希分组。柱状图和热力图展示所选时间粒度内的请求成本，不保存原始 API Key。'
+                  : `柱状图和热力图都使用相邻累计值相减，展示所选时间粒度内的新增用量；首个数据点没有前序基线，累计值回落的跨周期区间也不会绘制。热力图按当前范围内的最大增量动态划分主题色深浅。后台当前每 ${data?.sample_interval_minutes ?? '—'} 分钟探测一次。`
+              "
             >
               <button
                 type="button"
@@ -116,7 +138,9 @@ const usageIntervalLabel = computed(
         <span class="loading loading-lg loading-spinner"></span>
       </div>
       <div
-        v-else-if="participantCharts.length"
+        v-else-if="
+          data?.account.provider === 'sub2api' && participantCharts.length
+        "
         class="grid gap-4 xl:grid-cols-2"
       >
         <article
@@ -185,7 +209,72 @@ const usageIntervalLabel = computed(
           </div>
         </article>
       </div>
-      <div v-else class="py-16 text-center opacity-60">尚未添加参与者。</div>
+      <div
+        v-else-if="data?.account.provider === 'cpa' && cpaApiKeyCharts.length"
+        class="grid gap-4 xl:grid-cols-2"
+      >
+        <article
+          v-for="series in cpaApiKeyCharts"
+          :key="series.api_key_id"
+          class="rounded-box border border-base-300 bg-base-100 p-5"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 class="font-semibold">{{ series.api_key_name }}</h3>
+              <p class="mt-1 text-xs opacity-60">
+                本地标识 {{ series.api_key_id }}
+              </p>
+            </div>
+            <div class="text-right text-sm">
+              <div>估算用量：{{ formatCurrency(series.total_usage_usd) }}</div>
+              <div class="opacity-60">
+                {{ formatCount(series.request_count) }} 次请求 ·
+                {{ formatCount(series.token_count) }} tokens
+              </div>
+              <div
+                v-if="series.unpriced_request_count"
+                class="mt-1 text-warning"
+              >
+                {{ formatCount(series.unpriced_request_count) }}
+                次请求缺少模型定价
+              </div>
+            </div>
+          </div>
+          <p class="mt-4 text-xs font-medium opacity-60">
+            {{ usageIntervalLabel }}
+          </p>
+          <div class="mt-2 h-48 w-full">
+            <StatisticsChart
+              v-if="series.usagePoints.length && chartMode === 'bar'"
+              class="h-full w-full"
+              kind="bar"
+              :values="series.usagePoints.map((item) => item.value)"
+              :labels="series.usagePoints.map((item) => item.label)"
+              :min="0"
+            />
+            <UsageHeatmap
+              v-else-if="series.usagePoints.length"
+              class="h-full w-full"
+              :points="series.usagePoints"
+              :precision="usagePrecision"
+              :sample-interval-minutes="data?.sample_interval_minutes"
+            />
+            <div
+              v-else
+              class="flex h-full items-center justify-center text-sm opacity-60"
+            >
+              尚无已采集的 CPA 用量事件
+            </div>
+          </div>
+        </article>
+      </div>
+      <div v-else class="py-16 text-center opacity-60">
+        {{
+          data?.account.provider === "cpa"
+            ? "尚未采集到带 API Key 的 CPA 用量事件。"
+            : "尚未添加参与者。"
+        }}
+      </div>
 
       <div class="alert text-sm alert-info">
         <AppIcon name="information-circle" class="size-5" />

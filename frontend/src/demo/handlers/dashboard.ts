@@ -237,6 +237,8 @@ export function handleDashboard({
       run_in_progress: false,
       accounts: state.monitoredAccounts.map((account) => ({
         id: account.id,
+        provider: account.provider,
+        source_account_id: account.source_account_id,
         external_account_id: account.external_account_id,
         name: account.name,
         enabled: account.enabled,

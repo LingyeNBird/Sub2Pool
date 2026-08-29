@@ -1,4 +1,4 @@
-import { onMounted, reactive, ref } from "vue";
+import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
 
 import {
   ApiError,
@@ -9,11 +9,17 @@ import {
   setAccessToken,
 } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
-import type { OpenAIAccountOption, MonitoredAccount } from "@/types/accounts";
+import type {
+  CPAAccountOption,
+  MonitoredAccount,
+  OpenAIAccountOption,
+} from "@/types/accounts";
 import type { ConfirmDialogOptions } from "@/types/common";
 import type {
   APIKeyState,
   AppSettingsData,
+  CPACollectorStatus,
+  CPAModelPricing,
   HistoricalRebuildPlan,
   ReadOnlyAPIKeyGenerated,
 } from "@/types/settings";
@@ -37,14 +43,17 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   const message = ref("");
   const success = ref("");
   const adminToken = ref("");
+  const cpaManagementKey = ref("");
   const smtpPassword = ref("");
   const resendApiKey = ref("");
   const openAIAccounts = ref<OpenAIAccountOption[]>([]);
+  const cpaAccounts = ref<CPAAccountOption[]>([]);
   const monitoredAccounts = ref<MonitoredAccount[]>([]);
   const selectedTestAccountId = ref<number | null>(null);
   const maintenanceAccountId = ref<number | null>(null);
   const savingAccountId = ref<number | "new" | null>(null);
   const loadingAccounts = ref(false);
+  const loadingCPAAccounts = ref(false);
   const exportingDatabase = ref(false);
   const importingDatabase = ref(false);
   const historyRebuildPlan = ref<HistoricalRebuildPlan | null>(null);
@@ -57,6 +66,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     new_password: "",
     confirm_password: "",
   });
+  let collectorStatusTimer: number | null = null;
 
   function connectionPayload() {
     if (!settings.value) return {};
@@ -71,6 +81,42 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
       request_timeout_seconds: settings.value.request_timeout_seconds,
       verify_tls: settings.value.verify_tls,
     };
+  }
+
+  function cpaConnectionPayload() {
+    if (!settings.value) return {};
+    return {
+      cpa_base_url: settings.value.cpa_base_url,
+      cpa_management_key: cpaManagementKey.value,
+      request_timeout_seconds: settings.value.request_timeout_seconds,
+      verify_tls: settings.value.verify_tls,
+    };
+  }
+
+  async function loadCPAAccounts(announce = true) {
+    if (!settings.value) return;
+    loadingCPAAccounts.value = true;
+    if (announce) {
+      message.value = "";
+      success.value = "";
+    }
+    try {
+      cpaAccounts.value = await api<CPAAccountOption[]>(
+        "settings/cpa-accounts",
+        {
+          method: "POST",
+          body: jsonBody(cpaConnectionPayload()),
+        },
+      );
+      if (announce) {
+        success.value = `已读取 ${cpaAccounts.value.length} 个 CPA Codex 账号`;
+      }
+    } catch (error) {
+      message.value =
+        error instanceof ApiError ? error.message : "读取 CPA Codex 账号失败";
+    } finally {
+      loadingCPAAccounts.value = false;
+    }
   }
 
   async function loadOpenAIAccounts(announce = true) {
@@ -103,21 +149,20 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     monitoredAccounts.value = await api<MonitoredAccount[]>(
       "settings/monitored-accounts",
     );
+    const sub2apiAccounts = monitoredAccounts.value.filter(
+      (item) => item.provider === "sub2api",
+    );
     const firstEnabled =
-      monitoredAccounts.value.find((item) => item.enabled) ??
-      monitoredAccounts.value[0] ??
+      sub2apiAccounts.find((item) => item.enabled) ??
+      sub2apiAccounts[0] ??
       null;
     if (
-      !monitoredAccounts.value.some(
-        (item) => item.id === selectedTestAccountId.value,
-      )
+      !sub2apiAccounts.some((item) => item.id === selectedTestAccountId.value)
     ) {
       selectedTestAccountId.value = firstEnabled?.id ?? null;
     }
     if (
-      !monitoredAccounts.value.some(
-        (item) => item.id === maintenanceAccountId.value,
-      )
+      !sub2apiAccounts.some((item) => item.id === maintenanceAccountId.value)
     ) {
       maintenanceAccountId.value = firstEnabled?.id ?? null;
     }
@@ -132,6 +177,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         if (settings.value.sub2api_token_configured) {
           await loadOpenAIAccounts(false);
         }
+        if (settings.value.cpa_management_key_configured) {
+          await loadCPAAccounts(false);
+        }
       } else {
         personalApiKey.value = await api<APIKeyState>("settings/my-api-key");
       }
@@ -141,6 +189,25 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     } finally {
       loading.value = false;
     }
+  }
+
+  async function refreshCPACollectorStatus() {
+    if (demoMode || !auth.isStaff || !settings.value) return;
+    try {
+      settings.value.cpa_collector_status = await api<CPACollectorStatus>(
+        "settings/cpa-collector-status",
+      );
+    } catch {
+      // Keep the last snapshot; the next isolated poll retries without touching form drafts.
+    }
+  }
+
+  function startCollectorStatusPolling() {
+    if (demoMode || !auth.isStaff || collectorStatusTimer !== null) return;
+    collectorStatusTimer = window.setInterval(
+      () => void refreshCPACollectorStatus(),
+      5_000,
+    );
   }
 
   function settingsPayload(fields: string[]) {
@@ -167,12 +234,16 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
       });
       settings.value.sub2api_token_configured =
         updated.sub2api_token_configured;
+      settings.value.cpa_management_key_configured =
+        updated.cpa_management_key_configured;
       settings.value.smtp_password_configured =
         updated.smtp_password_configured;
       settings.value.resend_api_key_configured =
         updated.resend_api_key_configured;
+      settings.value.cpa_collector_status = updated.cpa_collector_status;
       if (fields.includes("timezone")) auth.setTimezone(updated.timezone);
       if (section === "connection") adminToken.value = "";
+      if (section === "cpa") cpaManagementKey.value = "";
       if (section === "email") {
         smtpPassword.value = "";
         resendApiKey.value = "";
@@ -198,10 +269,52 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     );
   }
 
+  function saveCPASettings() {
+    return saveSection(
+      "cpa",
+      "CPA 连接与计价设置",
+      [
+        "cpa_base_url",
+        "cpa_fast_multiplier",
+        "cpa_double_billing_enabled",
+        "cpa_double_billing_threshold_tokens",
+        "cpa_double_billing_multiplier",
+      ],
+      { cpa_management_key: cpaManagementKey.value },
+    );
+  }
+  async function saveCPAPricing(
+    pricing: CPAModelPricing,
+  ): Promise<string | null> {
+    if (!settings.value) return "设置尚未加载";
+    saving.value = "cpa-pricing";
+    message.value = "";
+    success.value = "";
+    try {
+      const updated = await api<AppSettingsData>("settings", {
+        method: "PATCH",
+        body: jsonBody({ cpa_model_pricing: pricing }),
+      });
+      settings.value.cpa_model_pricing = updated.cpa_model_pricing;
+      historyRebuildPlan.value = null;
+      success.value = "CPA 模型价格已保存";
+      return null;
+    } catch (error) {
+      const failure =
+        error instanceof ApiError ? error.message : "保存模型价格失败";
+      message.value = failure;
+      return failure;
+    } finally {
+      saving.value = "";
+    }
+  }
+
   async function saveMonitoredAccount(
     account: Pick<
       MonitoredAccount,
       | "id"
+      | "provider"
+      | "cpa_auth_index"
       | "external_account_id"
       | "name"
       | "enabled"
@@ -223,7 +336,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         {
           method: create ? "POST" : "PUT",
           body: jsonBody({
+            provider: account.provider,
             external_account_id: account.external_account_id,
+            cpa_auth_index: account.cpa_auth_index,
             name: account.name,
             enabled: account.enabled,
             quota_query_mode: account.quota_query_mode,
@@ -239,35 +354,6 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     } catch (error) {
       message.value =
         error instanceof ApiError ? error.message : "保存监控账号失败";
-    } finally {
-      savingAccountId.value = null;
-    }
-  }
-
-  async function removeMonitoredAccount(account: MonitoredAccount) {
-    if (
-      !(await confirmAction({
-        title: `删除监控账号“${account.name}”？`,
-        message: "已有历史事实的账号不能删除，只能停用。",
-        confirmLabel: "删除",
-        tone: "error",
-      }))
-    ) {
-      return;
-    }
-    savingAccountId.value = account.id;
-    message.value = "";
-    success.value = "";
-    try {
-      await api(`settings/monitored-accounts/${account.id}`, {
-        method: "DELETE",
-      });
-      await loadMonitoredAccounts();
-      historyRebuildPlan.value = null;
-      success.value = "监控账号已删除";
-    } catch (error) {
-      message.value =
-        error instanceof ApiError ? error.message : "删除监控账号失败";
     } finally {
       savingAccountId.value = null;
     }
@@ -572,22 +658,29 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     }
   }
 
-  async function test(kind: "sub2api" | "email") {
+  async function test(kind: "sub2api" | "cpa" | "email") {
     testing.value = kind;
     message.value = "";
     success.value = "";
     try {
       await api(`settings/test-${kind}`, {
         method: "POST",
-        body: kind === "sub2api" ? jsonBody(connectionPayload()) : undefined,
+        body:
+          kind === "sub2api"
+            ? jsonBody(connectionPayload())
+            : kind === "cpa"
+              ? jsonBody(cpaConnectionPayload())
+              : undefined,
       });
       success.value = demoMode
-        ? kind === "sub2api"
-          ? "演示连接检查成功；未发起任何网络连接"
-          : "演示邮件检查成功；未发送真实邮件"
+        ? kind === "email"
+          ? "演示邮件检查成功；未发送真实邮件"
+          : "演示连接检查成功；未发起任何网络连接"
         : kind === "sub2api"
           ? "Sub2API 连接与额度读取正常"
-          : "测试邮件已发送";
+          : kind === "cpa"
+            ? "CPA Management API、RESP 鉴权与 usage 配置正常"
+            : "测试邮件已发送";
     } catch (error) {
       message.value = error instanceof ApiError ? error.message : "测试失败";
     } finally {
@@ -625,7 +718,15 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     }
   }
 
-  onMounted(load);
+  onMounted(async () => {
+    await load();
+    startCollectorStatusPolling();
+  });
+  onBeforeUnmount(() => {
+    if (collectorStatusTimer !== null) {
+      window.clearInterval(collectorStatusTimer);
+    }
+  });
 
   return {
     settings,
@@ -636,14 +737,17 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     message,
     success,
     adminToken,
+    cpaManagementKey,
     smtpPassword,
     resendApiKey,
     openAIAccounts,
+    cpaAccounts,
     monitoredAccounts,
     selectedTestAccountId,
     maintenanceAccountId,
     savingAccountId,
     loadingAccounts,
+    loadingCPAAccounts,
     exportingDatabase,
     importingDatabase,
     historyRebuildPlan,
@@ -653,10 +757,12 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     revokingReadOnlyApiKey,
     passwordForm,
     loadOpenAIAccounts,
+    loadCPAAccounts,
     loadMonitoredAccounts,
     saveConnection,
+    saveCPASettings,
+    saveCPAPricing,
     saveMonitoredAccount,
-    removeMonitoredAccount,
     saveAllocation,
     saveSampling,
     saveEmail,

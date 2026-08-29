@@ -55,10 +55,25 @@ export function trajectoryData(
   const latestObservation = state.observations.find(
     (item) => item.id === period.observationIds.at(-1),
   );
+  if (account?.provider === "cpa") {
+    return {
+      account: {
+        id: account.id,
+        provider: account.provider,
+        source_account_id: account.source_account_id,
+        external_account_id: account.external_account_id,
+        name: account.name,
+      },
+      available: false,
+      message: "演示 CPA 账号刚建立连接，尚无连接后的粒子轨迹。",
+    };
+  }
   return {
     account: account
       ? {
           id: account.id,
+          provider: account.provider,
+          source_account_id: account.source_account_id,
           external_account_id: account.external_account_id,
           name: account.name,
         }
@@ -129,47 +144,57 @@ export function dashboardData(
     monitoring_enabled: Boolean(state.settings.monitoring_enabled),
     accounts: clone(state.monitoredAccounts),
     selected_account_id: account?.id ?? null,
+    selected_provider: account?.provider ?? null,
     last_local_check_at: account?.last_local_check_at ?? null,
     last_upstream_check_at: account?.last_upstream_check_at ?? null,
     snapshot_stale: false,
     last_success_at: account?.last_success_at ?? null,
     last_error: account?.last_error ?? "",
     sub2api_admin_url: "",
-    fast_correction_enabled: Boolean(state.settings.fast_correction_enabled),
+    upstream_admin_url: "",
+    fast_correction_enabled:
+      account?.provider === "sub2api" &&
+      Boolean(state.settings.fast_correction_enabled),
     quota_query_mode: account?.quota_query_mode ?? null,
     weekly_quota_model: state.settings.weekly_quota_model,
-    needs_manual_update_count: participantRows.length,
-    cycle: {
-      id: latest.id,
-      observed_at: latest.observed_at,
-      starts_at: latest.attribution_started_at!,
-      resets_at: latest.upstream_resets_at,
-      upstream_used_percent: latest.upstream_used_percent,
-      interval_used_percent: latest.interval_used_percent,
-      effective_usd_per_percent: latest.effective_usd_per_percent,
-      selected_total_cost: latest.selected_total_cost,
-      selected_total_cost_breakdown: costBreakdown(latest.selected_total_cost),
-      start_cost_breakdown: costBreakdown(0),
-      unattributed_used_percent: rounded(
-        Math.max(
-          0,
-          latest.estimated_used_percent -
-            latest.participants.reduce(
-              (sum, item) => sum + item.charged_cycle_percent,
-              0,
+    needs_manual_update_count:
+      account?.provider === "sub2api" ? participantRows.length : 0,
+    cycle:
+      account?.provider === "cpa"
+        ? null
+        : {
+            id: latest.id,
+            observed_at: latest.observed_at,
+            starts_at: latest.attribution_started_at!,
+            resets_at: latest.upstream_resets_at,
+            upstream_used_percent: latest.upstream_used_percent,
+            interval_used_percent: latest.interval_used_percent,
+            effective_usd_per_percent: latest.effective_usd_per_percent,
+            selected_total_cost: latest.selected_total_cost,
+            selected_total_cost_breakdown: costBreakdown(
+              latest.selected_total_cost,
             ),
-        ),
-        4,
-      ),
-      sample_note: latest.sample_note,
-      snapshot_sampled_at: latest.snapshot_sampled_at,
-      rate_calculated: true,
-      estimated_used_percent: latest.estimated_used_percent,
-      capacity_lower_usd: latest.capacity_lower_usd,
-      capacity_upper_usd: latest.capacity_upper_usd,
-      model_diagnostics: latest.model_diagnostics,
-    },
-    participants: clone(participantRows),
+            start_cost_breakdown: costBreakdown(0),
+            unattributed_used_percent: rounded(
+              Math.max(
+                0,
+                latest.estimated_used_percent -
+                  latest.participants.reduce(
+                    (sum, item) => sum + item.charged_cycle_percent,
+                    0,
+                  ),
+              ),
+              4,
+            ),
+            sample_note: latest.sample_note,
+            snapshot_sampled_at: latest.snapshot_sampled_at,
+            rate_calculated: true,
+            estimated_used_percent: latest.estimated_used_percent,
+            capacity_lower_usd: latest.capacity_lower_usd,
+            capacity_upper_usd: latest.capacity_upper_usd,
+            model_diagnostics: latest.model_diagnostics,
+          },
+    participants: account?.provider === "sub2api" ? clone(participantRows) : [],
   };
 }
 

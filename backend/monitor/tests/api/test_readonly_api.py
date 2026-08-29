@@ -237,6 +237,19 @@ def test_api_key_lifecycle_and_scope():
     assert schemas["AccountStatus"]["properties"]["accounts"]["items"][
         "$ref"
     ].endswith("/AccountStatusAccount")
+    assert schemas["MonitoredAccount"]["properties"]["provider"]["enum"] == [
+        "sub2api",
+        "cpa",
+    ]
+    assert schemas["MonitoredAccount"]["properties"]["external_account_id"] == {
+        "type": ["integer", "null"]
+    }
+    assert schemas["MonitoredAccountSummary"]["properties"][
+        "source_account_id"
+    ] == {"type": "string"}
+    assert schemas["Statistics"]["properties"]["cpa_api_key_series"]["items"][
+        "$ref"
+    ].endswith("/CPAApiKeyUsageSeries")
     assert (
         schemas["AccountUsageStats"]["properties"]["fast_correction_usd"]
         == {"type": ["number", "null"]}

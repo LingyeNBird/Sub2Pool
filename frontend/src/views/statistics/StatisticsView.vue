@@ -5,6 +5,7 @@ import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api } from "@/services/api";
 import type { MonitoredAccount } from "@/types/accounts";
 import type { CapacityPoint, StatisticsData } from "@/types/statistics";
+import { monitoredAccountLabel } from "@/utils/accounts";
 
 import CapacityBasisDialog from "./components/CapacityBasisDialog.vue";
 import APIUsageBreakdownDialog from "./components/APIUsageBreakdownDialog.vue";
@@ -115,7 +116,7 @@ onMounted(initialize);
       aria-label="选择监控账号"
     >
       <option v-for="account in accounts" :key="account.id" :value="account.id">
-        {{ account.name }}
+        {{ monitoredAccountLabel(account) }}
       </option>
     </select>
     <button class="btn btn-sm" :disabled="loading" @click="load">

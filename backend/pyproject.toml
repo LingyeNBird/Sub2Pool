@@ -1,7 +1,7 @@
 [project]
 name = "sub2api-carpool-monitor"
 version = "1.0.0"
-description = "Sub2API 拼车额度测算与人工调整建议服务"
+description = "Sub2API 与 CLIProxyAPI Codex 额度监控服务"
 requires-python = ">=3.12"
 dependencies = [
   "cryptography>=45.0,<46",
