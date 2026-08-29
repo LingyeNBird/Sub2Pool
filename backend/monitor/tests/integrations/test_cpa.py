@@ -1676,6 +1676,124 @@ def test_collector_brackets_collection_events_inside_live_subscription(
 
 
 @pytest.mark.django_db
+def test_collector_refreshes_business_config_without_reconnecting(
+    monkeypatch,
+    tmp_path,
+):
+    create_cpa_account()
+    management_key = encrypt_secret("management-secret")
+    connection_config = AppSettings(
+        cpa_management_key_encrypted=management_key,
+        cpa_fast_multiplier=Decimal("2.5"),
+    )
+    latest_business_config = AppSettings(
+        cpa_management_key_encrypted=management_key,
+        cpa_fast_multiplier=Decimal("9"),
+    )
+    persisted_configs = []
+    finished_configs = []
+    drained_configs = []
+    load_calls = 0
+
+    class FakeSpool:
+        path = tmp_path / "unused.sqlite3"
+
+        def pending_count(self):
+            return 0
+
+        def begin_session(self, *_args):
+            pass
+
+    class FakeSubscriber:
+        def connect(self):
+            pass
+
+        def close(self):
+            pass
+
+    class FakeThread:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            pass
+
+        def is_alive(self):
+            return False
+
+    def capture_opening(
+        _config,
+        _spool,
+        _session_key,
+        _connected_at,
+        pending_openings,
+        _barriers,
+        _reader_finished,
+    ):
+        pending_openings.clear()
+        return 0
+
+    def load_config():
+        nonlocal load_calls
+        load_calls += 1
+        if load_calls == 1:
+            return latest_business_config
+        raise KeyboardInterrupt
+
+    command = runcpacollector.Command(stdout=StringIO())
+    monkeypatch.setattr(
+        runcpacollector,
+        "CPAUsageSubscriber",
+        lambda _config: FakeSubscriber(),
+    )
+    monkeypatch.setattr(runcpacollector, "Thread", FakeThread)
+    monkeypatch.setattr(
+        runcpacollector,
+        "_persist_spool_batch",
+        lambda _spool: 0,
+    )
+    monkeypatch.setattr(
+        command,
+        "_capture_opening_boundaries",
+        capture_opening,
+    )
+    monkeypatch.setattr(
+        command,
+        "_persist_pending_boundaries",
+        lambda _spool, config: persisted_configs.append(config) or 0,
+    )
+    monkeypatch.setattr(
+        command,
+        "_finish_subscription_session",
+        lambda **kwargs: finished_configs.append(kwargs["config"]),
+    )
+    monkeypatch.setattr(
+        command,
+        "_drain_persistence",
+        lambda _spool, config: drained_configs.append(config),
+    )
+    monkeypatch.setattr(runcpacollector, "CONFIG_REFRESH_SECONDS", 0)
+    monkeypatch.setattr(runcpacollector.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runcpacollector, "close_old_connections", lambda: None)
+    monkeypatch.setattr(runcpacollector, "_has_cpa_accounts", lambda: True)
+    monkeypatch.setattr(runcpacollector.AppSettings, "load", load_config)
+    monkeypatch.setattr(runcpacollector, "mark_collector_connected", lambda: None)
+
+    with pytest.raises(KeyboardInterrupt):
+        command._run_subscription(connection_config, FakeSpool(), [])
+
+    assert persisted_configs == [
+        connection_config,
+        latest_business_config,
+    ]
+    assert finished_configs == [connection_config]
+    assert drained_configs == [latest_business_config]
+
+
+@pytest.mark.django_db
 def test_opening_sample_persists_usage_drained_by_its_resp_barrier(
     monkeypatch,
     tmp_path,

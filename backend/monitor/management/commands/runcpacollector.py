@@ -683,11 +683,16 @@ class Command(BaseCommand):
         spool: CPAUsageSpool,
         unspooled: list[dict],
     ) -> None:
+        connection_config = config
+        business_config = config
         all_accounts = _cpa_accounts()
-        accounts = _cpa_collection_accounts(config, all_accounts)
+        accounts = _cpa_collection_accounts(connection_config, all_accounts)
         account_signature = _account_signature(accounts)
-        signature = _connection_signature(config, account_signature)
-        subscriber = CPAUsageSubscriber(config)
+        signature = _connection_signature(
+            connection_config,
+            account_signature,
+        )
+        subscriber = CPAUsageSubscriber(connection_config)
         stop_event = Event()
         reader_finished = Event()
         reader_state = _ReaderState()
@@ -746,7 +751,7 @@ class Command(BaseCommand):
 
                 if pending_openings and now >= next_opening_attempt:
                     captured = self._capture_opening_boundaries(
-                        config,
+                        connection_config,
                         spool,
                         session_key,
                         connected_at,
@@ -781,7 +786,7 @@ class Command(BaseCommand):
                         persisted = _persist_spool_batch(spool)
                         persisted += self._persist_pending_boundaries(
                             spool,
-                            config,
+                            business_config,
                         )
                         pending_count = spool.pending_count()
                     except Exception as exc:
@@ -805,7 +810,7 @@ class Command(BaseCommand):
                     latest_collection_accounts = _cpa_collection_accounts(
                         latest_config
                     )
-                    if (
+                    should_restart = (
                         not _has_cpa_accounts()
                         or not latest_config.cpa_management_key_encrypted
                         or _connection_signature(
@@ -813,7 +818,9 @@ class Command(BaseCommand):
                             _account_signature(latest_collection_accounts),
                         )
                         != signature
-                    ):
+                    )
+                    business_config = latest_config
+                    if should_restart:
                         capture_closing_sample = False
                         break
                     last_config_refresh = now
@@ -854,7 +861,7 @@ class Command(BaseCommand):
             try:
                 if connected and session_key and connected_at is not None:
                     self._finish_subscription_session(
-                        config=config,
+                        config=connection_config,
                         spool=spool,
                         subscriber=subscriber,
                         session_key=session_key,
@@ -878,7 +885,7 @@ class Command(BaseCommand):
                     subscriber.close()
                 try:
                     self._flush_unspooled(spool, unspooled)
-                    self._drain_persistence(spool, config)
+                    self._drain_persistence(spool, business_config)
                     pending_count = spool.pending_count()
                 except Exception as exc:
                     self._safe_mark_error(
