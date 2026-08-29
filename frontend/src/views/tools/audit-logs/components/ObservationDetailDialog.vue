@@ -107,7 +107,10 @@ defineExpose<DialogController<[Observation]>>({ open, close });
           </div>
         </div>
       </section>
-      <div class="mt-4 overflow-x-auto">
+      <div
+        v-if="observation?.provider === 'sub2api'"
+        class="mt-4 overflow-x-auto"
+      >
         <table class="table table-sm">
           <thead>
             <tr>
@@ -151,6 +154,15 @@ defineExpose<DialogController<[Observation]>>({ open, close });
             </tr>
           </tbody>
         </table>
+      </div>
+      <div
+        v-if="observation?.provider === 'cpa'"
+        class="mt-4 alert text-sm alert-info"
+      >
+        <AppIcon name="information-circle" class="size-5" />
+        <span
+          >CPA 观测只有账号级本地估算成本，不生成参与者归属或余额建议。</span
+        >
       </div>
       <div class="modal-action">
         <button class="btn" @click="close">关闭</button>

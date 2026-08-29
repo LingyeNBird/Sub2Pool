@@ -33,7 +33,9 @@ class _ParticipantHasSnapshots(RuntimeError):
 
 def quota_allocation_data(user) -> dict:
     accounts = list(
-        MonitoredAccount.objects.select_related("pool").order_by(
+        MonitoredAccount.objects.filter(provider="sub2api")
+        .select_related("pool")
+        .order_by(
             "pool__name",
             "pool_id",
             "name",
@@ -41,10 +43,13 @@ def quota_allocation_data(user) -> dict:
         )
     )
     pools = list(
-        QuotaPool.objects.prefetch_related(
+        QuotaPool.objects.filter(accounts__provider="sub2api")
+        .prefetch_related(
             "accounts",
             "allocations__participant",
-        ).order_by("name", "id")
+        )
+        .distinct()
+        .order_by("name", "id")
     )
     participants = list(
         visible_participants_for(
@@ -82,8 +87,15 @@ def quota_allocation_data(user) -> dict:
                 "account_ids": [
                     account.id
                     for account in sorted(
-                        pool.accounts.all(),
-                        key=lambda item: (item.name, item.external_account_id),
+                        [
+                            item
+                            for item in pool.accounts.all()
+                            if item.provider == "sub2api"
+                        ],
+                        key=lambda item: (
+                            item.name,
+                            item.external_account_id or 0,
+                        ),
                     )
                 ],
                 "allocations": [
@@ -121,12 +133,12 @@ class QuotaAllocationView(PageAccessAPIView):
         serializer = QuotaAllocationWriteSerializer(data=request.data)
         if not serializer.is_valid():
             return error("分配方案校验失败", details=serializer.errors)
-        external_account_ids = list(
-            MonitoredAccount.objects.order_by("external_account_id").values_list(
-                "external_account_id",
-                flat=True,
-            )
-        )
+        external_account_ids = [
+            account.fact_key
+            for account in MonitoredAccount.objects.filter(
+                provider="sub2api"
+            ).order_by("external_account_id")
+        ]
         settings_id = AppSettings.load().pk
         try:
             with fenced_fact_write(external_account_ids):
@@ -242,9 +254,9 @@ class ParticipantDetailView(AdminAPIView):
         participant = self._get_participant(participant_id)
         if participant is None:
             return error("参与者不存在", status.HTTP_404_NOT_FOUND)
-        external_account_ids = list(
-            MonitoredAccount.objects.values_list("external_account_id", flat=True)
-        )
+        external_account_ids = [
+            account.fact_key for account in MonitoredAccount.objects.all()
+        ]
         try:
             with fenced_fact_write(external_account_ids):
                 participant = Participant.objects.select_for_update().get(

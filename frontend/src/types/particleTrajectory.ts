@@ -57,7 +57,10 @@ export interface ParticleCycleUsage {
   participants: ParticleCycleParticipantUsage[];
 }
 export interface ParticleTrajectoryData {
-  account?: Pick<MonitoredAccount, "id" | "external_account_id" | "name">;
+  account?: Pick<
+    MonitoredAccount,
+    "id" | "provider" | "source_account_id" | "external_account_id" | "name"
+  >;
   available: boolean;
   message: string;
   algorithm?: string;

@@ -7,6 +7,7 @@ export interface Observation {
   id: number;
   observed_at: string;
   source: string;
+  provider: "sub2api" | "cpa";
   account_id: number;
   attribution_started_at: string | null;
   upstream_resets_at: string;
@@ -93,7 +94,9 @@ export interface MonitorSchedule {
   run_in_progress: boolean;
   accounts: Array<{
     id: number;
-    external_account_id: number;
+    provider: "sub2api" | "cpa";
+    source_account_id: string;
+    external_account_id: number | null;
     name: string;
     enabled: boolean;
     next_local_check_at: string | null;
@@ -102,7 +105,10 @@ export interface MonitorSchedule {
   server_time: string;
 }
 export interface ObservationListData extends PaginatedData<Observation> {
-  account: Pick<MonitoredAccount, "id" | "external_account_id" | "name"> | null;
+  account: Pick<
+    MonitoredAccount,
+    "id" | "provider" | "source_account_id" | "external_account_id" | "name"
+  > | null;
   fast_correction_enabled: boolean;
   summary: {
     total: number;

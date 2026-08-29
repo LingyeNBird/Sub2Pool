@@ -100,6 +100,22 @@ export interface ParticipantUsageSeries {
   sub2api_user_id: number;
   points: UsagePoint[];
 }
+export interface CPAAPIKeyUsagePoint {
+  observed_at: string;
+  label: string;
+  usage_usd: number;
+  request_count: number;
+  token_count: number;
+}
+export interface CPAAPIKeyUsageSeries {
+  api_key_id: string;
+  api_key_name: string;
+  total_usage_usd: number;
+  request_count: number;
+  token_count: number;
+  unpriced_request_count: number;
+  points: CPAAPIKeyUsagePoint[];
+}
 export interface APIKeyUsageItem {
   api_key_id: number | null;
   name: string;
@@ -122,7 +138,10 @@ export interface APIUsageBreakdown {
   api_keys: APIKeyUsageItem[];
 }
 export interface StatisticsData {
-  account: Pick<MonitoredAccount, "id" | "external_account_id" | "name">;
+  account: Pick<
+    MonitoredAccount,
+    "id" | "provider" | "source_account_id" | "external_account_id" | "name"
+  >;
   capacity_period: "day" | "month";
   capacity_series: CapacityPoint[];
   fast_correction_enabled: boolean;
@@ -131,4 +150,5 @@ export interface StatisticsData {
   usage_precision: "raw" | "hour" | "day";
   sample_interval_minutes: number;
   participant_series: ParticipantUsageSeries[];
+  cpa_api_key_series: CPAAPIKeyUsageSeries[];
 }

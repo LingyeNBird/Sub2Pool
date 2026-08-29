@@ -11,6 +11,7 @@ from ..models import (
     MonitoredAccount,
     PagePermission,
 )
+from ..integrations.cpa import CPAError
 from ..integrations.sub2api import Sub2APIError
 
 
@@ -29,6 +30,8 @@ class RunMonitorView(PageAccessAPIView):
         accounts = [
             {
                 "id": account.id,
+                "provider": account.provider,
+                "source_account_id": account.source_account_id,
                 "external_account_id": account.external_account_id,
                 "name": account.name,
                 "enabled": account.enabled,
@@ -37,13 +40,13 @@ class RunMonitorView(PageAccessAPIView):
                     if config.monitoring_enabled and account.enabled
                     else None
                 ),
-                "run_in_progress": (
-                    account.external_account_id in active_leases
-                ),
+                "run_in_progress": account.fact_key in active_leases,
             }
             for account in MonitoredAccount.objects.order_by(
                 "name",
+                "provider",
                 "external_account_id",
+                "cpa_auth_index",
             )
         ]
         return ok(
@@ -72,7 +75,7 @@ class RunMonitorView(PageAccessAPIView):
                 force_upstream=True,
                 source="manual",
             )
-        except (Sub2APIError, ValueError) as exc:
+        except (CPAError, Sub2APIError, ValueError) as exc:
             return error(str(exc), 502)
         except Exception as exc:
             # 该接口需要把后台采集错误呈现给唯一管理员；运行进程本身仍保留日志。

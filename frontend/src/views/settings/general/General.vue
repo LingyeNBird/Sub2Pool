@@ -7,6 +7,7 @@ import type { ConfirmDialogHandle, ConfirmDialogOptions } from "@/types/common";
 
 import AllocationModelCard from "./components/AllocationModelCard.vue";
 import DatabaseTransferCard from "./components/DatabaseTransferCard.vue";
+import CPAConnectionCard from "./components/CPAConnectionCard.vue";
 import DataMaintenanceCard from "./components/DataMaintenanceCard.vue";
 import EmailServiceCard from "./components/EmailServiceCard.vue";
 import FastCorrectionCard from "./components/FastCorrectionCard.vue";
@@ -34,14 +35,17 @@ const {
   message,
   success,
   adminToken,
+  cpaManagementKey,
   smtpPassword,
   resendApiKey,
   openAIAccounts,
+  cpaAccounts,
   monitoredAccounts,
   selectedTestAccountId,
   maintenanceAccountId,
   savingAccountId,
   loadingAccounts,
+  loadingCPAAccounts,
   exportingDatabase,
   importingDatabase,
   historyRebuildPlan,
@@ -51,9 +55,11 @@ const {
   applyingHistory,
   passwordForm,
   loadOpenAIAccounts,
+  loadCPAAccounts,
   saveMonitoredAccount,
-  removeMonitoredAccount,
   saveConnection,
+  saveCPASettings,
+  saveCPAPricing,
   saveAllocation,
   saveSampling,
   saveEmail,
@@ -87,6 +93,13 @@ const apiKeyCreatedAt = computed(() =>
   auth.isStaff
     ? (settings.value?.readonly_api_key_created_at ?? null)
     : (personalApiKey.value?.created_at ?? null),
+);
+
+const sub2apiMonitoredAccounts = computed(() =>
+  monitoredAccounts.value.filter((account) => account.provider === "sub2api"),
+);
+const cpaMonitoredAccounts = computed(() =>
+  monitoredAccounts.value.filter((account) => account.provider === "cpa"),
 );
 
 async function handleGenerateReadOnlyAPIKey() {
@@ -156,7 +169,7 @@ async function handleRevokeReadOnlyAPIKey() {
       v-model:admin-token="adminToken"
       :accounts="openAIAccounts"
       v-model:selected-test-account-id="selectedTestAccountId"
-      :monitored-accounts="monitoredAccounts"
+      :monitored-accounts="sub2apiMonitoredAccounts"
       :saving-account-id="savingAccountId"
       :loading-accounts="loadingAccounts"
       :testing="testing === 'sub2api'"
@@ -165,7 +178,21 @@ async function handleRevokeReadOnlyAPIKey() {
       @test="test('sub2api')"
       @save="saveConnection"
       @save-account="saveMonitoredAccount"
-      @remove-account="removeMonitoredAccount"
+    />
+    <CPAConnectionCard
+      v-model:settings="settings"
+      v-model:management-key="cpaManagementKey"
+      :accounts="cpaAccounts"
+      :monitored-accounts="cpaMonitoredAccounts"
+      :saving-account-id="savingAccountId"
+      :loading-accounts="loadingCPAAccounts"
+      :testing="testing === 'cpa'"
+      :saving="saving === 'cpa'"
+      @load-accounts="loadCPAAccounts()"
+      @test="test('cpa')"
+      @save="saveCPASettings"
+      :save-pricing="saveCPAPricing"
+      @save-account="saveMonitoredAccount"
     />
     <AllocationModelCard
       v-model:settings="settings"
@@ -198,7 +225,7 @@ async function handleRevokeReadOnlyAPIKey() {
     />
     <DataMaintenanceCard
       v-model:account-id="maintenanceAccountId"
-      :accounts="monitoredAccounts"
+      :accounts="sub2apiMonitoredAccounts"
       :plan="historyRebuildPlan"
       :planning="planningHistory"
       :applying="applyingHistory"

@@ -9,6 +9,7 @@ from django.utils import timezone
 from monitor.engine import run_monitor
 from monitor.models import (
     AppSettings,
+    CPAAccountCollectionInterval,
     Observation,
     ParticipantSnapshot,
 )
@@ -16,7 +17,9 @@ from monitor.replay import (
     RATE_METHOD,
     exclude_observation,
     rebuild_account,
+    rebuild_current_interval,
     rebuild_observation_suffix,
+    restore_observation,
 )
 from monitor.integrations.sub2api import (
     UsageStats,
@@ -25,11 +28,259 @@ from monitor.integrations.sub2api import (
 )
 from monitor.tests.helpers import (
     create_monitored_account,
+    create_cpa_account,
     create_participant,
     create_participant_snapshot,
     jwt_login,
 )
 
+
+@pytest.mark.django_db
+def test_cpa_partial_cycle_starts_at_first_connection_observation():
+    config = AppSettings.load()
+    account = create_cpa_account()
+    first_at = timezone.now().replace(microsecond=0)
+    reset_at = first_at + timedelta(days=3)
+
+    first = Observation.objects.create(
+        account_id=account.fact_key,
+        source="manual",
+        observed_at=first_at,
+        window_seconds=604800,
+        upstream_resets_at=reset_at,
+        upstream_used_percent=Decimal("45"),
+        raw_selected_total_cost=Decimal("10"),
+        selected_total_cost=Decimal("10"),
+        total_standard_cost=Decimal("10"),
+        total_actual_cost=Decimal("10"),
+        effective_usd_per_percent=Decimal("16"),
+        raw_window={"provider": "cpa"},
+    )
+    second = Observation.objects.create(
+        account_id=account.fact_key,
+        source="manual",
+        observed_at=first_at + timedelta(hours=1),
+        window_seconds=604800,
+        upstream_resets_at=reset_at,
+        upstream_used_percent=Decimal("46"),
+        raw_selected_total_cost=Decimal("14"),
+        selected_total_cost=Decimal("14"),
+        total_standard_cost=Decimal("14"),
+        total_actual_cost=Decimal("14"),
+        raw_window={"provider": "cpa"},
+        effective_usd_per_percent=Decimal("16"),
+    )
+    CPAAccountCollectionInterval.objects.create(
+        account=account,
+        session_key="partial-cycle",
+        connected_at=first_at,
+    )
+
+    rebuild_account(account.fact_key, config)
+    first.refresh_from_db()
+    second.refresh_from_db()
+
+    assert first.attribution_started_at == first.observed_at
+    assert first.interval_used_percent == Decimal("0")
+    assert first.selected_total_cost == Decimal("0")
+    assert first.raw_window["replay_segment_reason"] == "provider_collection_baseline"
+    assert second.attribution_started_at == first.observed_at
+    assert second.interval_used_percent == Decimal("1")
+    assert second.selected_total_cost == Decimal("4.000000")
+
+
+@pytest.mark.django_db
+def test_cpa_reconnect_baseline_splits_out_uncollected_gap():
+    config = AppSettings.load()
+    account = create_cpa_account()
+    first_at = timezone.now().replace(microsecond=0)
+    reset_at = first_at + timedelta(days=3)
+    observations = []
+    for offset_hours, percent, total_cost, boundary in [
+        (0, "50", "10", "opened"),
+        (1, "51", "14", "closed"),
+        (1.5, "60", "14", ""),
+        (2, "70", "14", "opened"),
+        (3, "71", "18", ""),
+    ]:
+        observations.append(
+            Observation.objects.create(
+                account_id=account.fact_key,
+                source=(
+                    f"cpa_subscription_{boundary}"
+                    if boundary
+                    else "scheduled"
+                ),
+                observed_at=first_at + timedelta(hours=offset_hours),
+                window_seconds=604800,
+                upstream_resets_at=reset_at,
+                upstream_used_percent=Decimal(percent),
+                raw_selected_total_cost=Decimal(total_cost),
+                selected_total_cost=Decimal(total_cost),
+                total_standard_cost=Decimal(total_cost),
+                total_actual_cost=Decimal(total_cost),
+                effective_usd_per_percent=Decimal("16"),
+                raw_window={"provider": "cpa"},
+            )
+        )
+    CPAAccountCollectionInterval.objects.create(
+        account=account,
+        session_key="before-gap",
+        connected_at=first_at,
+        disconnected_at=first_at + timedelta(hours=1),
+        end_reliable=True,
+        opening_observation=observations[0],
+        closing_observation=observations[1],
+    )
+    CPAAccountCollectionInterval.objects.create(
+        account=account,
+        session_key="after-gap",
+        connected_at=first_at + timedelta(hours=2),
+        opening_observation=observations[3],
+    )
+
+    rebuild_account(account.fact_key, config)
+    for observation in observations:
+        observation.refresh_from_db()
+
+    first, disconnected, inside_gap, reconnected, after_reconnect = observations
+    assert first.attribution_started_at == first.observed_at
+    assert first.interval_used_percent == Decimal("0")
+    assert first.selected_total_cost == Decimal("0")
+    assert disconnected.attribution_started_at == first.observed_at
+    assert disconnected.interval_used_percent == Decimal("1")
+    assert disconnected.selected_total_cost == Decimal("4.000000")
+    assert inside_gap.excluded_at is not None
+    assert inside_gap.attribution_started_at is None
+    assert inside_gap.exclusion_source == "automatic"
+    assert inside_gap.exclusion_reason == "CPA usage 采集区间未覆盖该百分比观测"
+    assert reconnected.attribution_started_at == reconnected.observed_at
+    assert reconnected.interval_used_percent == Decimal("0")
+    assert reconnected.selected_total_cost == Decimal("0")
+    assert after_reconnect.attribution_started_at == reconnected.observed_at
+    assert after_reconnect.interval_used_percent == Decimal("1")
+    assert after_reconnect.selected_total_cost == Decimal("4.000000")
+    assert (
+        reconnected.raw_window["replay_segment_reason"]
+        == "provider_collection_baseline"
+    )
+
+
+@pytest.mark.django_db
+def test_cpa_manual_percentage_exclusion_keeps_connection_close_marker():
+    config = AppSettings.load()
+    account = create_cpa_account()
+    opened_at = timezone.now().replace(microsecond=0)
+    reset_at = opened_at + timedelta(days=3)
+    observations = []
+    for offset_minutes, percent, boundary in [
+        (0, "50", "opened"),
+        (1, "51", "closed"),
+        (2, "52", ""),
+    ]:
+        observations.append(
+            Observation.objects.create(
+                account_id=account.fact_key,
+                source=(
+                    f"cpa_subscription_{boundary}"
+                    if boundary
+                    else "scheduled"
+                ),
+                observed_at=opened_at + timedelta(minutes=offset_minutes),
+                window_seconds=604800,
+                upstream_resets_at=reset_at,
+                upstream_used_percent=Decimal(percent),
+                raw_selected_total_cost=Decimal(offset_minutes),
+                selected_total_cost=Decimal(offset_minutes),
+                total_standard_cost=Decimal(offset_minutes),
+                total_actual_cost=Decimal(offset_minutes),
+                effective_usd_per_percent=Decimal("16"),
+                raw_window={"provider": "cpa"},
+            )
+        )
+    CPAAccountCollectionInterval.objects.create(
+        account=account,
+        session_key="manual-closing-exclusion",
+        connected_at=opened_at,
+        disconnected_at=opened_at + timedelta(minutes=1),
+        end_reliable=True,
+        opening_observation=observations[0],
+        closing_observation=observations[1],
+    )
+
+    rebuild_account(account.fact_key, config)
+    opened, closed, gap = observations
+    gap.refresh_from_db()
+    assert gap.exclusion_source == "automatic"
+
+    exclude_observation(closed, "关闭百分比异常")
+
+    closed.refresh_from_db()
+    gap.refresh_from_db()
+    assert closed.exclusion_source == "manual"
+    assert gap.exclusion_source == "automatic"
+    assert gap.exclusion_reason == "CPA usage 采集区间未覆盖该百分比观测"
+    assert gap.attribution_started_at is None
+    opened.refresh_from_db()
+    assert opened.exclusion_source == ""
+
+
+@pytest.mark.django_db
+def test_cpa_partial_rebuild_and_restore_use_persisted_collection_interval():
+    config = AppSettings.load()
+    account = create_cpa_account()
+    first_at = timezone.now().replace(microsecond=0)
+    old_reset = first_at + timedelta(days=2)
+    new_reset = first_at + timedelta(days=9)
+    observations = []
+    for offset_hours, percent, total_cost, reset_at in [
+        (0, "50", "10", old_reset),
+        (1, "51", "14", old_reset),
+        (2, "0", "20", new_reset),
+        (3, "1", "24", new_reset),
+    ]:
+        observations.append(
+            Observation.objects.create(
+                account_id=account.fact_key,
+                source="scheduled",
+                observed_at=first_at + timedelta(hours=offset_hours),
+                window_seconds=604800,
+                upstream_resets_at=reset_at,
+                upstream_used_percent=Decimal(percent),
+                raw_selected_total_cost=Decimal(total_cost),
+                selected_total_cost=Decimal(total_cost),
+                total_standard_cost=Decimal(total_cost),
+                total_actual_cost=Decimal(total_cost),
+                raw_window={"provider": "cpa"},
+                effective_usd_per_percent=Decimal("16"),
+            )
+        )
+    CPAAccountCollectionInterval.objects.create(
+        account=account,
+        session_key="official-reset",
+        connected_at=first_at,
+        opening_observation=observations[0],
+    )
+
+    rebuild_account(account.fact_key, config)
+    rebuild_current_interval(account.fact_key, config)
+    for observation in observations:
+        observation.refresh_from_db()
+        assert observation.exclusion_source == ""
+
+    official_reset, current = observations[2:]
+    assert official_reset.attribution_started_at == official_reset.observed_at
+    assert current.attribution_started_at == official_reset.observed_at
+    assert current.selected_total_cost == Decimal("4.000000")
+
+    exclude_observation(current, "临时排除")
+    restore_observation(current)
+    official_reset.refresh_from_db()
+    current.refresh_from_db()
+    assert official_reset.exclusion_source == ""
+    assert current.exclusion_source == ""
+    assert current.attribution_started_at == official_reset.observed_at
+    assert current.selected_total_cost == Decimal("4.000000")
 
 @pytest.mark.django_db
 def test_passive_reset_timestamp_drift_keeps_the_same_cycle(monkeypatch):

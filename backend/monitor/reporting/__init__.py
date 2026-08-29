@@ -12,13 +12,14 @@ from .recommendations import (
     participant_data,
     snapshot_data,
 )
-from .usage import participant_usage_series
+from .usage import cpa_api_key_usage_series, participant_usage_series
 
 __all__ = [
     "aggregate_recommendation",
     "FastCorrectionBreakdownPresenter",
     "capacity_series",
     "capacity_summary",
+    "cpa_api_key_usage_series",
     "display_cycle_rates",
     "display_recommendation",
     "display_snapshot_data",

@@ -13,6 +13,7 @@ import type {
   ParticleTrajectoryPoint,
 } from "@/types/particleTrajectory";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
+import { monitoredAccountLabel } from "@/utils/accounts";
 
 import ParticleTrajectoryChart from "./components/ParticleTrajectoryChart.vue";
 import { trajectoryFrame } from "./trajectory";
@@ -249,7 +250,7 @@ onBeforeUnmount(() => {
           :key="account.id"
           :value="account.id"
         >
-          {{ account.name }}
+          {{ monitoredAccountLabel(account) }}
         </option>
       </select>
     </label>
@@ -457,11 +458,18 @@ onBeforeUnmount(() => {
             <AppIcon name="banknotes" class="size-5" />本周期使用统计
           </h2>
           <span class="badge badge-soft badge-sm badge-success">
-            金额已含 FAST 修正
+            {{
+              data.account?.provider === "cpa"
+                ? "CPA 本地估算成本"
+                : "金额已含 FAST 修正"
+            }}
           </span>
         </div>
 
-        <div class="grid gap-4 lg:grid-cols-2">
+        <div
+          class="grid gap-4"
+          :class="{ 'lg:grid-cols-2': data.account?.provider === 'sub2api' }"
+        >
           <div class="stats stats-vertical bg-base-100 sm:stats-horizontal">
             <div class="stat">
               <div class="stat-title">账号本周期已用</div>
@@ -485,7 +493,10 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="rounded-box bg-base-100">
+          <div
+            v-if="data.account?.provider === 'sub2api'"
+            class="rounded-box bg-base-100"
+          >
             <div
               class="flex flex-wrap items-center justify-between gap-2 px-4 pt-4"
             >
@@ -532,8 +543,11 @@ onBeforeUnmount(() => {
         </div>
 
         <p class="text-xs opacity-55">
-          账号总额与参与者明细均按当前成本口径计算并包含已保存的 FAST
-          修正；未绑定用户或聚合口径差异可能使参与者明细之和与账号总额不同。
+          {{
+            data.account?.provider === "cpa"
+              ? "账号总额来自连接后持续采集的 CPA usage 事件；普通请求按模型基础价格，只有 fast/priority 请求应用 FAST 倍率。"
+              : "账号总额与参与者明细均按当前成本口径计算并包含已保存的 FAST 修正；未绑定用户或聚合口径差异可能使参与者明细之和与账号总额不同。"
+          }}
         </p>
       </div>
     </section>

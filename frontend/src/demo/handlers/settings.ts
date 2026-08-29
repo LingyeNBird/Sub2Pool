@@ -13,7 +13,6 @@ import {
   type DemoState,
 } from "../state";
 import { participantBreakdowns } from "./participants";
-import { accountNames } from "./systemUsers";
 function quotaProfile(value: unknown): MonitoredAccount["quota_profile"] {
   return value === "plus" || value === "pro_5x" || value === "pro_20x"
     ? value
@@ -60,7 +59,7 @@ function createPlan(
     state.monitoredAccounts[0]!;
   const plan: HistoricalRebuildPlan = {
     id,
-    account_id: account.external_account_id,
+    account_id: account.external_account_id!,
     state: "ready",
     digest: `demo_digest_${String(state.revision).padStart(4, "0")}_${state.observations.length}`,
     created_at: new Date(now).toISOString(),
@@ -89,10 +88,16 @@ export function handleSettings({
     return ok(state.monitoredAccounts);
   }
   if (method === "POST" && pathname === "settings/monitored-accounts") {
-    const externalAccountId = Number(payload.external_account_id);
+    const provider = payload.provider === "cpa" ? "cpa" : "sub2api";
+    const externalAccountId =
+      provider === "sub2api" ? Number(payload.external_account_id) : null;
+    const cpaAuthIndex =
+      provider === "cpa" ? String(payload.cpa_auth_index ?? "") : null;
     if (
-      state.monitoredAccounts.some(
-        (account) => account.external_account_id === externalAccountId,
+      state.monitoredAccounts.some((account) =>
+        provider === "cpa"
+          ? account.cpa_auth_index === cpaAuthIndex
+          : account.external_account_id === externalAccountId,
       )
     ) {
       return fail("该上游账号已经在监控列表中", 400);
@@ -101,16 +106,27 @@ export function handleSettings({
       Math.max(0, ...state.monitoredAccounts.map((item) => item.id)) + 1;
     const poolId = state.nextPoolId++;
     const accountName = String(
-      payload.name ?? `OpenAI 账号 ${externalAccountId}`,
+      payload.name ??
+        (provider === "cpa"
+          ? `CPA Codex ${cpaAuthIndex}`
+          : `OpenAI 账号 ${externalAccountId}`),
     );
     const account: MonitoredAccount = {
       id: accountId,
+      provider,
+      source_account_id:
+        provider === "cpa" ? (cpaAuthIndex ?? "") : String(externalAccountId),
       pool_id: poolId,
       external_account_id: externalAccountId,
+      cpa_auth_index: cpaAuthIndex,
       name: accountName,
       enabled: payload.enabled !== false,
       quota_query_mode:
-        payload.quota_query_mode === "direct" ? "direct" : "passive",
+        provider === "cpa"
+          ? "direct"
+          : payload.quota_query_mode === "direct"
+            ? "direct"
+            : "passive",
       quota_profile: quotaProfile(payload.quota_profile),
       detected_plan_type: "",
       effective_quota_profile: "pro_20x",
@@ -154,9 +170,11 @@ export function handleSettings({
       (item) => item.id === Number(monitoredAccountMatch[1]),
     );
     if (!account) return fail("监控账号不存在", 404);
-    account.external_account_id = Number(
-      payload.external_account_id ?? account.external_account_id,
-    );
+    if (account.provider === "sub2api") {
+      account.external_account_id = Number(
+        payload.external_account_id ?? account.external_account_id,
+      );
+    }
     account.name = String(payload.name ?? account.name);
     account.enabled =
       payload.enabled === undefined
@@ -180,64 +198,13 @@ export function handleSettings({
     saveDemoState(state);
     return ok(account);
   }
-  if (monitoredAccountMatch && method === "DELETE") {
-    const accountId = Number(monitoredAccountMatch[1]);
-    state.monitoredAccounts = state.monitoredAccounts.filter(
-      (item) => item.id !== accountId,
-    );
-    for (const user of state.systemUsers) {
-      user.account_ids = user.account_ids.filter((item) => item !== accountId);
-      user.account_names = accountNames(state, user.account_ids);
-    }
-    state.quotaPools = state.quotaPools.flatMap((pool) => {
-      const remainingAccountIds = pool.account_ids.filter(
-        (item) => item !== accountId,
-      );
-      return remainingAccountIds.length
-        ? [
-            {
-              ...pool,
-              contract_revision: pool.contract_revision + 1,
-              account_ids: remainingAccountIds,
-            },
-          ]
-        : [];
-    });
-    for (const participant of state.participants) {
-      participant.pool_allocations = participant.pool_allocations.flatMap(
-        (allocation) => {
-          const pool = state.quotaPools.find(
-            (item) => item.id === allocation.pool_id,
-          );
-          return pool
-            ? [
-                {
-                  ...allocation,
-                  account_ids: [...pool.account_ids],
-                  account_count: pool.account_ids.length,
-                },
-              ]
-            : [];
-        },
-      );
-      participant.account_breakdowns = participantBreakdowns(
-        state,
-        participant.id,
-        participant.account_breakdowns.filter(
-          (item) => item.account_id !== accountId,
-        ),
-      );
-      aggregateParticipant(participant);
-    }
-    saveDemoState(state);
-    return ok();
-  }
   if (method === "GET" && pathname === "settings") {
     return ok(state.settings satisfies AppSettingsData);
   }
   if (method === "PATCH" && pathname === "settings") {
     const secretKeys: Record<string, true> = {
       sub2api_admin_token: true,
+      cpa_management_key: true,
       smtp_password: true,
       resend_api_key: true,
     };
@@ -259,6 +226,23 @@ export function handleSettings({
     }
     saveDemoState(state);
     return ok(state.settings);
+  }
+  if (method === "POST" && pathname === "settings/cpa-accounts") {
+    return ok([
+      {
+        auth_index: "demo-codex-auth",
+        name: "演示 CPA Codex 账号",
+        email: "codex@example.test",
+        chatgpt_account_id: "chatgpt-demo",
+        plan_type: "pro",
+        status: "active",
+        status_message: "",
+        disabled: false,
+        unavailable: false,
+        success: 12,
+        failed: 0,
+      },
+    ]);
   }
   if (method === "POST" && pathname === "settings/openai-accounts") {
     return ok([
@@ -287,11 +271,13 @@ export function handleSettings({
   }
   if (
     method === "POST" &&
-    (pathname === "settings/test-sub2api" || pathname === "settings/test-email")
+    (pathname === "settings/test-sub2api" ||
+      pathname === "settings/test-cpa" ||
+      pathname === "settings/test-email")
   ) {
     return ok({
       demo: true,
-      connected: pathname.endsWith("sub2api"),
+      connected: pathname.endsWith("sub2api") || pathname.endsWith("test-cpa"),
       sent: false,
     });
   }

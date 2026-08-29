@@ -21,6 +21,9 @@ from .observations import (
 )
 from .fast_correction import ObservationFastCorrection
 from .api_usage import ParticipantAPIUsageSnapshot
+from .cpa_usage import CPAUsageEvent
+from .cpa_collector import CPACollectorState
+from .cpa_collection import CPAAccountCollectionInterval
 from .audit import AnnouncementRead, BlockedIPAddress, LoginEvent, NotificationEvent
 from .history_maintenance import (
     HistoricalRebuildRun,
@@ -38,6 +41,9 @@ __all__ = [
     "AnnouncementRead",
     "AppSettings",
     "BlockedIPAddress",
+    "CPAUsageEvent",
+    "CPAAccountCollectionInterval",
+    "CPACollectorState",
     "HistoricalRebuildRun",
     "HistoryMaintenanceState",
     "MonitoredAccount",

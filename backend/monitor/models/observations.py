@@ -9,7 +9,14 @@ from .participants import Participant
 
 class Observation(models.Model):
     """一次上游百分比采样；已保存成本是历史维护不会替换的来源事实。"""
-    SOURCE_CHOICES = (("scheduled", "定时"), ("manual", "手动"), ("exhausted", "额度耗尽触发"), ("reset", "重置临近"))
+    SOURCE_CHOICES = (
+        ("scheduled", "定时"),
+        ("manual", "手动"),
+        ("exhausted", "额度耗尽触发"),
+        ("reset", "重置临近"),
+        ("cpa_subscription_opened", "CPA 订阅后采样"),
+        ("cpa_subscription_closed", "CPA 关闭前采样"),
+    )
     EXCLUSION_CHOICES = (
         ("", "未排除"),
         ("manual", "管理员排除"),
@@ -23,7 +30,7 @@ class Observation(models.Model):
         null=True,
         blank=True,
     )
-    source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default="scheduled")
+    source = models.CharField(max_length=32, choices=SOURCE_CHOICES, default="scheduled")
     observed_at = models.DateTimeField()
     window_seconds = models.PositiveIntegerField(default=604800)
     upstream_resets_at = models.DateTimeField()

@@ -35,12 +35,12 @@ class ParticipantWriteSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _account_external_ids() -> list[int]:
-        return list(
-            MonitoredAccount.objects.order_by("external_account_id").values_list(
-                "external_account_id",
-                flat=True,
-            )
-        )
+        return [
+            account.fact_key
+            for account in MonitoredAccount.objects.filter(
+                provider="sub2api"
+            ).order_by("external_account_id")
+        ]
 
     @staticmethod
     def _validate_user_identity(
@@ -66,7 +66,10 @@ class ParticipantWriteSerializer(serializers.ModelSerializer):
         AccountParticipant.objects.bulk_create(
             [
                 AccountParticipant(account_id=account_id, participant=participant)
-                for account_id in MonitoredAccount.objects.exclude(pk__in=existing)
+                for account_id in MonitoredAccount.objects.filter(
+                    provider="sub2api"
+                )
+                .exclude(pk__in=existing)
                 .order_by("id")
                 .values_list("id", flat=True)
             ],
@@ -134,12 +137,19 @@ class QuotaAllocationWriteSerializer(serializers.Serializer):
     def validate(self, attrs):
         pools = attrs["pools"]
         configured_account_ids = set(
-            MonitoredAccount.objects.values_list("id", flat=True)
+            MonitoredAccount.objects.filter(provider="sub2api").values_list(
+                "id",
+                flat=True,
+            )
         )
         configured_participant_ids = set(
             Participant.objects.values_list("id", flat=True)
         )
-        existing_pool_ids = set(QuotaPool.objects.values_list("id", flat=True))
+        existing_pool_ids = set(
+            QuotaPool.objects.filter(accounts__provider="sub2api")
+            .distinct()
+            .values_list("id", flat=True)
+        )
 
         seen_account_ids: set[int] = set()
         seen_pool_ids: set[int] = set()
@@ -244,6 +254,7 @@ class QuotaAllocationWriteSerializer(serializers.Serializer):
     def apply(self) -> list[QuotaPool]:
         accounts = list(
             MonitoredAccount.objects.select_for_update()
+            .filter(provider="sub2api")
             .select_related("pool")
             .order_by("id")
         )
@@ -251,7 +262,9 @@ class QuotaAllocationWriteSerializer(serializers.Serializer):
         existing_pools = {
             pool.id: pool
             for pool in QuotaPool.objects.select_for_update()
+            .filter(accounts__provider="sub2api")
             .prefetch_related("allocations")
+            .distinct()
             .order_by("id")
         }
         requested_account_ids = {
@@ -352,5 +365,7 @@ class QuotaAllocationWriteSerializer(serializers.Serializer):
             )
 
         retained_pool_ids = {pool.id for pool, _spec, _changed in applied}
-        QuotaPool.objects.exclude(id__in=retained_pool_ids).delete()
+        QuotaPool.objects.exclude(id__in=retained_pool_ids).filter(
+            accounts__isnull=True
+        ).delete()
         return [pool for pool, _spec, _changed in applied]

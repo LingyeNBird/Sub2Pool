@@ -100,7 +100,12 @@ def build_dynamic_replay_input(
     baseline_by_user: dict[int, Decimal] = {}
     first_is_observed_baseline = bool(
         observations[0].observed_at == segment.started_at
-        and segment.reason in {"manual_override", "official_zero_observation"}
+        and segment.reason
+        in {
+            "manual_override",
+            "official_zero_observation",
+            "provider_collection_baseline",
+        }
     )
     if first_is_observed_baseline:
         baseline_rows = raw_by_time.get(observations[0].observed_at, {})

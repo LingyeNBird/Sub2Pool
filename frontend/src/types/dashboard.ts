@@ -39,12 +39,14 @@ export interface DashboardData {
   monitoring_enabled: boolean;
   accounts: MonitoredAccount[];
   selected_account_id: number | null;
+  selected_provider: "sub2api" | "cpa" | null;
   last_local_check_at: string | null;
   last_upstream_check_at: string | null;
   snapshot_stale: boolean;
   last_success_at: string | null;
   last_error: string;
   sub2api_admin_url: string;
+  upstream_admin_url: string;
   fast_correction_enabled: boolean;
   quota_query_mode: "passive" | "direct" | null;
   weekly_quota_model: "time_varying" | "constant_average";

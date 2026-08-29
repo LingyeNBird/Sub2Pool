@@ -86,6 +86,47 @@ function statisticsData(state: DemoState, url: URL): StatisticsData {
     state.monitoredAccounts.find((item) => item.id === accountId) ??
     state.monitoredAccounts.find((item) => item.enabled) ??
     state.monitoredAccounts[0]!;
+  if (account.provider === "cpa") {
+    return {
+      account: {
+        id: account.id,
+        provider: account.provider,
+        source_account_id: account.source_account_id,
+        external_account_id: account.external_account_id,
+        name: account.name,
+      },
+      capacity_period: capacityPeriod,
+      capacity_series: [],
+      fast_correction_enabled: false,
+      capacity_summary: {
+        cycle: null,
+        today: {
+          estimate_usd: null,
+          minimum_usd: null,
+          maximum_usd: null,
+          start_cost_usd: null,
+          start_cost_breakdown: null,
+          start_percent: null,
+          end_cost_usd: null,
+          end_cost_breakdown: null,
+          end_percent: null,
+          cost_delta_usd: null,
+          percent_delta: null,
+          sample_count: 0,
+          observed_from: null,
+          observed_to: null,
+          min_percent_span: 3,
+          sufficient: false,
+          reason: "连接后尚无 CPA 观测记录",
+        },
+      },
+      usage_days: usageDays,
+      usage_precision: usagePrecision,
+      sample_interval_minutes: Number(state.settings.local_poll_minutes),
+      participant_series: [],
+      cpa_api_key_series: [],
+    };
+  }
   const now = Date.parse(state.clock);
   const recentObservations = state.observations.filter(
     (item) => Date.parse(item.observed_at) >= now - capacityDays * 86_400_000,
@@ -190,12 +231,16 @@ function statisticsData(state: DemoState, url: URL): StatisticsData {
   return {
     account: {
       id: account.id,
+      provider: account.provider,
+      source_account_id: account.source_account_id,
       external_account_id: account.external_account_id,
       name: account.name,
     },
     capacity_period: capacityPeriod,
     capacity_series: capacitySeries,
-    fast_correction_enabled: Boolean(state.settings.fast_correction_enabled),
+    fast_correction_enabled:
+      account.provider === "sub2api" &&
+      Boolean(state.settings.fast_correction_enabled),
     capacity_summary: {
       cycle: {
         estimate_usd: latest.effective_usd_per_percent * 100,
@@ -259,22 +304,26 @@ function statisticsData(state: DemoState, url: URL): StatisticsData {
     usage_days: usageDays,
     usage_precision: usagePrecision,
     sample_interval_minutes: Number(state.settings.local_poll_minutes),
-    participant_series: state.participants
-      .filter((item) => item.enabled)
-      .map((participant) => ({
-        participant_id: participant.id,
-        participant_name: participant.name,
-        account_id: account.id,
-        external_account_id: account.external_account_id,
-        sub2api_user_id: participant.sub2api_user_id,
-        points: participantUsagePoints(
-          state,
-          participant.id,
-          usageDays,
-          usagePrecision,
-          account.id,
-        ),
-      })),
+    participant_series:
+      account.provider === "sub2api"
+        ? state.participants
+            .filter((item) => item.enabled)
+            .map((participant) => ({
+              participant_id: participant.id,
+              participant_name: participant.name,
+              account_id: account.id,
+              external_account_id: account.external_account_id!,
+              sub2api_user_id: participant.sub2api_user_id,
+              points: participantUsagePoints(
+                state,
+                participant.id,
+                usageDays,
+                usagePrecision,
+                account.id,
+              ),
+            }))
+        : [],
+    cpa_api_key_series: [],
   };
 }
 
@@ -305,36 +354,43 @@ function accountStatusData(state: DemoState): AccountStatusData {
     connection_error: null,
     accounts: state.monitoredAccounts.map((account, index) => {
       const fixture = fixtures[index % fixtures.length]!;
+      const isCPA = account.provider === "cpa";
       const resetAt = new Date(
         sampledAt + (index === 0 ? 52 : 91) * 3_600_000,
       ).toISOString();
       const cycleCapacity =
         (account.capacity_min_usd + account.capacity_max_usd) / 2;
-      const cycles = Array.from({ length: 12 }, (_, cycleIndex) => {
-        const endedAt =
-          new Date(resetAt).getTime() - (11 - cycleIndex) * 7 * DAY_MS;
-        const usedPercent =
-          cycleIndex === 11
-            ? fixture.usedPercent
-            : Number(
-                (
-                  38 +
-                  ((cycleIndex * 17 + index * 11) % 54) +
-                  (cycleIndex % 3) * 0.37
-                ).toFixed(2),
-              );
-        return {
-          sequence: cycleIndex + 1,
-          started_at: new Date(endedAt - 7 * DAY_MS).toISOString(),
-          ended_at: new Date(endedAt).toISOString(),
-          used_percent: usedPercent,
-          used_usd: Number(((cycleCapacity * usedPercent) / 100).toFixed(2)),
-          is_current: cycleIndex === 11,
-        };
-      });
+      const cycles = isCPA
+        ? []
+        : Array.from({ length: 12 }, (_, cycleIndex) => {
+            const endedAt =
+              new Date(resetAt).getTime() - (11 - cycleIndex) * 7 * DAY_MS;
+            const usedPercent =
+              cycleIndex === 11
+                ? fixture.usedPercent
+                : Number(
+                    (
+                      38 +
+                      ((cycleIndex * 17 + index * 11) % 54) +
+                      (cycleIndex % 3) * 0.37
+                    ).toFixed(2),
+                  );
+            return {
+              sequence: cycleIndex + 1,
+              started_at: new Date(endedAt - 7 * DAY_MS).toISOString(),
+              ended_at: new Date(endedAt).toISOString(),
+              used_percent: usedPercent,
+              used_usd: Number(
+                ((cycleCapacity * usedPercent) / 100).toFixed(2),
+              ),
+              is_current: cycleIndex === 11,
+            };
+          });
       const statsAccountCost = Number((fixture.accountCost * 3.6).toFixed(2));
       return {
         id: account.id,
+        provider: account.provider,
+        source_account_id: account.source_account_id,
         external_account_id: account.external_account_id,
         name: account.name,
         enabled: account.enabled,
@@ -342,14 +398,14 @@ function accountStatusData(state: DemoState): AccountStatusData {
         cycles,
         runtime: {
           name: account.name,
-          account_type: "oauth",
+          account_type: isCPA ? "pro" : "oauth",
           status: "active",
           schedulable: true,
-          current_concurrency: fixture.concurrency,
-          concurrency_limit: 10,
-          last_used_at: new Date(
-            sampledAt - (index + 1) * 85_000,
-          ).toISOString(),
+          current_concurrency: isCPA ? null : fixture.concurrency,
+          concurrency_limit: isCPA ? null : 10,
+          last_used_at: isCPA
+            ? null
+            : new Date(sampledAt - (index + 1) * 85_000).toISOString(),
           rate_limited_at: null,
           rate_limit_reset_at: null,
           overload_until: null,
@@ -358,60 +414,78 @@ function accountStatusData(state: DemoState): AccountStatusData {
           error_message: null,
         },
         usage: {
-          source: "passive",
+          source: isCPA ? "cpa_direct" : "passive",
           updated_at: new Date(sampledAt - 95_000).toISOString(),
-          five_hour: {
-            used_percent: index === 0 ? 18.2 : 6.75,
-            reset_at: new Date(sampledAt + 2 * 3_600_000).toISOString(),
-            remaining_seconds: 7200,
-            request_count: null,
-            token_count: null,
-            account_cost_usd: null,
-            standard_cost_usd: null,
-            user_cost_usd: null,
-          },
+          five_hour: isCPA
+            ? null
+            : {
+                used_percent: index === 0 ? 18.2 : 6.75,
+                reset_at: new Date(sampledAt + 2 * 3_600_000).toISOString(),
+                remaining_seconds: 7200,
+                request_count: null,
+                token_count: null,
+                account_cost_usd: null,
+                standard_cost_usd: null,
+                user_cost_usd: null,
+              },
           seven_day: {
             used_percent: fixture.usedPercent,
             reset_at: resetAt,
             remaining_seconds: Math.floor(
               (new Date(resetAt).getTime() - sampledAt) / 1000,
             ),
-            request_count: fixture.requests,
-            token_count: fixture.tokens,
-            account_cost_usd: fixture.accountCost,
-            standard_cost_usd: Number((fixture.accountCost / 1.12).toFixed(2)),
-            user_cost_usd: Number((fixture.accountCost * 1.08).toFixed(2)),
+            request_count: isCPA ? 0 : fixture.requests,
+            token_count: isCPA ? 0 : fixture.tokens,
+            account_cost_usd: isCPA ? 0 : fixture.accountCost,
+            standard_cost_usd: isCPA
+              ? null
+              : Number((fixture.accountCost / 1.12).toFixed(2)),
+            user_cost_usd: isCPA
+              ? null
+              : Number((fixture.accountCost * 1.08).toFixed(2)),
           },
-          needs_verify: false,
-          is_banned: false,
-          needs_reauth: false,
+          needs_verify: isCPA ? null : false,
+          is_banned: isCPA ? null : false,
+          needs_reauth: isCPA ? null : false,
           error_code: null,
           error: null,
         },
         stats: {
           days: 30,
-          actual_days_used: 26,
-          account_cost_usd: statsAccountCost,
-          fast_correction_usd: fixture.fastCorrection,
-          account_cost_with_fast_correction_usd: Number(
-            (statsAccountCost + fixture.fastCorrection).toFixed(2),
-          ),
-          standard_cost_usd: Number((fixture.accountCost * 3.2).toFixed(2)),
-          user_cost_usd: Number((fixture.accountCost * 3.9).toFixed(2)),
-          request_count: fixture.requests * 4,
-          token_count: fixture.tokens * 4,
-          avg_daily_cost_usd: Number((statsAccountCost / 26).toFixed(2)),
-          avg_daily_request_count: Number(
-            ((fixture.requests * 4) / 26).toFixed(1),
-          ),
-          avg_daily_token_count: Math.round((fixture.tokens * 4) / 26),
-          avg_duration_ms: index === 0 ? 1348 : 1126,
+          actual_days_used: isCPA ? 0 : 26,
+          account_cost_usd: isCPA ? 0 : statsAccountCost,
+          fast_correction_usd: isCPA ? null : fixture.fastCorrection,
+          account_cost_with_fast_correction_usd: isCPA
+            ? null
+            : Number((statsAccountCost + fixture.fastCorrection).toFixed(2)),
+          standard_cost_usd: isCPA
+            ? null
+            : Number((fixture.accountCost * 3.2).toFixed(2)),
+          user_cost_usd: isCPA
+            ? null
+            : Number((fixture.accountCost * 3.9).toFixed(2)),
+          request_count: isCPA ? 0 : fixture.requests * 4,
+          token_count: isCPA ? 0 : fixture.tokens * 4,
+          avg_daily_cost_usd: isCPA
+            ? 0
+            : Number((statsAccountCost / 26).toFixed(2)),
+          avg_daily_request_count: isCPA
+            ? 0
+            : Number(((fixture.requests * 4) / 26).toFixed(1)),
+          avg_daily_token_count: isCPA
+            ? 0
+            : Math.round((fixture.tokens * 4) / 26),
+          avg_duration_ms: isCPA ? null : index === 0 ? 1348 : 1126,
           today: {
             date: state.clock.slice(0, 10),
-            account_cost_usd: Number((fixture.accountCost * 0.12).toFixed(2)),
-            user_cost_usd: Number((fixture.accountCost * 0.13).toFixed(2)),
-            request_count: Math.round(fixture.requests * 0.14),
-            token_count: Math.round(fixture.tokens * 0.14),
+            account_cost_usd: isCPA
+              ? 0
+              : Number((fixture.accountCost * 0.12).toFixed(2)),
+            user_cost_usd: isCPA
+              ? null
+              : Number((fixture.accountCost * 0.13).toFixed(2)),
+            request_count: isCPA ? 0 : Math.round(fixture.requests * 0.14),
+            token_count: isCPA ? 0 : Math.round(fixture.tokens * 0.14),
           },
         },
         warnings: [],

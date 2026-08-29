@@ -3,12 +3,19 @@
 from django.conf import settings
 from django.utils import timezone
 
+from ..cpa.collector_state import get_collector_status
 from .base import PublicAPIView, ok
 
 
 class HealthView(PublicAPIView):
     def get(self, _request):
-        return ok({"status": "ok", "time": timezone.now().isoformat()})
+        return ok(
+            {
+                "status": "ok",
+                "time": timezone.now().isoformat(),
+                "cpa_collector": get_collector_status(include_error=False),
+            }
+        )
 
 
 class AuthClientConfigView(PublicAPIView):

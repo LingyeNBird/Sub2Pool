@@ -9,7 +9,10 @@ from rest_framework.permissions import IsAuthenticated
 
 from ..access import HasPageAccess, visible_accounts_for
 from ..api_auth import APIKeyAuthentication, generate_api_key
+from ..cpa.collector_state import get_collector_status
+from ..cpa.usage import refresh_cpa_history
 from ..history_state import LeaseLostError, fenced_fact_write
+from ..integrations.cpa import CPAClient, CPAError, CPAUsageSubscriber
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError
 from ..models import (
     AccountParticipant,
@@ -18,13 +21,13 @@ from ..models import (
     Observation,
     PagePermission,
     Participant,
-    QuotaPool,
     SystemUserAPIKey,
 )
 from ..notifications import send_notification
 from ..replay import rebuild_account
 from ..serializers import (
     AppSettingsSerializer,
+    CPAConnectionSerializer,
     MonitoredAccountSerializer,
     Sub2APIConnectionSerializer,
 )
@@ -37,6 +40,15 @@ DERIVED_RESULT_SETTINGS = frozenset(
         "safety_factor",
         "limit_warning_usd",
         "recommendation_change_usd",
+    }
+)
+CPA_PRICING_SETTINGS = frozenset(
+    {
+        "cpa_fast_multiplier",
+        "cpa_double_billing_enabled",
+        "cpa_double_billing_threshold_tokens",
+        "cpa_double_billing_multiplier",
+        "cpa_model_pricing",
     }
 )
 PLAN_RELEVANT_SETTINGS = frozenset(
@@ -53,8 +65,6 @@ PLAN_RELEVANT_SETTINGS = frozenset(
 )
 
 
-class _MonitoredAccountHasObservations(RuntimeError):
-    pass
 
 
 def _temporary_sub2api_client(
@@ -73,6 +83,37 @@ def _temporary_sub2api_client(
         verify_tls=values.get("verify_tls", config.verify_tls),
     )
 
+def _temporary_cpa_client(
+    config: AppSettings,
+    values: dict,
+) -> CPAClient:
+    return CPAClient(
+        config,
+        base_url=values.get("cpa_base_url", config.cpa_base_url),
+        management_key=values.get("cpa_management_key") or None,
+        request_timeout_seconds=values.get(
+            "request_timeout_seconds",
+            config.request_timeout_seconds,
+        ),
+        verify_tls=values.get("verify_tls", config.verify_tls),
+    )
+
+def _temporary_cpa_subscriber(
+    config: AppSettings,
+    values: dict,
+) -> CPAUsageSubscriber:
+    return CPAUsageSubscriber(
+        config,
+        base_url=values.get("cpa_base_url", config.cpa_base_url),
+        management_key=values.get("cpa_management_key") or None,
+        request_timeout_seconds=values.get(
+            "request_timeout_seconds",
+            config.request_timeout_seconds,
+        ),
+        verify_tls=values.get("verify_tls", config.verify_tls),
+    )
+
+
 
 class SettingsView(AdminAPIView):
     def get(self, _request):
@@ -80,12 +121,7 @@ class SettingsView(AdminAPIView):
 
     def patch(self, request):
         config = AppSettings.load()
-        account_ids = set(
-            MonitoredAccount.objects.values_list(
-                "external_account_id",
-                flat=True,
-            )
-        )
+        account_ids = {account.fact_key for account in MonitoredAccount.objects.all()}
         serializer = AppSettingsSerializer(
             config,
             data=request.data,
@@ -105,6 +141,12 @@ class SettingsView(AdminAPIView):
             if field in serializer.validated_data
             and getattr(config, field) != serializer.validated_data[field]
         }
+        changed_cpa_pricing = {
+            field
+            for field in CPA_PRICING_SETTINGS
+            if field in serializer.validated_data
+            and getattr(config, field) != serializer.validated_data[field]
+        }
         derived_account_ids = (
             set(
                 Observation.objects.order_by()
@@ -115,7 +157,17 @@ class SettingsView(AdminAPIView):
             else set()
         )
         plan_account_ids = account_ids if changed_plan_settings else set()
-        affected_account_ids = derived_account_ids | plan_account_ids
+        cpa_account_ids = (
+            {
+                account.fact_key
+                for account in MonitoredAccount.objects.filter(provider="cpa")
+            }
+            if changed_cpa_pricing
+            else set()
+        )
+        affected_account_ids = (
+            derived_account_ids | plan_account_ids | cpa_account_ids
+        )
         try:
             with fenced_fact_write(
                 affected_account_ids,
@@ -128,11 +180,15 @@ class SettingsView(AdminAPIView):
                     raise LeaseLostError("系统设置已被其他请求修改，请刷新后重试")
                 serializer.instance = locked_config
                 config = serializer.save()
-                for account_id in derived_account_ids:
+                if changed_cpa_pricing:
+                    refresh_cpa_history(config, rebuild=False)
+                for replay_account_id in (
+                    derived_account_ids | cpa_account_ids
+                ):
                     rebuild_account(
-                        account_id,
+                        replay_account_id,
                         config,
-                        guard=guards[account_id],
+                        guard=guards[replay_account_id],
                     )
         except ValidationError as exc:
             return error("设置校验失败", details=exc.detail)
@@ -192,6 +248,44 @@ class TestSub2APIView(AdminAPIView):
             return error(str(exc), 502)
         return ok(result)
 
+class CPAAccountListView(AdminAPIView):
+    def post(self, request):
+        serializer = CPAConnectionSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error("连接参数格式无效", details=serializer.errors)
+        config = AppSettings.load()
+        try:
+            with _temporary_cpa_client(
+                config,
+                serializer.validated_data,
+            ) as client:
+                accounts = client.list_codex_accounts()
+        except (CPAError, ValueError) as exc:
+            return error(str(exc), 502)
+        return ok(accounts)
+
+
+class CPACollectorStatusView(AdminAPIView):
+    def get(self, _request):
+        return ok(get_collector_status())
+
+
+class TestCPAView(AdminAPIView):
+    def post(self, request):
+        serializer = CPAConnectionSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error("连接参数格式无效", details=serializer.errors)
+        config = AppSettings.load()
+        try:
+            values = serializer.validated_data
+            with _temporary_cpa_client(config, values) as client:
+                result = client.test_connection()
+            result.update(_temporary_cpa_subscriber(config, values).probe())
+        except (CPAError, ValueError) as exc:
+            return error(str(exc), 502)
+        return ok(result)
+
+
 
 class MonitoredAccountListView(PageAccessAPIView):
     required_page_permissions = (
@@ -203,7 +297,12 @@ class MonitoredAccountListView(PageAccessAPIView):
     def get(self, request):
         accounts = visible_accounts_for(
             request.user,
-            MonitoredAccount.objects.order_by("name", "external_account_id"),
+            MonitoredAccount.objects.order_by(
+                "name",
+                "provider",
+                "external_account_id",
+                "cpa_auth_index",
+            ),
         )
         return ok(MonitoredAccountSerializer(accounts, many=True).data)
 
@@ -211,17 +310,23 @@ class MonitoredAccountListView(PageAccessAPIView):
         serializer = MonitoredAccountSerializer(data=request.data)
         if not serializer.is_valid():
             return error("监控账号校验失败", details=serializer.errors)
-        external_account_id = serializer.validated_data["external_account_id"]
+        provider = serializer.validated_data.get("provider", "sub2api")
+        source_lock_id = serializer.validated_data.get("external_account_id")
         settings_id = AppSettings.load().pk
-        with fenced_fact_write([external_account_id]):
-            AppSettings.objects.select_for_update().get(pk=settings_id)
-            account = serializer.save()
-            AccountParticipant.objects.bulk_create(
-                [
-                    AccountParticipant(account=account, participant=participant)
-                    for participant in Participant.objects.order_by("id")
-                ]
-            )
+        if provider == "sub2api":
+            with fenced_fact_write([source_lock_id]):
+                AppSettings.objects.select_for_update().get(pk=settings_id)
+                account = serializer.save()
+                AccountParticipant.objects.bulk_create(
+                    [
+                        AccountParticipant(account=account, participant=participant)
+                        for participant in Participant.objects.order_by("id")
+                    ]
+                )
+        else:
+            with transaction.atomic():
+                AppSettings.objects.select_for_update().get(pk=settings_id)
+                account = serializer.save()
         return ok(MonitoredAccountSerializer(account).data, 201)
 
 
@@ -247,19 +352,19 @@ class MonitoredAccountDetailView(AdminAPIView):
         )
         if not serializer.is_valid():
             return error("监控账号校验失败", details=serializer.errors)
-        external_account_id = account.external_account_id
+        fact_key = account.fact_key
         previous_capacity_profile = account.resolved_capacity_profile
         try:
             with fenced_fact_write(
-                [external_account_id],
+                [fact_key],
                 ttl=timedelta(minutes=30),
             ) as guards:
                 account = serializer.save()
                 if account.resolved_capacity_profile != previous_capacity_profile:
                     rebuild_account(
-                        external_account_id,
+                        fact_key,
                         AppSettings.load(),
-                        guard=guards[external_account_id],
+                        guard=guards[fact_key],
                     )
         except ValueError as exc:
             return error(
@@ -269,35 +374,6 @@ class MonitoredAccountDetailView(AdminAPIView):
             )
         return ok(MonitoredAccountSerializer(account).data)
 
-    def delete(self, _request, account_id: int):
-        try:
-            account = MonitoredAccount.objects.get(pk=account_id)
-        except MonitoredAccount.DoesNotExist:
-            return error("监控账号不存在", 404)
-        affected_account_ids = list(
-            MonitoredAccount.objects.order_by().values_list(
-                "external_account_id",
-                flat=True,
-            )
-        )
-        try:
-            with fenced_fact_write(affected_account_ids):
-                account = MonitoredAccount.objects.select_for_update().get(
-                    pk=account_id
-                )
-                if Observation.objects.filter(
-                    account_id=account.external_account_id
-                ).exists():
-                    raise _MonitoredAccountHasObservations
-                pool_id = account.pool_id
-                account.delete()
-                if MonitoredAccount.objects.filter(pool_id=pool_id).exists():
-                    QuotaPool.bump_contract_revisions([pool_id])
-                else:
-                    QuotaPool.objects.filter(pk=pool_id).delete()
-        except _MonitoredAccountHasObservations:
-            return error("该账号已有历史事实，不能删除；请改为停用", 409)
-        return ok({"deleted": True})
 
 
 class TestEmailView(AdminAPIView):

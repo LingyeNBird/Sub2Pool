@@ -127,6 +127,7 @@ def statistics_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "usage_precision",
                 "sample_interval_minutes",
                 "participant_series",
+                "cpa_api_key_series",
             ],
             "properties": {
                 "account": {
@@ -154,6 +155,12 @@ def statistics_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                     "type": "array",
                     "items": {
                         "$ref": "#/components/schemas/ParticipantUsageSeries"
+                    },
+                },
+                "cpa_api_key_series": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/components/schemas/CPAApiKeyUsageSeries"
                     },
                 },
             },
@@ -438,6 +445,49 @@ def statistics_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "label": {"type": "string"},
                 "account_cycle_usage_usd": {"type": "number"},
                 "balance_usd": nullable_number,
+            },
+        },
+        "CPAApiKeyUsageSeries": {
+            "type": "object",
+            "required": [
+                "api_key_id",
+                "api_key_name",
+                "total_usage_usd",
+                "request_count",
+                "token_count",
+                "unpriced_request_count",
+                "points",
+            ],
+            "properties": {
+                "api_key_id": {"type": "string"},
+                "api_key_name": {"type": "string"},
+                "total_usage_usd": {"type": "number"},
+                "request_count": {"type": "integer"},
+                "token_count": {"type": "integer"},
+                "unpriced_request_count": {"type": "integer"},
+                "points": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/components/schemas/CPAApiKeyUsagePoint"
+                    },
+                },
+            },
+        },
+        "CPAApiKeyUsagePoint": {
+            "type": "object",
+            "required": [
+                "observed_at",
+                "label",
+                "usage_usd",
+                "request_count",
+                "token_count",
+            ],
+            "properties": {
+                "observed_at": {"type": "string", "format": "date-time"},
+                "label": {"type": "string"},
+                "usage_usd": {"type": "number"},
+                "request_count": {"type": "integer"},
+                "token_count": {"type": "integer"},
             },
         },
         "ParticipantApiUsage": {

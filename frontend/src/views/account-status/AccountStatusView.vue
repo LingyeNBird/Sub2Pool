@@ -128,8 +128,8 @@ onMounted(load);
         </ul>
       </div>
       <p class="mt-1 max-w-3xl text-sm opacity-60">
-        直接读取 Sub2API
-        保存的账号状态、额度窗口与请求统计；不同版本未提供的字段不会显示。
+        读取 Sub2API 或 CPA
+        保存的账号状态、额度窗口与本地请求统计；上游未提供的字段不会显示。
       </p>
     </div>
     <div class="flex items-center gap-3">
@@ -147,9 +147,9 @@ onMounted(load);
   <div class="col-span-12 alert alert-info">
     <AppIcon name="information-circle" class="size-5" />
     <span>
-      额度窗口使用 Sub2API 被动快照，不会因打开或刷新本页而请求 OpenAI
-      官方额度接口；近 {{ data?.stats_days ?? 30 }} 天统计来自 Sub2API
-      本地请求日志， FAST 修正来自本地已持久化事实。
+      Sub2API 账号读取被动额度快照和本地请求日志；CPA
+      账号直接读取周限，并使用本地持续采集的 usage
+      队列估算成本。刷新本页不会补造连接监控前的历史数据。
     </span>
   </div>
 
@@ -168,7 +168,7 @@ onMounted(load);
   >
     <div class="card-body items-center py-16">
       <span class="loading loading-lg loading-spinner"></span>
-      <span class="text-sm opacity-60">正在读取 Sub2API 账号状态</span>
+      <span class="text-sm opacity-60">正在读取上游账号状态</span>
     </div>
   </section>
 
@@ -208,6 +208,12 @@ onMounted(load);
               {{ statusLabel(account) }}
             </span>
             <span
+              v-if="account.provider === 'cpa'"
+              class="badge badge-sm badge-info"
+            >
+              CPA
+            </span>
+            <span
               v-if="account.runtime?.schedulable != null"
               class="badge badge-outline badge-sm"
             >
@@ -218,7 +224,11 @@ onMounted(load);
             </span>
           </div>
           <p class="mt-1 text-xs opacity-50">
-            Sub2API #{{ account.external_account_id }}
+            {{
+              account.provider === "cpa"
+                ? `CPA ${account.source_account_id}`
+                : `Sub2API #${account.external_account_id}`
+            }}
             <template v-if="account.runtime?.account_type">
               · {{ account.runtime.account_type }}
             </template>
@@ -321,13 +331,23 @@ onMounted(load);
               </div>
               <div class="mt-1 space-y-0.5 text-xs opacity-45">
                 <div>账号成本口径</div>
-                <div v-if="account.usage.seven_day.standard_cost_usd != null">
+                <div
+                  v-if="
+                    account.provider === 'sub2api' &&
+                    account.usage.seven_day.standard_cost_usd != null
+                  "
+                >
                   标准成本
                   {{
                     formatCurrency(account.usage.seven_day.standard_cost_usd)
                   }}
                 </div>
-                <div v-if="account.usage.seven_day.user_cost_usd != null">
+                <div
+                  v-if="
+                    account.provider === 'sub2api' &&
+                    account.usage.seven_day.user_cost_usd != null
+                  "
+                >
                   用户扣费
                   {{ formatCurrency(account.usage.seven_day.user_cost_usd) }}
                 </div>
@@ -375,7 +395,10 @@ onMounted(load);
                 {{ formatCurrency(account.stats.account_cost_usd) }}
               </span>
               <span
-                v-if="account.stats.fast_correction_usd != null"
+                v-if="
+                  account.provider === 'sub2api' &&
+                  account.stats.fast_correction_usd != null
+                "
                 class="text-xs font-normal opacity-60"
               >
                 （FAST 修正 +{{
@@ -384,7 +407,10 @@ onMounted(load);
               </span>
             </div>
             <div
-              v-if="account.stats.account_cost_with_fast_correction_usd != null"
+              v-if="
+                account.provider === 'sub2api' &&
+                account.stats.account_cost_with_fast_correction_usd != null
+              "
               class="mt-1 text-sm font-medium"
             >
               含 FAST 修正
@@ -429,16 +455,27 @@ onMounted(load);
         </div>
         <div
           v-if="
-            account.stats.standard_cost_usd != null ||
-            account.stats.user_cost_usd != null ||
+            (account.provider === 'sub2api' &&
+              (account.stats.standard_cost_usd != null ||
+                account.stats.user_cost_usd != null)) ||
             account.stats.today
           "
           class="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs opacity-60"
         >
-          <span v-if="account.stats.standard_cost_usd != null">
+          <span
+            v-if="
+              account.provider === 'sub2api' &&
+              account.stats.standard_cost_usd != null
+            "
+          >
             标准成本 {{ formatCurrency(account.stats.standard_cost_usd) }}
           </span>
-          <span v-if="account.stats.user_cost_usd != null">
+          <span
+            v-if="
+              account.provider === 'sub2api' &&
+              account.stats.user_cost_usd != null
+            "
+          >
             用户扣费 {{ formatCurrency(account.stats.user_cost_usd) }}
           </span>
           <span v-if="account.stats.today?.request_count != null">

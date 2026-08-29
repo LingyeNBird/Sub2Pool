@@ -11,7 +11,11 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
             "type": "object",
             "required": [
                 "id",
+                "provider",
+                "source_account_id",
                 "external_account_id",
+                "cpa_auth_index",
+                "pool_id",
                 "name",
                 "enabled",
                 "quota_query_mode",
@@ -30,7 +34,14 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
             ],
             "properties": {
                 "id": {"type": "integer"},
-                "external_account_id": {"type": "integer"},
+                "provider": {
+                    "type": "string",
+                    "enum": ["sub2api", "cpa"],
+                },
+                "source_account_id": {"type": "string"},
+                "external_account_id": _nullable("integer"),
+                "cpa_auth_index": nullable_string,
+                "pool_id": {"type": "integer"},
                 "name": {"type": "string"},
                 "enabled": {"type": "boolean"},
                 "quota_query_mode": {
@@ -67,6 +78,7 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "monitoring_enabled",
                 "accounts",
                 "selected_account_id",
+                "selected_provider",
                 "last_local_check_at",
                 "last_upstream_check_at",
                 "snapshot_stale",
@@ -74,6 +86,7 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "last_error",
                 "quota_query_mode",
                 "sub2api_admin_url",
+                "upstream_admin_url",
                 "fast_correction_enabled",
                 "weekly_quota_model",
                 "cycle",
@@ -88,6 +101,10 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                     "items": {"$ref": "#/components/schemas/MonitoredAccount"},
                 },
                 "selected_account_id": _nullable("integer"),
+                "selected_provider": {
+                    "type": ["string", "null"],
+                    "enum": ["sub2api", "cpa", None],
+                },
                 "last_local_check_at": nullable_string,
                 "last_upstream_check_at": nullable_string,
                 "snapshot_stale": {"type": "boolean"},
@@ -98,6 +115,7 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                     "enum": ["passive", "direct", None],
                 },
                 "sub2api_admin_url": {"type": "string", "format": "uri"},
+                "upstream_admin_url": {"type": "string", "format": "uri"},
                 "fast_correction_enabled": {"type": "boolean"},
                 "weekly_quota_model": {
                     "type": "string",
@@ -198,6 +216,8 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
             "type": "object",
             "required": [
                 "id",
+                "provider",
+                "source_account_id",
                 "external_account_id",
                 "name",
                 "enabled",
@@ -210,7 +230,12 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
             ],
             "properties": {
                 "id": {"type": "integer"},
-                "external_account_id": {"type": "integer"},
+                "provider": {
+                    "type": "string",
+                    "enum": ["sub2api", "cpa"],
+                },
+                "source_account_id": {"type": "string"},
+                "external_account_id": _nullable("integer"),
                 "name": {"type": "string"},
                 "enabled": {"type": "boolean"},
                 "quota_query_mode": {
@@ -343,10 +368,21 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
         },
         "MonitoredAccountSummary": {
             "type": "object",
-            "required": ["id", "external_account_id", "name"],
+            "required": [
+                "id",
+                "provider",
+                "source_account_id",
+                "external_account_id",
+                "name",
+            ],
             "properties": {
                 "id": {"type": "integer"},
-                "external_account_id": {"type": "integer"},
+                "provider": {
+                    "type": "string",
+                    "enum": ["sub2api", "cpa"],
+                },
+                "source_account_id": {"type": "string"},
+                "external_account_id": _nullable("integer"),
                 "name": {"type": "string"},
             },
         },

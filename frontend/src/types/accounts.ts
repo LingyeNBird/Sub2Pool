@@ -1,10 +1,14 @@
 export type QuotaProfile = "auto" | "plus" | "pro_5x" | "pro_20x";
 export type EffectiveQuotaProfile = Exclude<QuotaProfile, "auto">;
+export type AccountProvider = "sub2api" | "cpa";
 
 export interface MonitoredAccount {
   id: number;
+  provider: AccountProvider;
+  source_account_id: string;
   pool_id: number;
-  external_account_id: number;
+  external_account_id: number | null;
+  cpa_auth_index: string | null;
   name: string;
   enabled: boolean;
   quota_query_mode: "passive" | "direct";
@@ -20,6 +24,19 @@ export interface MonitoredAccount {
   last_success_at: string | null;
   next_local_check_at: string | null;
   last_error: string;
+}
+export interface CPAAccountOption {
+  auth_index: string;
+  name: string;
+  email: string;
+  chatgpt_account_id: string;
+  plan_type: string;
+  status: string;
+  status_message: string;
+  disabled: boolean;
+  unavailable: boolean;
+  success: number;
+  failed: number;
 }
 export interface AccountRuntimeStatus {
   name: string | null;
@@ -90,7 +107,9 @@ export interface AccountCycleUsage {
 }
 export interface AccountStatusAccount {
   id: number;
-  external_account_id: number;
+  provider: AccountProvider;
+  source_account_id: string;
+  external_account_id: number | null;
   name: string;
   enabled: boolean;
   quota_query_mode: "passive" | "direct";

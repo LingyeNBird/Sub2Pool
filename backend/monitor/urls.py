@@ -55,6 +55,8 @@ from .views.security import (
     LoginEventListView,
 )
 from .views.settings import (
+    CPAAccountListView,
+    CPACollectorStatusView,
     MonitoredAccountDetailView,
     MonitoredAccountListView,
     MyAPIKeyView,
@@ -63,6 +65,7 @@ from .views.settings import (
     SettingsView,
     ReadOnlyAPIKeyView,
     TestEmailView,
+    TestCPAView,
     TestSub2APIView,
 )
 from .views.statistics import (
@@ -166,12 +169,18 @@ urlpatterns = [
     path("notifications", NotificationListView.as_view()),
     path("settings", SettingsView.as_view()),
     path("settings/openai-accounts", OpenAIAccountListView.as_view()),
+    path("settings/cpa-accounts", CPAAccountListView.as_view()),
+    path(
+        "settings/cpa-collector-status",
+        CPACollectorStatusView.as_view(),
+    ),
     path("settings/monitored-accounts", MonitoredAccountListView.as_view()),
     path(
         "settings/monitored-accounts/<int:account_id>",
         MonitoredAccountDetailView.as_view(),
     ),
     path("settings/test-sub2api", TestSub2APIView.as_view()),
+    path("settings/test-cpa", TestCPAView.as_view()),
     path("settings/test-email", TestEmailView.as_view()),
     path("settings/readonly-api-key", ReadOnlyAPIKeyView.as_view()),
     path("settings/my-api-key", MyAPIKeyView.as_view()),

@@ -17,14 +17,27 @@ from ..quota_profiles import (
     effective_quota_profile,
 )
 from .validators import validate_service_url
+from ..cpa.pricing import (
+    default_cpa_model_pricing,
+    validate_cpa_model_pricing,
+)
 
 
 class MonitoredAccount(models.Model):
-    """One quota-bearing OpenAI account exposed by the configured Sub2API channel."""
+    """One quota-bearing OpenAI account exposed by Sub2API or CPA."""
 
+    PROVIDER_CHOICES = (
+        ("sub2api", "Sub2API"),
+        ("cpa", "CPA"),
+    )
     QUERY_MODE_CHOICES = (
         ("passive", "仅读取 Sub2API 被动快照"),
         ("direct", "调用上游账号额度接口"),
+    )
+    provider = models.CharField(
+        max_length=16,
+        choices=PROVIDER_CHOICES,
+        default="sub2api",
     )
     pool = models.ForeignKey(
         "QuotaPool",
@@ -37,7 +50,17 @@ class MonitoredAccount(models.Model):
         blank=True,
     )
 
-    external_account_id = models.BigIntegerField(unique=True)
+    external_account_id = models.BigIntegerField(
+        unique=True,
+        null=True,
+        blank=True,
+    )
+    cpa_auth_index = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+    )
     name = models.CharField(max_length=160)
     enabled = models.BooleanField(default=True)
     quota_query_mode = models.CharField(
@@ -80,7 +103,7 @@ class MonitoredAccount(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["name", "external_account_id"]
+        ordering = ["name", "provider", "external_account_id", "cpa_auth_index"]
         constraints = [
             models.CheckConstraint(
                 condition=(
@@ -99,12 +122,32 @@ class MonitoredAccount(models.Model):
                     )
                 ),
                 name="account_capacity_range_valid",
-            )
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        provider="sub2api",
+                        external_account_id__isnull=False,
+                        cpa_auth_index__isnull=True,
+                    )
+                    | models.Q(
+                        provider="cpa",
+                        external_account_id__isnull=True,
+                        cpa_auth_index__isnull=False,
+                    )
+                ),
+                name="account_provider_identity_valid",
+            ),
         ]
         verbose_name = "监控上游账号"
         verbose_name_plural = "监控上游账号"
 
     def save(self, *args, **kwargs):
+        if self.provider == "sub2api":
+            self.cpa_auth_index = None
+        elif self.provider == "cpa":
+            self.external_account_id = None
+            self.quota_query_mode = "direct"
         if self.pool_id is not None:
             return super().save(*args, **kwargs)
         from .participants import QuotaPool
@@ -112,6 +155,31 @@ class MonitoredAccount(models.Model):
         with transaction.atomic():
             self.pool = QuotaPool.for_new_account(self.name)
             return super().save(*args, **kwargs)
+
+    @classmethod
+    def for_fact_key(cls, account_id: int) -> "MonitoredAccount | None":
+        if account_id < 0:
+            return cls.objects.filter(pk=-account_id, provider="cpa").first()
+        return cls.objects.filter(
+            external_account_id=account_id,
+            provider="sub2api",
+        ).first()
+
+    @property
+    def fact_key(self) -> int:
+        if self.provider == "sub2api":
+            if self.external_account_id is None:
+                raise ValueError("Sub2API 账号缺少上游账号 ID")
+            return self.external_account_id
+        if self.pk is None:
+            raise ValueError("CPA 账号必须先保存后才能生成事实键")
+        return -self.pk
+
+    @property
+    def source_account_id(self) -> str:
+        if self.provider == "cpa":
+            return self.cpa_auth_index or ""
+        return str(self.external_account_id or "")
 
     @property
     def effective_quota_profile(self) -> str:
@@ -130,7 +198,7 @@ class MonitoredAccount(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.external_account_id})"
+        return f"{self.name} ({self.provider}:{self.source_account_id})"
 
 
 class AppSettings(models.Model):
@@ -148,6 +216,39 @@ class AppSettings(models.Model):
         validators=[validate_service_url],
     )
     sub2api_admin_token_encrypted = models.TextField(blank=True)
+    cpa_base_url = models.CharField(
+        max_length=500,
+        default="http://host.docker.internal:8317",
+        validators=[validate_service_url],
+    )
+    cpa_management_key_encrypted = models.TextField(blank=True)
+    cpa_fast_multiplier = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        default=Decimal("2.5"),
+        validators=[
+            MinValueValidator(Decimal("1")),
+            MaxValueValidator(Decimal("100")),
+        ],
+    )
+    cpa_double_billing_enabled = models.BooleanField(default=False)
+    cpa_double_billing_threshold_tokens = models.PositiveIntegerField(
+        default=272000,
+        validators=[MinValueValidator(1)],
+    )
+    cpa_double_billing_multiplier = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        default=Decimal("2"),
+        validators=[
+            MinValueValidator(Decimal("1")),
+            MaxValueValidator(Decimal("100")),
+        ],
+    )
+    cpa_model_pricing = models.JSONField(
+        default=default_cpa_model_pricing,
+        validators=[validate_cpa_model_pricing],
+    )
 
     request_timeout_seconds = models.PositiveIntegerField(default=20)
     verify_tls = models.BooleanField(default=True)

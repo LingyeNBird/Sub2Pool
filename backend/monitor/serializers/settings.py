@@ -10,6 +10,7 @@ from ..fast_correction.rules import normalize_fast_correction_rules
 from ..fast_correction.status import missing_current_cycle_intervals
 from ..models import AppSettings, MonitoredAccount, QuotaPool, validate_service_url
 from ..secrets import encrypt_secret
+from ..cpa.pricing import validate_cpa_model_pricing
 
 
 class Sub2APIConnectionSerializer(serializers.Serializer):
@@ -41,10 +42,35 @@ class Sub2APIConnectionSerializer(serializers.Serializer):
     )
     verify_tls = serializers.BooleanField(required=False)
 
+class CPAConnectionSerializer(serializers.Serializer):
+    cpa_base_url = serializers.CharField(
+        required=False,
+        max_length=500,
+        validators=[validate_service_url],
+    )
+    cpa_management_key = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+        write_only=True,
+    )
+    request_timeout_seconds = serializers.IntegerField(
+        required=False,
+        min_value=1,
+    )
+    verify_tls = serializers.BooleanField(required=False)
+
+
 
 SETTINGS_FIELDS = (
     "monitoring_enabled",
     "sub2api_base_url",
+    "cpa_base_url",
+    "cpa_fast_multiplier",
+    "cpa_double_billing_enabled",
+    "cpa_double_billing_threshold_tokens",
+    "cpa_double_billing_multiplier",
+    "cpa_model_pricing",
     "request_timeout_seconds",
     "verify_tls",
     "timezone",
@@ -83,12 +109,16 @@ SETTINGS_FIELDS = (
 class MonitoredAccountSerializer(serializers.ModelSerializer):
     capacity_min_usd = serializers.SerializerMethodField()
     capacity_max_usd = serializers.SerializerMethodField()
+    source_account_id = serializers.SerializerMethodField()
 
     class Meta:
         model = MonitoredAccount
         fields = (
             "id",
+            "provider",
             "external_account_id",
+            "cpa_auth_index",
+            "source_account_id",
             "pool_id",
             "name",
             "enabled",
@@ -108,6 +138,7 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "id",
+            "source_account_id",
             "pool_id",
             "last_local_check_at",
             "detected_plan_type",
@@ -120,15 +151,50 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
             "last_error",
         )
 
-    def validate_external_account_id(self, value: int) -> int:
-        if value <= 0:
+    def validate_external_account_id(self, value: int | None) -> int | None:
+        if value is not None and value <= 0:
             raise serializers.ValidationError("上游账号 ID 必须为正整数")
         if self.instance is not None and value != self.instance.external_account_id:
             raise serializers.ValidationError("已有监控账号不能修改上游账号 ID")
         return value
 
+    def validate_cpa_auth_index(self, value: str | None) -> str | None:
+        normalized = value.strip() if value else None
+        if self.instance is not None and normalized != self.instance.cpa_auth_index:
+            raise serializers.ValidationError("已有监控账号不能修改 CPA auth_index")
+        return normalized
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        provider = attrs.get(
+            "provider",
+            self.instance.provider if self.instance is not None else "sub2api",
+        )
+        if self.instance is not None and provider != self.instance.provider:
+            raise serializers.ValidationError(
+                {"provider": "已有监控账号不能修改来源类型"}
+            )
+        external_id = attrs.get(
+            "external_account_id",
+            self.instance.external_account_id if self.instance is not None else None,
+        )
+        cpa_auth_index = attrs.get(
+            "cpa_auth_index",
+            self.instance.cpa_auth_index if self.instance is not None else None,
+        )
+        if provider == "sub2api" and external_id is None:
+            raise serializers.ValidationError(
+                {"external_account_id": "Sub2API 账号必须填写上游账号 ID"}
+            )
+        if provider == "cpa" and not cpa_auth_index:
+            raise serializers.ValidationError(
+                {"cpa_auth_index": "CPA 账号必须填写 auth_index"}
+            )
+        if provider == "cpa":
+            attrs["external_account_id"] = None
+            attrs["quota_query_mode"] = "direct"
+        else:
+            attrs["cpa_auth_index"] = None
         capacity_min = attrs.get(
             "capacity_min_usd_override",
             (
@@ -164,6 +230,9 @@ class MonitoredAccountSerializer(serializers.ModelSerializer):
 
     def get_capacity_max_usd(self, instance) -> float:
         return instance.resolved_capacity_profile.capacity_max_usd
+    def get_source_account_id(self, instance) -> str:
+        return instance.source_account_id
+
 
     @transaction.atomic
     def create(self, validated_data):
@@ -188,6 +257,12 @@ class AppSettingsSerializer(serializers.ModelSerializer):
         trim_whitespace=False,
         write_only=True,
     )
+    cpa_management_key = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+        write_only=True,
+    )
     smtp_password = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -204,31 +279,41 @@ class AppSettingsSerializer(serializers.ModelSerializer):
         required=False,
         write_only=True,
     )
+    clear_cpa_management_key = serializers.BooleanField(
+        required=False,
+        write_only=True,
+    )
     clear_smtp_password = serializers.BooleanField(required=False, write_only=True)
     clear_resend_api_key = serializers.BooleanField(required=False, write_only=True)
     sub2api_token_configured = serializers.SerializerMethodField()
+    cpa_management_key_configured = serializers.SerializerMethodField()
     smtp_password_configured = serializers.SerializerMethodField()
     resend_api_key_configured = serializers.SerializerMethodField()
     fast_correction_rebuild_recommended = serializers.SerializerMethodField()
     fast_correction_missing_intervals = serializers.SerializerMethodField()
     readonly_api_key_configured = serializers.SerializerMethodField()
+    cpa_collector_status = serializers.SerializerMethodField()
 
     class Meta:
         model = AppSettings
         fields = (
             *SETTINGS_FIELDS,
             "sub2api_admin_token",
+            "cpa_management_key",
             "smtp_password",
             "resend_api_key",
             "clear_sub2api_admin_token",
+            "clear_cpa_management_key",
             "clear_smtp_password",
             "clear_resend_api_key",
             "sub2api_token_configured",
+            "cpa_management_key_configured",
             "smtp_password_configured",
             "resend_api_key_configured",
             "fast_correction_rebuild_recommended",
             "fast_correction_missing_intervals",
             "readonly_api_key_configured",
+            "cpa_collector_status",
             "readonly_api_key_hint",
             "readonly_api_key_created_at",
             "last_local_check_at",
@@ -238,6 +323,7 @@ class AppSettingsSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "fast_correction_rebuild_recommended",
+            "cpa_collector_status",
             "fast_correction_missing_intervals",
             "readonly_api_key_configured",
             "readonly_api_key_hint",
@@ -250,6 +336,14 @@ class AppSettingsSerializer(serializers.ModelSerializer):
 
     def get_sub2api_token_configured(self, obj) -> bool:
         return bool(obj.sub2api_admin_token_encrypted)
+    def get_cpa_management_key_configured(self, obj) -> bool:
+        return bool(obj.cpa_management_key_encrypted)
+
+    def get_cpa_collector_status(self, _obj) -> dict:
+        from ..cpa.collector_state import get_collector_status
+
+        return get_collector_status()
+
 
     def get_smtp_password_configured(self, obj) -> bool:
         return bool(obj.smtp_password_encrypted)
@@ -279,6 +373,12 @@ class AppSettingsSerializer(serializers.ModelSerializer):
             return normalize_fast_correction_rules(value)
         except ValueError as exc:
             raise serializers.ValidationError(str(exc)) from exc
+    def validate_cpa_model_pricing(self, value):
+        try:
+            return validate_cpa_model_pricing(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+
 
     def validate_timezone(self, value: str) -> str:
         try:
@@ -311,9 +411,11 @@ class AppSettingsSerializer(serializers.ModelSerializer):
 
     def update(self, instance: AppSettings, validated_data):
         token = validated_data.pop("sub2api_admin_token", "")
+        cpa_management_key = validated_data.pop("cpa_management_key", "")
         smtp_password = validated_data.pop("smtp_password", "")
         resend_api_key = validated_data.pop("resend_api_key", "")
         clear_token = validated_data.pop("clear_sub2api_admin_token", False)
+        clear_cpa_key = validated_data.pop("clear_cpa_management_key", False)
         clear_smtp = validated_data.pop("clear_smtp_password", False)
         clear_resend = validated_data.pop("clear_resend_api_key", False)
 
@@ -323,6 +425,10 @@ class AppSettingsSerializer(serializers.ModelSerializer):
             instance.sub2api_admin_token_encrypted = encrypt_secret(token)
         if clear_token:
             instance.sub2api_admin_token_encrypted = ""
+        if cpa_management_key:
+            instance.cpa_management_key_encrypted = encrypt_secret(cpa_management_key)
+        if clear_cpa_key:
+            instance.cpa_management_key_encrypted = ""
         if smtp_password:
             instance.smtp_password_encrypted = encrypt_secret(smtp_password)
         if clear_smtp:

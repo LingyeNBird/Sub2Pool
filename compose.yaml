@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    stop_grace_period: 45s
     environment:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?请在 .env 中设置 DJANGO_SECRET_KEY}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}

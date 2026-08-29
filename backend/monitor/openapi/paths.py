@@ -139,8 +139,9 @@ def openapi_paths() -> dict:
             "get": {
                 "summary": "读取上游账号状态",
                 "description": (
-                    "对每个监控账号执行 Sub2API 只读查询；"
-                    "单账号失败写入 warnings，不中断其他账号。"
+                    "对每个监控账号执行对应提供方的只读查询；"
+                    "Sub2API 读取账号状态与请求统计，CPA 读取 Codex 周限并汇总"
+                    "本地 usage 事件。单账号失败写入 warnings，不中断其他账号。"
                 ),
                 "operationId": "getAccountStatus",
                 "responses": {
@@ -283,6 +284,10 @@ def openapi_paths() -> dict:
         "/v1/statistics": {
             "get": {
                 "summary": "读取额度统计",
+                "description": (
+                    "Sub2API 账号返回参与者用量序列；CPA 账号不返回参与者，"
+                    "改为按本地哈希后的 API Key 返回连接后用量序列。"
+                ),
                 "operationId": "getStatistics",
                 "parameters": [
                     {
@@ -315,7 +320,7 @@ def openapi_paths() -> dict:
                     {
                         "name": "usage_days",
                         "in": "query",
-                        "description": "参与者用量回看天数，最大 90。",
+                        "description": "参与者或 CPA API Key 用量回看天数，最大 90。",
                         "schema": {
                             "type": "integer",
                             "minimum": 1,
@@ -326,7 +331,7 @@ def openapi_paths() -> dict:
                     {
                         "name": "usage_precision",
                         "in": "query",
-                        "description": "参与者用量序列的时间粒度。",
+                        "description": "参与者或 CPA API Key 用量序列的时间粒度。",
                         "schema": {
                             "type": "string",
                             "enum": ["raw", "hour", "day"],

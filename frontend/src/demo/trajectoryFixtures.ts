@@ -208,6 +208,7 @@ function buildPeriods(participants: Participant[]): {
         id: observationId,
         observed_at: iso(observedAt),
         source,
+        provider: "sub2api",
         account_id: 8801,
         attribution_started_at: iso(start),
         upstream_resets_at: iso(reset),

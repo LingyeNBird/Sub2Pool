@@ -129,7 +129,7 @@ def capacity_summary(
     }
     latest = (
         Observation.objects.filter(
-            account_id=account.external_account_id,
+            account_id=account.fact_key,
             excluded_at__isnull=True,
             attribution_started_at__isnull=False,
         )
@@ -274,7 +274,7 @@ def capacity_series(
     )
     observation_rows = list(
         Observation.objects.filter(
-            account_id=account.external_account_id,
+            account_id=account.fact_key,
             excluded_at__isnull=True,
             observed_at__gte=capacity_start,
         ).order_by("observed_at", "id")

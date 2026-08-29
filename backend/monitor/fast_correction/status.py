@@ -7,9 +7,11 @@ from ..models import AppSettings, MonitoredAccount, Observation
 
 
 def current_cycle_start(account: MonitoredAccount) -> datetime | None:
+    if account.provider != "sub2api":
+        return None
     latest = (
         Observation.objects.filter(
-            account_id=account.external_account_id,
+            account_id=account.fact_key,
             excluded_at__isnull=True,
             attribution_started_at__isnull=False,
         )
@@ -19,7 +21,7 @@ def current_cycle_start(account: MonitoredAccount) -> datetime | None:
     if latest is not None:
         return latest.attribution_started_at
     latest_raw = (
-        Observation.objects.filter(account_id=account.external_account_id)
+        Observation.objects.filter(account_id=account.fact_key)
         .order_by("-observed_at", "-id")
         .first()
     )
@@ -36,7 +38,7 @@ def _missing_for_account(account: MonitoredAccount) -> int:
         return 0
     return (
         Observation.objects.filter(
-            account_id=account.external_account_id,
+            account_id=account.fact_key,
             observed_at__gte=start,
         )
         .filter(
@@ -56,5 +58,8 @@ def missing_current_cycle_intervals(
         return _missing_for_account(account)
     return sum(
         _missing_for_account(item)
-        for item in MonitoredAccount.objects.filter(enabled=True)
+        for item in MonitoredAccount.objects.filter(
+            enabled=True,
+            provider="sub2api",
+        )
     )
