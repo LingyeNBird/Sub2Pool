@@ -208,6 +208,61 @@ def test_cpa_usage_persists_for_disabled_monitored_account():
 
 
 @pytest.mark.django_db
+def test_cpa_collection_controls_skip_disabled_and_globally_paused_accounts(
+    monkeypatch,
+):
+    account = create_cpa_account(enabled=False)
+    config = AppSettings.load()
+    config.monitoring_enabled = True
+
+    class ForbiddenCPAClient:
+        def __init__(self, *_args, **_kwargs):
+            raise AssertionError("disabled CPA account must not be queried")
+
+    monkeypatch.setattr(runcpacollector, "CPAClient", ForbiddenCPAClient)
+    disabled_accounts = runcpacollector._cpa_collection_accounts(config)
+    disabled_signature = runcpacollector._connection_signature(
+        config,
+        runcpacollector._account_signature(disabled_accounts),
+    )
+    assert disabled_accounts == []
+    assert (
+        runcpacollector.Command()._query_subscription_boundaries(
+            config,
+            "opened",
+        )
+        == []
+    )
+
+    account.enabled = True
+    account.save(update_fields=["enabled", "updated_at"])
+    enabled_accounts = runcpacollector._cpa_collection_accounts(config)
+    enabled_signature = runcpacollector._connection_signature(
+        config,
+        runcpacollector._account_signature(enabled_accounts),
+    )
+    assert [item.id for item in enabled_accounts] == [account.id]
+    assert enabled_signature != disabled_signature
+
+    config.monitoring_enabled = False
+    paused_accounts = runcpacollector._cpa_collection_accounts(config)
+    paused_signature = runcpacollector._connection_signature(
+        config,
+        runcpacollector._account_signature(paused_accounts),
+    )
+    assert paused_accounts == []
+    assert paused_signature != enabled_signature
+    assert (
+        runcpacollector.Command()._query_subscription_boundaries(
+            config,
+            "opened",
+        )
+        == []
+    )
+    assert runcpacollector._has_cpa_accounts() is True
+
+
+@pytest.mark.django_db
 def test_cpa_usage_rejects_missing_or_invalid_event_time():
     account = create_cpa_account()
     payload = {
@@ -1248,6 +1303,62 @@ def test_collector_disconnect_reliability_is_independent_of_opening_sample(
             reader_state=runcpacollector._ReaderState(),
             reader_finished=Event(),
             barriers=Queue(),
+        )
+        disconnected = next(
+            row
+            for row in spool.peek_boundaries(10)
+            if row.payload["kind"] == "disconnected"
+        )
+
+    assert disconnected.payload["account_id"] == account.id
+    assert disconnected.payload["end_reliable"] is True
+    assert disconnected.payload["window"] is None
+
+
+@pytest.mark.django_db
+def test_collector_config_restart_closes_without_quota_probe(
+    monkeypatch,
+    tmp_path,
+):
+    account = create_cpa_account()
+    config = AppSettings.load()
+    command = runcpacollector.Command()
+    connected_at = timezone.now()
+    monkeypatch.setattr(
+        runcpacollector,
+        "_request_reader_barrier",
+        lambda *_args, **_kwargs: 0,
+    )
+    def reject_closing_query(*_args, **_kwargs):
+        raise AssertionError("config restart must not query closing quota")
+
+    monkeypatch.setattr(
+        command,
+        "_query_subscription_boundaries",
+        reject_closing_query,
+    )
+
+    class FakeSubscriber:
+        def close(self):
+            raise AssertionError("live barrier should not close the subscriber")
+
+    with CPAUsageSpool(tmp_path / "config-restart-close.sqlite3") as spool:
+        spool.begin_session(
+            "config-restart-session",
+            [account.id],
+            connected_at.isoformat(),
+        )
+        command._finish_subscription_session(
+            config=config,
+            spool=spool,
+            subscriber=FakeSubscriber(),
+            session_key="config-restart-session",
+            connected_at=connected_at,
+            accounts=[account],
+            reader_state=runcpacollector._ReaderState(),
+            reader_finished=Event(),
+            barriers=Queue(),
+            capture_closing_sample=False,
         )
         disconnected = next(
             row

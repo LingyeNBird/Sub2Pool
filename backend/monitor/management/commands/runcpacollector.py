@@ -71,6 +71,16 @@ def _cpa_accounts() -> list[MonitoredAccount]:
     return list(MonitoredAccount.objects.filter(provider="cpa").order_by("id"))
 
 
+def _cpa_collection_accounts(
+    config: AppSettings,
+    accounts: list[MonitoredAccount] | None = None,
+) -> list[MonitoredAccount]:
+    if not config.monitoring_enabled:
+        return []
+    rows = accounts if accounts is not None else _cpa_accounts()
+    return [account for account in rows if account.enabled]
+
+
 def _has_cpa_accounts() -> bool:
     return MonitoredAccount.objects.filter(provider="cpa").exists()
 
@@ -82,6 +92,7 @@ def _account_signature(accounts: list[MonitoredAccount] | None = None) -> tuple:
 
 def _connection_signature(config: AppSettings, accounts: tuple) -> tuple:
     return (
+        config.monitoring_enabled,
         config.cpa_base_url,
         config.cpa_management_key_encrypted,
         config.request_timeout_seconds,
@@ -314,7 +325,7 @@ class Command(BaseCommand):
     ) -> list[_BoundarySample]:
         accounts = [
             account
-            for account in _cpa_accounts()
+            for account in _cpa_collection_accounts(config)
             if account_ids is None or account.id in account_ids
         ]
         if not accounts:
@@ -603,6 +614,7 @@ class Command(BaseCommand):
         reader_state: _ReaderState,
         reader_finished: Event,
         barriers: Queue[_BarrierRequest],
+        capture_closing_sample: bool = True,
     ) -> None:
         end_reliable = False
         if reader_finished.is_set() or reader_state.error is not None:
@@ -613,11 +625,18 @@ class Command(BaseCommand):
             )
             required_usage_id = spool.max_usage_id()
         else:
-            samples = self._query_subscription_boundaries(
-                config,
-                "closed",
-                retain_failures=True,
-                deadline=time.monotonic() + CLOSING_BOUNDARY_BUDGET_SECONDS,
+            samples = (
+                self._query_subscription_boundaries(
+                    config,
+                    "closed",
+                    account_ids={account.id for account in accounts},
+                    retain_failures=True,
+                    deadline=(
+                        time.monotonic() + CLOSING_BOUNDARY_BUDGET_SECONDS
+                    ),
+                )
+                if capture_closing_sample
+                else []
             )
             try:
                 required_usage_id = _request_reader_barrier(
@@ -635,6 +654,19 @@ class Command(BaseCommand):
             else:
                 disconnected_at = timezone.now()
                 end_reliable = True
+                sampled_account_ids = {
+                    sample.account_id for sample in samples
+                }
+                samples.extend(
+                    self._uncertain_closing_samples(
+                        [
+                            account
+                            for account in accounts
+                            if account.id not in sampled_account_ids
+                        ],
+                        disconnected_at,
+                    )
+                )
         records = self._disconnect_records(
             samples,
             session_key,
@@ -651,7 +683,8 @@ class Command(BaseCommand):
         spool: CPAUsageSpool,
         unspooled: list[dict],
     ) -> None:
-        accounts = _cpa_accounts()
+        all_accounts = _cpa_accounts()
+        accounts = _cpa_collection_accounts(config, all_accounts)
         account_signature = _account_signature(accounts)
         signature = _connection_signature(config, account_signature)
         subscriber = CPAUsageSubscriber(config)
@@ -674,6 +707,7 @@ class Command(BaseCommand):
         pending_count = spool.pending_count()
         pending_openings = {account.id for account in accounts}
         close_error: Exception | None = None
+        capture_closing_sample = True
 
         try:
             subscriber.connect()
@@ -768,15 +802,19 @@ class Command(BaseCommand):
                 if now - last_config_refresh >= CONFIG_REFRESH_SECONDS:
                     close_old_connections()
                     latest_config = AppSettings.load()
+                    latest_collection_accounts = _cpa_collection_accounts(
+                        latest_config
+                    )
                     if (
                         not _has_cpa_accounts()
                         or not latest_config.cpa_management_key_encrypted
                         or _connection_signature(
                             latest_config,
-                            _account_signature(),
+                            _account_signature(latest_collection_accounts),
                         )
                         != signature
                     ):
+                        capture_closing_sample = False
                         break
                     last_config_refresh = now
 
@@ -825,6 +863,7 @@ class Command(BaseCommand):
                         reader_state=reader_state,
                         reader_finished=reader_finished,
                         barriers=barriers,
+                        capture_closing_sample=capture_closing_sample,
                     )
             except Exception as exc:
                 close_error = exc

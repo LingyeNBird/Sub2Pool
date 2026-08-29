@@ -21,6 +21,8 @@ from monitor.models import (
     AppSettings,
     BlockedIPAddress,
     LoginEvent,
+    HistoryMaintenanceState,
+    MonitoredAccount,
     NotificationEvent,
     Observation,
     ObservationFastCorrection,
@@ -136,6 +138,11 @@ def test_database_transfer_endpoints_require_admin_and_clear_refresh_on_import(
     client = Client()
     headers, _ = jwt_login(client)
     account = create_monitored_account(7)
+    cpa_account = MonitoredAccount.objects.create(
+        provider="cpa",
+        cpa_auth_index="database-import-cpa",
+        name="CPA database import",
+    )
     monkeypatch.setattr(
         "monitor.views.database.export_database_bytes",
         lambda: b"SQLite format 3\x00backup",
@@ -218,6 +225,9 @@ def test_database_transfer_endpoints_require_admin_and_clear_refresh_on_import(
         len(b"SQLite format 3\x00backup"),
     )
     assert captured["imports"] == [True]
+    assert HistoryMaintenanceState.objects.get(
+        account_id=cpa_account.fact_key
+    ).fact_revision == 1
     assert captured["writer_status"] == 409
     assert not Participant.objects.filter(sub2api_user_id=99).exists()
     assert imported.cookies["pinche_refresh"]["max-age"] == 0

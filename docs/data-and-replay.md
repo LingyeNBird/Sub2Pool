@@ -99,7 +99,7 @@ apply 在一个数据库事务中完成：
 
 CPA 账号的可计算覆盖由独立持久化的账号采集区间决定。RESP 订阅成功后先记录区间的 `connected_at`；区间内第一条未被人工排除的百分比观测提供数值基线，但观测本身不保存、推断或改变连接状态。没有采集区间覆盖的百分比观测只保留审计事实并自动排除。成本窗口起点不得早于账号创建时间。
 
-采集进程只保存 RESP 订阅成功后的直播 usage，不读取 CPA FIFO，也不回补连接建立前或断线期间的请求。活动 session 与每账号 `connected` 事件在独立 SQLite 队列中同事务落盘；业务库随后写入 `CPAAccountCollectionInterval`。订阅后的 opening 百分比和关闭前的 closing 百分比是可选数值样本：Management 采样后的 RESP `PING` 会把该截止点前已发布的事件推进持久队列，这些样本只有在对应 usage 先写入业务库后才落库。lease busy 或业务数据库故障只会延迟写入，不会跳过。
+采集进程只保存 RESP 订阅成功后的直播 usage，不读取 CPA FIFO，也不回补连接建立前或断线期间的请求。原始 usage 对所有已纳管 CPA 账号持续落盘；只有全局后台监控开启且账号已启用时，活动 session 才会为该账号把 `connected` 事件写入独立 SQLite 队列、在业务库建立 `CPAAccountCollectionInterval` 并主动读取 opening/closing 百分比。全局或账号启用状态变化会先通过 RESP barrier 关闭旧区间，再按新配置重连，不在配置切换过程中追加 closing 百分比探测。Management 采样后的 RESP `PING` 会把该截止点前已发布的事件推进持久队列；百分比样本只有在对应 usage 先写入业务库后才落库。lease busy 或业务数据库故障只会延迟写入，不会跳过。
 
 账号结束事件独立关闭采集区间。正常结束时，最终 RESP barrier 成功即可把 `disconnected_at` 标为可靠；closing 百分比读取失败不会让真实连接状态依赖某条观测。进程异常消失或 barrier 失败时，spool 使用最后持久心跳恢复不可靠结束时间，不伪造百分比观测。重连创建新采集区间，两段之间的不可观测缺口不连续计算。人工排除只移除百分比数值对斜率的影响，不改写采集区间，也不改写或删除不可排除的 `CPAUsageEvent`。上游不提供小数百分比，因此可选采样只保留实际返回的整数精度。
 

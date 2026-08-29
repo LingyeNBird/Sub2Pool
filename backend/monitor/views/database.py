@@ -79,10 +79,8 @@ class DatabaseImportView(AdminAPIView):
                         .distinct()
                     )
                     account_ids.update(
-                        MonitoredAccount.objects.values_list(
-                            "external_account_id",
-                            flat=True,
-                        )
+                        account.fact_key
+                        for account in MonitoredAccount.objects.all()
                     )
                     for account_id in sorted(account_ids):
                         state, _created = (
