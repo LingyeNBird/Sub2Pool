@@ -1,9 +1,9 @@
 import type { MonitoredAccount } from "./accounts";
-import type { PaginatedData } from "./common";
+import type { CorrectionBreakdown, PaginatedData } from "./common";
 import type { ModelDiagnostics } from "./dashboard";
 import type { Snapshot } from "./participants";
 
-export interface Observation {
+export interface Observation extends CorrectionBreakdown {
   id: number;
   observed_at: string;
   source: string;
@@ -47,7 +47,9 @@ export interface Observation {
   manual_start_end_id: number | null;
   manual_start_end_observed_at: string | null;
 }
-export interface FastCorrectionUserDetail {
+export interface FastCorrectionUserDetail extends CorrectionBreakdown {
+  raw_cost_usd?: number | null;
+  corrected_cost_usd?: number | null;
   sub2api_user_id: number;
   username: string;
   email: string;
@@ -59,12 +61,17 @@ export interface FastCorrectionUserDetail {
   correction_usd: number;
   corrected_fast_cost_usd: number;
 }
-export interface FastCorrectionCalculateResult {
+export interface FastCorrectionCalculateResult extends CorrectionBreakdown {
   observation_id: number;
   fast_correction_usd: number;
   fast_correction_calculated: true;
 }
-export interface FastCorrectionDetail {
+export interface FastCorrectionDetail extends CorrectionBreakdown {
+  raw_cost_usd?: number | null;
+  corrected_cost_usd?: number | null;
+  rules_digest?: string;
+  rules?: Record<string, unknown>;
+  model_details?: CorrectionModelDetail[];
   observation_id: number;
   started_at: string | null;
   ended_at: string;
@@ -110,10 +117,23 @@ export interface ObservationListData extends PaginatedData<Observation> {
     "id" | "provider" | "source_account_id" | "external_account_id" | "name"
   > | null;
   fast_correction_enabled: boolean;
+  corrections_available?: boolean;
   summary: {
     total: number;
     valid_count: number;
     passive_count: number;
     excluded_count: number;
   };
+}
+
+export interface CorrectionModelDetail extends CorrectionBreakdown {
+  model: string;
+  service_tier: string;
+  request_count: number;
+  raw_cost_usd: number;
+  corrected_cost_usd: number;
+  fast_factor: string;
+  long_context_factor: string;
+  model_factor: string;
+  long_context_evidence: string;
 }

@@ -32,9 +32,9 @@ def test_admin_announcements_have_persistent_per_user_read_state():
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["unread_count"] == 1
-    assert len(data["items"]) == 1
-    announcement = data["items"][0]
+    assert data["unread_count"] == 3
+    assert len(data["items"]) == 3
+    announcement = next(item for item in data["items"] if item["code"] == "sub2api-fast-model-correction-0-1-179")
     assert announcement["code"] == "sub2api-fast-model-correction-0-1-179"
     assert announcement["read"] is False
     assert announcement["read_at"] is None
@@ -72,8 +72,8 @@ def test_admin_announcements_have_persistent_per_user_read_state():
     refreshed = admin_client.get("/api/announcements", **admin_headers).json()[
         "data"
     ]
-    assert refreshed["unread_count"] == 0
-    assert refreshed["items"][0]["read"] is True
+    assert refreshed["unread_count"] == 2
+    assert next(item for item in refreshed["items"] if item["code"] == announcement["code"])["read"] is True
     assert admin_client.post(
         "/api/announcements/not-a-real-announcement/read",
         **admin_headers,

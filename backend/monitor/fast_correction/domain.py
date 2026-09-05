@@ -33,6 +33,7 @@ class FastCorrectionInterval:
     standard_correction_cost: Decimal
     actual_correction_cost: Decimal
     users: tuple[UserFastCorrection, ...]
+    logs: tuple[Sub2APIUsageLog, ...] | None = None
 
     def selected_correction(self, basis: str) -> Decimal:
         return (
@@ -66,7 +67,7 @@ def aggregate_fast_logs(
             },
         )
         row["request_count"] = int(row["request_count"]) + 1
-        if log.service_tier != "priority":
+        if log.service_tier.strip().casefold() not in {"priority", "fast"}:
             continue
         correction_factor = rules.correction_factor_for_model(log.model)
         fast_count += 1
@@ -113,4 +114,5 @@ def aggregate_fast_logs(
             sum((row.actual_correction_cost for row in users), ZERO)
         ),
         users=tuple(users),
+        logs=tuple(logs),
     )

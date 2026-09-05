@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import Any
 
+from ..billing_correction.facts import validate_interval_logs
 from .domain import FastCorrectionInterval, aggregate_fast_logs
 from .rules import FastCorrectionRuleSet
 from ..integrations.sub2api import Sub2APIReader
@@ -18,12 +19,13 @@ def fetch_fast_interval(
     correction_rules: Any,
 ) -> FastCorrectionInterval:
     rules = FastCorrectionRuleSet(correction_rules)
-    logs = client.usage_logs(
+    logs = [] if started_at == ended_at else client.usage_logs(
         account_id=account_id,
         started_at=started_at,
         ended_at=ended_at,
         timezone_name=timezone_name,
     )
+    validate_interval_logs(logs, account_id=account_id, started_at=started_at, ended_at=ended_at)
     return aggregate_fast_logs(
         logs,
         started_at=started_at,

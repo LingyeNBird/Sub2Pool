@@ -259,6 +259,10 @@ class UsageResourceMixin:
                         api_key_id=_positive_int(raw.get("api_key_id")),
                         api_key_name=_api_key_name(raw.get("api_key")),
                         model=str(raw.get("model") or "").strip(),
+                        input_tokens=_optional_tokens(raw, "input_tokens"),
+                        cache_creation_tokens=_optional_tokens(raw, "cache_creation_tokens"),
+                        cache_read_tokens=_optional_tokens(raw, "cache_read_tokens"),
+                        long_context_billing_applied=_optional_long_context_flag(raw),
                     )
                 )
 
@@ -298,3 +302,19 @@ class UsageResourceMixin:
             total_cost=_decimal(data.get("total_cost"), "total_cost"),
             total_actual_cost=_decimal(data.get("total_actual_cost"), "total_actual_cost"),
         )
+
+
+def _optional_tokens(raw: dict, name: str) -> int | None:
+    value = raw.get(name)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 2**63 - 1:
+        raise Sub2APIError(f"Sub2API 返回了无效字段 {name}")
+    return value
+
+
+def _optional_long_context_flag(raw: dict) -> bool | None:
+    value = raw.get("long_context_billing_applied")
+    if value is not None and not isinstance(value, bool):
+        raise Sub2APIError("Sub2API 返回了无效字段 long_context_billing_applied")
+    return value

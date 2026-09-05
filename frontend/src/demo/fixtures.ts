@@ -258,6 +258,24 @@ function baseSettings(): AppSettingsData {
     ],
     fast_correction_rebuild_recommended: false,
     fast_correction_missing_intervals: 0,
+    correction_missing_intervals: 0,
+    long_context_correction_enabled: true,
+    long_context_correction_rules: [
+      {
+        model_pattern: "gpt-5.6*",
+        source_multiplier: "2",
+        target_multiplier: "1",
+        threshold_tokens: 272000,
+      },
+      {
+        model_pattern: "gpt-6*",
+        source_multiplier: "2",
+        target_multiplier: "1",
+        threshold_tokens: 272000,
+      },
+    ],
+    model_correction_enabled: true,
+    model_correction_rules: [{ model_pattern: "gpt-6*", multiplier: "1.8" }],
     initial_usd_per_percent: 30,
     safety_factor: 0.92,
     daily_estimate_min_percent_span: 3,
@@ -351,7 +369,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 14,
+    version: 15,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextPoolId: 2,

@@ -6,6 +6,8 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Q
 
+from ..billing_correction.observations import interval_corrections
+from ..billing_correction.rules import corrections_enabled
 from ..accounting.boundaries import official_start, same_official_reset
 from ..accounting.replay import rebuild_observation_suffix
 from ..history_state import LeaseGuard, fenced_fact_write
@@ -52,13 +54,13 @@ def _interval_start(observation: Observation):
     return official_start(observation)
 
 
-def _result(observation: Observation, cost_basis: str) -> dict[str, int | float | bool]:
+def _result(observation: Observation, config: AppSettings) -> dict:
+    interval = interval_corrections(observation, config)
     return {
         "observation_id": observation.id,
-        "fast_correction_usd": float(
-            _selected_correction(observation, cost_basis)
-        ),
-        "fast_correction_calculated": _calculated(observation),
+        "fast_correction_usd": float(interval.amounts.fast),
+        "fast_correction_calculated": interval.calculated,
+        **interval.payload(),
     }
 
 
@@ -72,7 +74,7 @@ def _persist_interval(
     guard.assert_owned()
     locked = Observation.objects.select_for_update().get(pk=observation.pk)
     if _calculated(locked):
-        return _result(locked, config.cost_basis)
+        return _result(locked, config)
 
     apply_fast_interval(locked, interval)
     locked.save(
@@ -85,7 +87,7 @@ def _persist_interval(
     )
     rebuild_observation_suffix(locked, config, guard=guard)
     locked.refresh_from_db()
-    return _result(locked, config.cost_basis)
+    return _result(locked, config)
 
 
 def calculate_missing_fast_correction(
@@ -95,10 +97,10 @@ def calculate_missing_fast_correction(
     """Fetch and persist one exact raw-observation interval, then replay its suffix."""
 
     config = config or AppSettings.load()
-    if not config.fast_correction_enabled:
-        raise ValueError("FAST 修正当前未启用")
+    if not corrections_enabled(config):
+        raise ValueError("修正当前未启用")
     if _calculated(observation):
-        return _result(observation, config.cost_basis)
+        return _result(observation, config)
 
     with fenced_fact_write(
         [observation.account_id],
@@ -106,7 +108,7 @@ def calculate_missing_fast_correction(
     ) as guards:
         current = Observation.objects.get(pk=observation.pk)
         if _calculated(current):
-            return _result(current, config.cost_basis)
+            return _result(current, config)
         started_at = min(_interval_start(current), current.observed_at)
         with Sub2APIClient(config) as client:
             interval = fetch_fast_interval(

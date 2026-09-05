@@ -428,7 +428,7 @@ def rebuild_account(
             ],
         )
 
-    correction_prefix = FastCorrectionPrefix(account_id, config.cost_basis)
+    correction_prefix = FastCorrectionPrefix(account_id, config.cost_basis, config)
     rebuilt = 0
     for segment in segments:
         count, latest_rate = _replay_segment(

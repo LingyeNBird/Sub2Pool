@@ -238,7 +238,7 @@ def openapi_paths() -> dict:
         },
         "/v1/observations/{observation_id}/fast-correction": {
             "get": {
-                "summary": "读取 FAST 修正明细",
+                "summary": "读取修正合计明细",
                 "operationId": "getObservationFastCorrection",
                 "parameters": [
                     {
@@ -250,7 +250,7 @@ def openapi_paths() -> dict:
                 ],
                 "responses": {
                     "200": _success_response(
-                        "一个观测区间已持久化的 FAST 修正事实。",
+                        "由一个观测区间的原始请求事实按当前规则计算 FAST、长上下文与模型倍率修正。兼容保留 FAST URL。",
                         {"$ref": "#/components/schemas/FastCorrectionDetail"},
                     ),
                     "401": {"$ref": "#/components/responses/Unauthorized"},

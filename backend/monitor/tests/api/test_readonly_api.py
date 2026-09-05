@@ -7,7 +7,7 @@ from django.test import Client
 from django.utils import timezone
 
 from monitor.api_auth import API_KEY_PREFIX, hash_api_key
-from monitor.fast_correction.rules import fast_correction_rules_digest
+from monitor.billing_correction.rules import corrections_digest
 from monitor.models import (
     AccountParticipant,
     AppSettings,
@@ -80,9 +80,7 @@ def test_api_key_lifecycle_and_scope():
         observed_at=now,
         cost_basis="actual",
         fast_correction_enabled=config.fast_correction_enabled,
-        fast_correction_rules_hash=fast_correction_rules_digest(
-            config.fast_correction_rules
-        ),
+        fast_correction_rules_hash=corrections_digest(config),
         participant_total_usd=Decimal("120"),
         weekly_total_estimate_usd=Decimal("2000"),
         participant_weekly_percent=Decimal("6"),

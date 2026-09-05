@@ -121,7 +121,9 @@ async function load() {
     rows.value = observations.items;
     pagination.value = observations.pagination;
     Object.assign(summary, observations.summary);
-    fastCorrectionEnabled.value = observations.fast_correction_enabled;
+    fastCorrectionEnabled.value =
+      observations.corrections_available ??
+      observations.fast_correction_enabled;
     applySchedule(monitorSchedule);
   } catch (error) {
     message.value =
@@ -176,12 +178,11 @@ async function processFastCorrectionQueue() {
         (item) => item.id === result.observation_id,
       );
       if (current) {
-        current.fast_correction_usd = result.fast_correction_usd;
-        current.fast_correction_calculated = result.fast_correction_calculated;
+        Object.assign(current, result);
       }
     } catch (error) {
       message.value =
-        error instanceof ApiError ? error.message : "计算 FAST 修正失败";
+        error instanceof ApiError ? error.message : "计算修正合计失败";
     } finally {
       fastCorrectionActiveId.value = null;
       setFastCorrectionPending(observationId, false);

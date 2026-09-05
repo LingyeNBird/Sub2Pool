@@ -8,6 +8,9 @@ from django.shortcuts import get_object_or_404
 from .base import AdminAPIView, PageAccessAPIView, error, ok
 from ..api_auth import APIKeyAuthentication
 from ..access import visible_accounts_for, visible_participant_ids
+from ..billing_correction.domain import BillingCorrectionRules
+from ..billing_correction.observations import interval_corrections
+from ..billing_correction.rules import CORRECTION_SETTINGS, corrections_digest
 from ..fast_correction.repair import calculate_missing_fast_correction
 from ..integrations.sub2api import Sub2APIError
 from ..reporting import iso, snapshot_data
@@ -41,8 +44,8 @@ class ObservationListView(PageAccessAPIView):
         except ValueError as exc:
             return error(str(exc), 400)
         queryset = Observation.objects.select_related(
-            "manual_start_end"
-        ).prefetch_related("participant_snapshots__participant")
+            "manual_start_end", "billing_capture"
+        ).prefetch_related("participant_snapshots__participant", "fast_corrections", "billing_capture__facts")
         if account is not None:
             queryset = queryset.filter(account_id=account.fact_key)
         elif not request.user.is_staff:
@@ -83,7 +86,9 @@ class ObservationListView(PageAccessAPIView):
         passive_count = queryset.filter(raw_window__query_mode="passive").count()
         rows, pagination = paginated_rows(request, queryset)
         result = []
+        rules = BillingCorrectionRules(config)
         for item in rows:
+            correction = interval_corrections(item, config, rules=rules)
             result.append(
                 {
                     "id": item.id,
@@ -147,24 +152,10 @@ class ObservationListView(PageAccessAPIView):
                         else None
                     ),
                     "model_diagnostics": item.model_diagnostics,
-                    "fast_correction_usd": (
-                        float(
-                            item.fast_correction_actual_cost
-                            if config.cost_basis == "actual"
-                            else item.fast_correction_standard_cost
-                        )
-                        if (
-                            item.fast_correction_actual_cost
-                            if config.cost_basis == "actual"
-                            else item.fast_correction_standard_cost
-                        )
-                        is not None
-                        else None
-                    ),
-                    "fast_correction_calculated": (
-                        item.fast_correction_standard_cost is not None
-                        and item.fast_correction_actual_cost is not None
-                    ),
+                    **correction.payload(),
+                    "correction_total_usd": float(correction.amounts.total) if correction.calculated else None,
+                    "fast_correction_usd": float(correction.amounts.fast) if correction.calculated else None,
+                    "fast_correction_calculated": correction.calculated,
                     "valid_sample": item.valid_sample,
                     "sample_note": item.sample_note,
                     "rate_method": item.raw_window.get(
@@ -208,6 +199,7 @@ class ObservationListView(PageAccessAPIView):
                     else None
                 ),
                 "items": result,
+                "corrections_available": account is None or account.provider == "sub2api",
                 "fast_correction_enabled": bool(
                     account is None
                     or (
@@ -234,149 +226,73 @@ class ReadOnlyObservationListView(ObservationListView):
 
 
 class ObservationFastCorrectionDetailView(PageAccessAPIView):
-    """展示一个采样区间内已持久化的 FAST 修正事实。"""
+    """展示当前规则从原始事实计算的三项修正；旧 FAST-only 记录明确标识。"""
 
     required_page_permissions = (PagePermission.OBSERVATIONS,)
 
     def get(self, request, observation_id: int):
         config = AppSettings.load()
-        observations = Observation.objects.prefetch_related("fast_corrections")
+        observations = Observation.objects.select_related("billing_capture").prefetch_related("fast_corrections", "billing_capture__facts")
         if not request.user.is_staff:
-            observations = observations.filter(
-                account_id__in=[
-                    item.fact_key
-                    for item in visible_accounts_for(request.user)
-                ]
-            )
+            observations = observations.filter(account_id__in=[item.fact_key for item in visible_accounts_for(request.user)])
         observation = get_object_or_404(observations, pk=observation_id)
         source_account = MonitoredAccount.for_fact_key(observation.account_id)
-        if source_account is not None and source_account.provider == "cpa":
-            return error("CPA 观测不使用 Sub2API FAST 修正明细", 400)
-        details = list(observation.fast_corrections.all())
+        if observation.account_id < 0 or (source_account is not None and source_account.provider == "cpa"):
+            return error("CPA 观测不使用 Sub2API 修正明细", 400)
+        correction = interval_corrections(observation, config, include_models=True)
         visible_ids = visible_participant_ids(request.user)
-        participant_queryset = Participant.objects.filter(
-            sub2api_user_id__in=[item.sub2api_user_id for item in details],
-        )
+        participant_queryset = Participant.objects.filter(sub2api_user_id__in=correction.users)
         if visible_ids is not None:
             participant_queryset = participant_queryset.filter(id__in=visible_ids)
-        participants = {
-            item.sub2api_user_id: item for item in participant_queryset
-        }
-        if visible_ids is not None:
-            details = [
-                item
-                for item in details
-                if item.sub2api_user_id in participants
-            ]
-        user_ids = [item.sub2api_user_id for item in details]
-        user_samples = {
-            item.sub2api_user_id: item
-            for item in Sub2APIUserUsageSample.objects.filter(
-                account_id=observation.account_id,
-                observed_at=observation.observed_at,
-                sub2api_user_id__in=user_ids,
-            )
-        }
-        participants = {
-            item.sub2api_user_id: item
-            for item in participants.values()
-            if item.sub2api_user_id in user_ids
-        }
-        fast_cost_field = (
-            "fast_actual_cost"
-            if config.cost_basis == "actual"
-            else "fast_standard_cost"
-        )
-        correction_field = (
-            "actual_correction_cost"
-            if config.cost_basis == "actual"
-            else "standard_correction_cost"
-        )
-        selected_correction = (
-            observation.fast_correction_actual_cost
-            if config.cost_basis == "actual"
-            else observation.fast_correction_standard_cost
-        )
-        fast_request_count = sum(
-            item.fast_request_count for item in details
-        )
-        request_counts = [item.request_count for item in details]
-        request_count = (
-            sum(request_counts)
-            if all(value is not None for value in request_counts)
-            else None
-        )
-        fast_billed_cost = sum(
-            (getattr(item, fast_cost_field) for item in details),
-            Decimal("0"),
-        )
-        correction = selected_correction or Decimal("0")
-
+        participants = {item.sub2api_user_id: item for item in participant_queryset}
+        rows = [row for row in correction.users.values() if visible_ids is None or row.user_id in participants]
+        samples = {item.sub2api_user_id: item for item in Sub2APIUserUsageSample.objects.filter(
+            account_id=observation.account_id, observed_at=observation.observed_at,
+            sub2api_user_id__in=[row.user_id for row in rows],
+        )}
         users = []
-        for item in details:
-            sample = user_samples.get(item.sub2api_user_id)
-            participant = participants.get(item.sub2api_user_id)
-            username = sample.username if sample else ""
-            email = sample.email if sample else ""
-            user_fast_cost = getattr(item, fast_cost_field)
-            user_correction = getattr(item, correction_field)
-            users.append(
-                {
-                    "sub2api_user_id": item.sub2api_user_id,
-                    "username": username,
-                    "email": email,
-                    "display_name": (
-                        username
-                        or email
-                        or (participant.name if participant else "")
-                        or f"用户 {item.sub2api_user_id}"
-                    ),
-                    "request_count": item.request_count,
-                    "fast_request_count": item.fast_request_count,
-                    "non_fast_request_count": (
-                        max(0, item.request_count - item.fast_request_count)
-                        if item.request_count is not None
-                        else None
-                    ),
-                    "fast_billed_cost_usd": float(user_fast_cost),
-                    "correction_usd": float(user_correction),
-                    "corrected_fast_cost_usd": float(
-                        user_fast_cost + user_correction
-                    ),
-                }
-            )
-
-        return ok(
-            {
-                "observation_id": observation.id,
-                "started_at": iso(observation.fast_correction_started_at),
-                "ended_at": iso(observation.observed_at),
-                "calculated": (
-                    observation.fast_correction_standard_cost is not None
-                    and observation.fast_correction_actual_cost is not None
-                ),
-                "cost_basis": config.cost_basis,
-                "cost_basis_label": (
-                    "实际扣费" if config.cost_basis == "actual" else "标准扣费"
-                ),
-                "request_count": request_count,
-                "fast_request_count": fast_request_count,
-                "non_fast_request_count": (
-                    max(0, request_count - fast_request_count)
-                    if request_count is not None
-                    else None
-                ),
-                "fast_billed_cost_usd": float(fast_billed_cost),
-                "correction_usd": float(correction),
-                "corrected_fast_cost_usd": float(
-                    fast_billed_cost + correction
-                ),
-                "collection_error": str(
-                    observation.raw_window.get("fast_correction_error") or ""
-                ),
-                "users": users,
-            }
-        )
+        for row in sorted(rows, key=lambda row: row.user_id):
+            sample, participant = samples.get(row.user_id), participants.get(row.user_id)
+            username, email = (sample.username, sample.email) if sample else ("", "")
+            users.append({
+                "sub2api_user_id": row.user_id, "username": username, "email": email,
+                "display_name": username or email or (participant.name if participant else "") or f"用户 {row.user_id}",
+                "request_count": row.request_count, "fast_request_count": row.fast_request_count,
+                "non_fast_request_count": max(0, row.request_count - row.fast_request_count) if row.request_count is not None else None,
+                "fast_billed_cost_usd": float(row.fast_raw_cost),
+                "correction_usd": float(row.amounts.total),
+                "corrected_fast_cost_usd": float(row.fast_raw_cost + row.amounts.fast),
+                "raw_cost_usd": float(row.raw_cost) if correction.facts_complete else None,
+                "corrected_cost_usd": float(row.raw_cost + row.amounts.total) if correction.facts_complete else None,
+                "unknown_long_context_request_count": row.unknown_long_context_request_count,
+                **row.amounts.payload(),
+            })
+        request_count = sum(row.request_count for row in rows) if all(row.request_count is not None for row in rows) else None
+        if not rows and correction.request_count is None:
+            request_count = None
+        fast_count = sum(row.fast_request_count for row in rows)
+        fast_raw_cost = sum((row.fast_raw_cost for row in rows), Decimal("0"))
+        capture = getattr(observation, "billing_capture", None)
+        return ok({
+            "observation_id": observation.id,
+            "started_at": iso(capture.started_at if capture else observation.fast_correction_started_at),
+            "ended_at": iso(observation.observed_at), "calculated": correction.calculated,
+            "cost_basis": config.cost_basis,
+            "cost_basis_label": "实际扣费" if config.cost_basis == "actual" else "标准扣费",
+            "request_count": request_count, "fast_request_count": fast_count,
+            "non_fast_request_count": max(0, request_count - fast_count) if request_count is not None else None,
+            "fast_billed_cost_usd": float(fast_raw_cost),
+            "correction_usd": float(correction.amounts.total),
+            "corrected_fast_cost_usd": float(fast_raw_cost + correction.amounts.fast),
+            "raw_cost_usd": float(correction.raw_cost) if correction.raw_cost is not None else None,
+            "corrected_cost_usd": float(correction.raw_cost + correction.amounts.total) if correction.raw_cost is not None else None,
+            "collection_error": str(observation.raw_window.get("fast_correction_error") or "") if not correction.facts_complete else "",
+            "users": users, "model_details": correction.model_details,
+            "calculation_order": ["fast", "long_context", "model"],
+            "rules_digest": corrections_digest(config),
+            "rules": {name: getattr(config, name) for name in sorted(CORRECTION_SETTINGS)},
+            **correction.payload(),
+        })
 
 
 class ReadOnlyObservationFastCorrectionDetailView(

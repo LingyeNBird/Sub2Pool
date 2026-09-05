@@ -3,10 +3,10 @@ withDefaults(
   defineProps<{
     startLabel?: string;
     startTime: string;
-    startValue: string;
+    startValue?: string;
     endLabel?: string;
     endTime: string;
-    endValue: string;
+    endValue?: string;
   }>(),
   {
     startLabel: "计算起点",
@@ -22,7 +22,9 @@ withDefaults(
         <div class="timeline-start w-full max-w-64 timeline-box text-left">
           <div class="text-xs opacity-60">{{ startLabel }}</div>
           <div class="mt-1 font-semibold">{{ startTime }}</div>
-          <div class="mt-1 tabular-nums">{{ startValue }}</div>
+          <div class="mt-1 tabular-nums">
+            <slot name="start-value">{{ startValue }}</slot>
+          </div>
         </div>
         <div class="timeline-middle">
           <span
@@ -41,7 +43,9 @@ withDefaults(
         <div class="timeline-start w-full max-w-64 timeline-box text-left">
           <div class="text-xs opacity-60">{{ endLabel }}</div>
           <div class="mt-1 font-semibold">{{ endTime }}</div>
-          <div class="mt-1 tabular-nums">{{ endValue }}</div>
+          <div class="mt-1 tabular-nums">
+            <slot name="end-value">{{ endValue }}</slot>
+          </div>
         </div>
       </li>
     </ul>

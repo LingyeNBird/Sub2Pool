@@ -54,6 +54,10 @@ class Sub2APIUsageLog:
     api_key_id: int = 0
     api_key_name: str = ""
     model: str = ""
+    input_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    long_context_billing_applied: bool | None = None
 
     def selected(self, basis: str) -> Decimal:
         return self.actual_cost if basis == "actual" else self.total_cost

@@ -3,6 +3,13 @@ export interface FastCorrectionRule {
   source_multiplier: string | number;
   target_multiplier: string | number;
 }
+export interface LongContextCorrectionRule extends FastCorrectionRule {
+  threshold_tokens: number;
+}
+export interface ModelCorrectionRule {
+  model_pattern: string;
+  multiplier: string | number;
+}
 export interface CPAModelPrice {
   input: string | number;
   cached_input: string | number;
@@ -29,6 +36,8 @@ export interface AppSettingsData {
     | boolean
     | null
     | FastCorrectionRule[]
+    | LongContextCorrectionRule[]
+    | ModelCorrectionRule[]
     | CPAModelPricing
     | CPACollectorStatus;
   monitoring_enabled: boolean;
@@ -48,6 +57,11 @@ export interface AppSettingsData {
   weekly_quota_model: "time_varying" | "constant_average";
   fast_correction_enabled: boolean;
   fast_correction_rules: FastCorrectionRule[];
+  long_context_correction_enabled: boolean;
+  long_context_correction_rules: LongContextCorrectionRule[];
+  model_correction_enabled: boolean;
+  model_correction_rules: ModelCorrectionRule[];
+  correction_missing_intervals: number;
   fast_correction_rebuild_recommended: boolean;
   fast_correction_missing_intervals: number;
   initial_usd_per_percent: number;

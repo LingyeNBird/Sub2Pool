@@ -20,6 +20,7 @@ from .observations import (
     Sub2APIUserUsageSample,
 )
 from .fast_correction import ObservationFastCorrection
+from .billing_correction import ObservationBillingCapture, BillingUsageFact, APIUsageRequestFact
 from .api_usage import ParticipantAPIUsageSnapshot
 from .cpa_usage import CPAUsageEvent
 from .cpa_collector import CPACollectorState
@@ -51,6 +52,9 @@ __all__ = [
     "NotificationEvent",
     "Observation",
     "ObservationFastCorrection",
+    "ObservationBillingCapture",
+    "BillingUsageFact",
+    "APIUsageRequestFact",
     "ParticipantAPIUsageSnapshot",
     "PagePermission",
     "ACCOUNT_SCOPED_PAGE_PERMISSIONS",

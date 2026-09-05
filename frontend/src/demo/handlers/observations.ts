@@ -41,6 +41,7 @@ function observationsData(context: DemoRequestContext): ObservationListData {
           name: account.name,
         }
       : null,
+    corrections_available: account?.provider === "sub2api",
     fast_correction_enabled:
       account?.provider === "sub2api" &&
       Boolean(state.settings.fast_correction_enabled),
@@ -76,6 +77,12 @@ function fastCorrectionData(
     non_fast_request_count: totalRequests - fastRequests,
     fast_billed_cost_usd: fastCost * 2,
     correction_usd: fastCost,
+    fast_correction_usd: fastCost,
+    correction_total_usd: fastCost,
+    long_context_correction_usd: 0,
+    model_correction_usd: 0,
+    correction_facts_complete: false,
+    legacy_fast_only: true,
     corrected_fast_cost_usd: fastCost * 3,
     collection_error: "",
     users: state.participants.map((participant, index) => {
@@ -94,6 +101,10 @@ function fastCorrectionData(
         non_fast_request_count: requestCount - participantFast,
         fast_billed_cost_usd: billed,
         correction_usd: billed * 0.5,
+        fast_correction_usd: billed * 0.5,
+        correction_total_usd: billed * 0.5,
+        long_context_correction_usd: 0,
+        model_correction_usd: 0,
         corrected_fast_cost_usd: billed * 1.5,
       };
     }),

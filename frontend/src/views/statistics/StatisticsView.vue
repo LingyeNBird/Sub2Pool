@@ -147,7 +147,7 @@ onMounted(initialize);
   <CapacityBasisDialog v-if="data" ref="basisDialog" :data="data" />
   <DailyClosingBasisDialog
     ref="closingBasisDialog"
-    :fast-correction-enabled="data?.fast_correction_enabled ?? false"
+    :show-corrections="data?.account?.provider !== 'cpa'"
   />
   <APIUsageBreakdownDialog ref="apiUsageDialog" />
 </template>

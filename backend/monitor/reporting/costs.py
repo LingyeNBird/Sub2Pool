@@ -1,53 +1,38 @@
-"""周限报告使用的累计成本拆分。"""
+"""Explain selected costs with signed, locally recalculated correction terms."""
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 
+from ..billing_correction.domain import CorrectionAmounts
 from ..fast_correction.prefix import FastCorrectionPrefix
 from ..models import AppSettings, Observation
 
-
 ZERO = Decimal("0")
-CENT = Decimal("0.01")
 
 
 class FastCorrectionBreakdownPresenter:
-    """把累计成本拆成 Sub2API 原值与已保存的历史 FAST 修正。"""
-
+    # Name retained to avoid breaking consumers; this presents all corrections.
     def __init__(self, config: AppSettings, account_id: int | None):
-        # 当前开关只控制新事实采集；历史事实即使停用后也必须继续展示。
-        self.prefix = (
-            FastCorrectionPrefix(account_id, config.cost_basis)
-            if account_id
-            else None
-        )
+        self.prefix = FastCorrectionPrefix(account_id, config.cost_basis, config) if account_id else None
 
-    @staticmethod
-    def _money(value: Decimal) -> float:
-        return float(value.quantize(CENT, rounding=ROUND_HALF_UP))
-
-    def for_observation(self, observation: Observation) -> dict[str, float]:
+    def for_observation(self, observation: Observation) -> dict:
         total = max(ZERO, observation.selected_total_cost)
-        correction = (
-            self.prefix.total_between(
-                observation.attribution_started_at,
-                observation,
-            )
-            if self.prefix is not None
-            and observation.attribution_started_at is not None
-            else ZERO
-        )
-        # 重放保证修正包含在总成本中；上限保护让历史异常数据也保持 A + B = 总额。
-        correction = min(total, max(ZERO, correction))
+        amounts = CorrectionAmounts()
+        coverage = {"correction_facts_complete": True, "missing_correction_intervals": 0, "unknown_long_context_request_count": 0}
+        if self.prefix is not None and observation.attribution_started_at is not None:
+            amounts = self.prefix.breakdown_between(observation.attribution_started_at, observation)
+            coverage = self.prefix.coverage_between(observation.attribution_started_at, observation)
+        # Never clamp a negative correction; raw + signed corrections = total.
         return {
-            "sub2api_cost_usd": self._money(total - correction),
-            "fast_correction_usd": self._money(correction),
-            "total_cost_usd": self._money(total),
+            "sub2api_cost_usd": float(total - amounts.total),
+            "total_cost_usd": float(total),
+            **amounts.payload(), **coverage,
         }
 
     @staticmethod
-    def zero() -> dict[str, float]:
+    def zero() -> dict:
         return {
-            "sub2api_cost_usd": 0.0,
-            "fast_correction_usd": 0.0,
-            "total_cost_usd": 0.0,
+            "sub2api_cost_usd": 0.0, "total_cost_usd": 0.0,
+            **CorrectionAmounts().payload(),
+            "correction_facts_complete": True, "missing_correction_intervals": 0,
+            "unknown_long_context_request_count": 0,
         }

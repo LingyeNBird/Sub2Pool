@@ -11,6 +11,24 @@ import { demoIdentity, saveDemoState, type DemoState } from "../state";
 const DEMO_ANNOUNCEMENTS: Array<Omit<AnnouncementRecord, "read" | "read_at">> =
   [
     {
+      code: "sub2api-long-context-correction-2026-09",
+      title: "长上下文双倍倍率修正默认启用",
+      published_at: "2026-09-05T00:00:00Z",
+      severity: "info",
+      paragraphs: [
+        "根据科学的测算研究，发现在 OpenAI 订阅中，5.6 以及 6 系列的模型并没有双倍倍率。因此，默认为您打开了双倍倍率修正为 1。如果你在 sub2API 手动设置了双倍倍率已经为 1,那么可以前往系统设置页面，“双倍倍率修正”选项那里，将 Sub2API 双倍倍率改写成 1。在默认情况下，您不需要进行任何操作",
+      ],
+    },
+    {
+      code: "sub2api-gpt6-model-correction-2026-09",
+      title: "GPT-6 系列默认计费倍率设为 1.8",
+      published_at: "2026-09-05T00:00:00Z",
+      severity: "info",
+      paragraphs: [
+        "根据这两篇帖子的相关研究：https://linux.do/t/topic/2861126 和https://linux.do/t/topic/2860543 ，目前已将 GPT-6 系列的默认计费倍率设置成了 1.8。如果您在 sub2API 中已经设置了这一计费倍率，还请您前往系统设置的模型计费倍率设置项中，将计费倍率改成 1。 在默认情况下，您不需要进行任何操作",
+      ],
+    },
+    {
       code: "sub2api-fast-model-correction-0-1-179",
       title: "Sub2API 0.1.179 FAST 计费调整",
       published_at: "2026-08-20T00:00:00Z",

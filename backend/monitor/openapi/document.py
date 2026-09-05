@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .corrections import with_correction_schemas
 from .accounts import account_schemas
 from .common import _nullable, common_schemas, error_responses, security_schemes
 from .observations import observation_schemas
@@ -51,12 +52,12 @@ def openapi_document(
         "components": {
             "securitySchemes": security_schemes(),
             "responses": error_responses(),
-            "schemas": {
+            "schemas": with_correction_schemas({
                 **common_schemas(),
                 **account_schemas(nullable_number, nullable_string),
                 **participant_schemas(nullable_number, nullable_string),
                 **observation_schemas(nullable_number, nullable_string),
                 **statistics_schemas(nullable_number, nullable_string),
-            },
+            }),
         },
     }

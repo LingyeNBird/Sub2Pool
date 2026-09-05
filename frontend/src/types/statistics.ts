@@ -1,3 +1,4 @@
+import type { CorrectionBreakdown } from "./common";
 import type { MonitoredAccount } from "./accounts";
 import type { CostBreakdown } from "./common";
 
@@ -116,7 +117,7 @@ export interface CPAAPIKeyUsageSeries {
   unpriced_request_count: number;
   points: CPAAPIKeyUsagePoint[];
 }
-export interface APIKeyUsageItem {
+export interface APIKeyUsageItem extends CorrectionBreakdown {
   api_key_id: number | null;
   name: string;
   status: string;
@@ -124,7 +125,8 @@ export interface APIKeyUsageItem {
   participant_usage_percent: number;
   weekly_quota_percent: number;
 }
-export interface APIUsageBreakdown {
+export interface APIUsageBreakdown extends CorrectionBreakdown {
+  corrections_enabled?: boolean;
   participant_id: number;
   participant_name: string;
   sub2api_user_id: number;

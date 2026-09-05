@@ -5,15 +5,18 @@ from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.utils import timezone
+from django.db import transaction
+
+from .billing_correction.domain import BillingCorrectionRules, CorrectionAmounts
+from .billing_correction.facts import validate_interval_logs
+from .billing_correction.persistence import persist_api_usage_facts
+from .billing_correction.rules import corrections_digest, corrections_enabled
 
 from .fast_correction.constants import COST_PRECISION
-from .fast_correction.rules import (
-    FastCorrectionRuleSet,
-    fast_correction_rules_digest,
-)
 from .integrations.sub2api import Sub2APIClient
 from .models import (
     AppSettings,
+    APIUsageRequestFact,
     MonitoredAccount,
     Observation,
     Participant,
@@ -33,17 +36,6 @@ def _percentage(numerator: Decimal, denominator: Decimal | None) -> Decimal:
         PERCENT_PRECISION,
         rounding=ROUND_HALF_UP,
     )
-
-
-def _selected_log_cost(
-    item,
-    config: AppSettings,
-    rules: FastCorrectionRuleSet,
-) -> Decimal:
-    cost = item.selected(config.cost_basis)
-    if config.fast_correction_enabled and item.service_tier == "priority":
-        cost += cost * rules.correction_factor_for_model(item.model)
-    return cost.quantize(COST_PRECISION, rounding=ROUND_HALF_UP)
 
 
 def latest_cycle_observation(
@@ -72,29 +64,65 @@ def _matching_snapshots(
         attribution_started_at=observation.attribution_started_at,
         cost_basis=config.cost_basis,
         fast_correction_enabled=config.fast_correction_enabled,
-        fast_correction_rules_hash=fast_correction_rules_digest(
-            config.fast_correction_rules
-        ),
+        fast_correction_rules_hash=corrections_digest(config),
     )
 
 
-def fresh_snapshot(
-    *,
-    participant: Participant,
-    observation: Observation,
-    config: AppSettings,
-    now,
-) -> ParticipantAPIUsageSnapshot | None:
-    return (
-        _matching_snapshots(
-            participant=participant,
-            observation=observation,
-            config=config,
-        )
-        .filter(observed_at__gte=now - CACHE_INTERVAL)
-        .order_by("-observed_at", "-id")
-        .first()
-    )
+def fresh_snapshot(*, participant, observation, config, now):
+    # Age applies to upstream facts, not pricing policy. Policy changes alone
+    # must not trigger another current-week request-log download.
+    cached = ParticipantAPIUsageSnapshot.objects.filter(
+        participant=participant, account_id=observation.account_id,
+        attribution_started_at=observation.attribution_started_at,
+        raw_facts_available=True, raw_user_id=participant.sub2api_user_id,
+        observed_at__gte=now - CACHE_INTERVAL,
+    ).order_by("-observed_at", "-id").first()
+    if cached is not None:
+        logs = list(APIUsageRequestFact.objects.filter(
+            account_id=cached.account_id, user_id=cached.raw_user_id,
+            created_at__gte=cached.attribution_started_at, created_at__lt=cached.observed_at,
+        ))
+        if len(logs) == cached.raw_request_count:
+            project_snapshot(cached, logs=logs, keys=cached.raw_api_keys, observation=observation, config=config)
+            return cached
+        raise ValueError("API 用量缓存的原始事实数量不一致；未使用残缺数据重算")
+    return _matching_snapshots(participant=participant, observation=observation, config=config).filter(observed_at__gte=now - CACHE_INTERVAL).order_by("-observed_at", "-id").first()
+
+
+def project_snapshot(snapshot, *, logs, keys, observation, config):
+    names = {int(item["id"]): str(item.get("name") or "").strip() for item in keys}
+    statuses = {int(item["id"]): str(item.get("status") or "") for item in keys}
+    rules = BillingCorrectionRules(config)
+    costs = defaultdict(Decimal)
+    corrections = {}
+    total = CorrectionAmounts()
+    unknown = 0
+    for item in logs:
+        result = rules.calculate(item, config.cost_basis)
+        costs[item.api_key_id] += result.corrected_cost.quantize(COST_PRECISION, rounding=ROUND_HALF_UP)
+        corrections[item.api_key_id] = corrections.get(item.api_key_id, CorrectionAmounts()) + result.amounts
+        total += result.amounts
+        unknown += int(result.long_context_unknown)
+        if item.api_key_id and item.api_key_name:
+            names.setdefault(item.api_key_id, item.api_key_name)
+    participant_total = sum(costs.values(), ZERO)
+    weekly_total = observation.selected_total_cost * HUNDRED / observation.interval_used_percent if observation.interval_used_percent > ZERO else None
+    key_ids = sorted(set(names) | set(costs), key=lambda key: (key == 0, names.get(key, "").casefold(), key))
+    snapshot.cost_basis = config.cost_basis
+    snapshot.fast_correction_enabled = config.fast_correction_enabled
+    snapshot.fast_correction_rules_hash = corrections_digest(config)
+    snapshot.participant_total_usd = participant_total
+    snapshot.weekly_total_estimate_usd = weekly_total
+    snapshot.participant_weekly_percent = _percentage(participant_total, weekly_total)
+    snapshot.api_keys = [{
+        "api_key_id": key or None,
+        "name": names.get(key) or ("未识别或已删除的 API 密钥" if key == 0 else f"API 密钥 {key}"),
+        "status": statuses.get(key, ""), "usage_usd": float(costs[key]),
+        "participant_usage_percent": float(_percentage(costs[key], participant_total)),
+        "weekly_quota_percent": float(_percentage(costs[key], weekly_total)),
+        **corrections.get(key, CorrectionAmounts()).payload(),
+    } for key in key_ids]
+    snapshot._correction_payload = {**total.payload(), "correction_facts_complete": True, "unknown_long_context_request_count": unknown, "corrections_enabled": corrections_enabled(config)}
 
 
 def refresh_participant_api_usage(
@@ -105,83 +133,36 @@ def refresh_participant_api_usage(
     config: AppSettings,
     observed_to,
 ) -> ParticipantAPIUsageSnapshot:
-    """读取一个参与者的当前周期日志，并只保存按 API 密钥汇总的结论。"""
-
+    """Capture immutable requests once; save only a replaceable UI projection."""
     keys = client.list_user_api_keys(participant.sub2api_user_id)
     logs = client.usage_logs(
-        account_id=observation.account_id,
-        user_id=participant.sub2api_user_id,
-        started_at=observation.attribution_started_at,
-        ended_at=observed_to,
+        account_id=observation.account_id, user_id=participant.sub2api_user_id,
+        started_at=observation.attribution_started_at, ended_at=observed_to,
         timezone_name=config.timezone,
     )
-    names = {
-        int(item["id"]): str(item.get("name") or "").strip()
-        for item in keys
-    }
-    statuses = {
-        int(item["id"]): str(item.get("status") or "")
-        for item in keys
-    }
-    rules = FastCorrectionRuleSet(config.fast_correction_rules)
-    costs: defaultdict[int, Decimal] = defaultdict(Decimal)
-    for item in logs:
-        costs[item.api_key_id] += _selected_log_cost(item, config, rules)
-        if item.api_key_id and item.api_key_name:
-            names.setdefault(item.api_key_id, item.api_key_name)
-
-    participant_total = sum(costs.values(), ZERO)
-    weekly_total = (
-        observation.selected_total_cost
-        * HUNDRED
-        / observation.interval_used_percent
-        if observation.interval_used_percent > ZERO
-        else None
-    )
-    key_ids = sorted(
-        set(names) | set(costs),
-        key=lambda key_id: (
-            key_id == 0,
-            names.get(key_id, "").casefold(),
-            key_id,
-        ),
-    )
-    api_keys = [
-        {
-            "api_key_id": key_id or None,
-            "name": names.get(key_id)
-            or (
-                "未识别或已删除的 API 密钥"
-                if key_id == 0
-                else f"API 密钥 {key_id}"
-            ),
-            "status": statuses.get(key_id, ""),
-            "usage_usd": float(costs[key_id]),
-            "participant_usage_percent": float(
-                _percentage(costs[key_id], participant_total)
-            ),
-            "weekly_quota_percent": float(
-                _percentage(costs[key_id], weekly_total)
-            ),
-        }
-        for key_id in key_ids
-    ]
-    return ParticipantAPIUsageSnapshot.objects.create(
-        participant=participant,
-        observation=observation,
+    validate_interval_logs(logs, account_id=observation.account_id, user_id=participant.sub2api_user_id, started_at=observation.attribution_started_at, ended_at=observed_to)
+    # Never persist the raw API key/token, even if a future client returns it.
+    keys = [{"id": int(row["id"]), "name": str(row.get("name") or ""), "status": str(row.get("status") or "")} for row in keys]
+    snapshot = ParticipantAPIUsageSnapshot(
+        participant=participant, observation=observation,
         account_id=observation.account_id,
         attribution_started_at=observation.attribution_started_at,
-        observed_at=observed_to,
-        cost_basis=config.cost_basis,
-        fast_correction_enabled=config.fast_correction_enabled,
-        fast_correction_rules_hash=fast_correction_rules_digest(
-            config.fast_correction_rules
-        ),
-        participant_total_usd=participant_total,
-        weekly_total_estimate_usd=weekly_total,
-        participant_weekly_percent=_percentage(participant_total, weekly_total),
-        api_keys=api_keys,
+        observed_at=observed_to, raw_facts_available=True,
+        raw_request_count=len(logs), raw_user_id=participant.sub2api_user_id,
+        raw_api_keys=keys,
     )
+    project_snapshot(snapshot, logs=logs, keys=keys, observation=observation, config=config)
+    with transaction.atomic():
+        persist_api_usage_facts(observation.account_id, logs)
+        projected_keys = snapshot.api_keys
+        correction_keys = set(CorrectionAmounts().payload())
+        snapshot.api_keys = [
+            {key: value for key, value in row.items() if key not in correction_keys}
+            for row in projected_keys
+        ]
+        snapshot.save()
+        snapshot.api_keys = projected_keys
+    return snapshot
 
 
 def get_participant_api_usage(
@@ -274,4 +255,5 @@ def api_usage_snapshot_data(snapshot: ParticipantAPIUsageSnapshot) -> dict:
             snapshot.participant_weekly_percent
         ),
         "api_keys": snapshot.api_keys,
+        **getattr(snapshot, "_correction_payload", {}),
     }

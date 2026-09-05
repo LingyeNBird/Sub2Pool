@@ -53,7 +53,7 @@ export interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 14;
+  version: 15;
   clock: string;
   nextParticipantId: number;
   nextPoolId: number;
@@ -81,7 +81,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 14) return parsed;
+      if (parsed.version === 15) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }

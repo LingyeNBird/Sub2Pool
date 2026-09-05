@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal
 from typing import Iterable
 
+from ..billing_correction.facts import validate_capture
 from ..fact_utils import expected_user_digest
 from ..models import (
     Observation,
@@ -95,6 +96,7 @@ def audit_account(account_id: int) -> AuditResult:
         .prefetch_related(
             "user_samples",
             "observations__fast_corrections",
+            "observations__billing_capture__facts",
             "participant_usage_samples",
             "balance_samples",
         )
@@ -120,6 +122,13 @@ def audit_account(account_id: int) -> AuditResult:
                 point,
             )
         observation = observations[0] if observations else None
+        if observation is not None:
+            capture = getattr(observation, "billing_capture", None)
+            if capture is not None:
+                try:
+                    validate_capture(capture, observation, list(capture.facts.all()))
+                except ValueError as exc:
+                    _issue(issues, "invalid_billing_capture", str(exc), point, dimension="billing_facts")
 
         if point.window_started_at is not None and point.window_ended_at is not None:
             if point.window_started_at > point.window_ended_at:

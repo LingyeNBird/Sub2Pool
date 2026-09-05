@@ -1,33 +1,44 @@
-import type { CostBreakdown } from "@/types/common";
+import type { CorrectionBreakdown, CostBreakdown } from "@/types/common";
 
 export function formatCurrency(value: number | null | undefined): string {
   return value == null ? "—" : `$${value.toFixed(2)}`;
 }
+export function correctionTotal(
+  breakdown: CorrectionBreakdown | null | undefined,
+): number | null {
+  if (breakdown?.correction_total_usd !== undefined)
+    return breakdown.correction_total_usd;
+  return breakdown?.fast_correction_usd ?? null;
+}
+
+export function formatCorrectionCurrency(
+  value: number | null | undefined,
+): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const amount = Math.abs(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 6,
+  });
+  return `${value < 0 ? "−" : value > 0 ? "+" : ""}$${amount}`;
+}
+
 export function formatCostTerms(
   total: number | null | undefined,
   breakdown: CostBreakdown | null | undefined,
-  showFastCorrection: boolean,
+  showCorrections: boolean,
 ): string {
-  const hasHistoricalCorrection =
-    breakdown != null && Math.abs(breakdown.fast_correction_usd) >= 0.005;
-  if ((!showFastCorrection && !hasHistoricalCorrection) || !breakdown) {
+  if (!breakdown || (!showCorrections && !correctionTotal(breakdown)))
     return formatCurrency(total);
-  }
-  return `${formatCurrency(breakdown.sub2api_cost_usd)} + ${formatCurrency(
-    breakdown.fast_correction_usd,
-  )} FAST`;
+  return `${formatCurrency(breakdown.sub2api_cost_usd)} + (${formatCorrectionCurrency(correctionTotal(breakdown))} 修正合计)`;
 }
 
 export function formatCostBreakdown(
   total: number | null | undefined,
   breakdown: CostBreakdown | null | undefined,
-  showFastCorrection: boolean,
+  showCorrections: boolean,
 ): string {
-  const hasHistoricalCorrection =
-    breakdown != null && Math.abs(breakdown.fast_correction_usd) >= 0.005;
-  const showBreakdown = showFastCorrection || hasHistoricalCorrection;
-  const terms = formatCostTerms(total, breakdown, showFastCorrection);
-  return showBreakdown && breakdown
+  const terms = formatCostTerms(total, breakdown, showCorrections);
+  return breakdown && (showCorrections || correctionTotal(breakdown))
     ? `${terms} = ${formatCurrency(breakdown.total_cost_usd)}`
     : terms;
 }

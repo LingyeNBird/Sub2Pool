@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionAmount from "@/components/common/CorrectionAmount.vue";
 import { onMounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
@@ -401,24 +402,31 @@ onMounted(load);
                 "
                 class="text-xs font-normal opacity-60"
               >
-                （FAST 修正 +{{
-                  formatCurrency(account.stats.fast_correction_usd)
-                }}）
+                <CorrectionAmount
+                  :breakdown="account.stats"
+                  label="修正合计 "
+                />
               </span>
             </div>
             <div
               v-if="
                 account.provider === 'sub2api' &&
-                account.stats.account_cost_with_fast_correction_usd != null
+                account.stats.account_cost_with_correction_usd != null
               "
               class="mt-1 text-sm font-medium"
             >
-              含 FAST 修正
-              {{
-                formatCurrency(
-                  account.stats.account_cost_with_fast_correction_usd,
-                )
-              }}
+              含修正合计
+              <CorrectionAmount :breakdown="account.stats">
+                {{
+                  formatCurrency(account.stats.account_cost_with_correction_usd)
+                }}
+              </CorrectionAmount>
+              <span
+                v-if="account.stats.correction_collected_until"
+                class="mt-1 block text-xs font-normal opacity-60"
+                >修正事实截至
+                {{ dateTime(account.stats.correction_collected_until) }}</span
+              >
             </div>
           </div>
 

@@ -3,14 +3,10 @@ import { computed, ref } from "vue";
 
 import CalculationBasisHeader from "@/components/common/CalculationBasisHeader.vue";
 import CalculationBasisTimeline from "@/components/common/CalculationBasisTimeline.vue";
+import CostBreakdownValue from "@/components/common/CostBreakdownValue.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import type { DashboardData, ModelDiagnostics } from "@/types/dashboard";
-import {
-  formatCostBreakdown,
-  formatCostTerms,
-  formatCurrency,
-  formatPercent,
-} from "@/utils/formatters";
+import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 const props = defineProps<{
   data: DashboardData;
@@ -74,19 +70,25 @@ defineExpose({ open, close });
         />
         <CalculationBasisTimeline
           :start-time="dateTime(data.cycle.starts_at)"
-          :start-value="`${formatCostBreakdown(
-            0,
-            data.cycle.start_cost_breakdown,
-            data.fast_correction_enabled,
-          )} / ${formatPercent(0)}`"
           end-label="当前观测终点"
           :end-time="dateTime(data.cycle.observed_at)"
-          :end-value="`${formatCostBreakdown(
-            data.cycle.selected_total_cost,
-            data.cycle.selected_total_cost_breakdown,
-            data.fast_correction_enabled,
-          )} / 显示 ${formatPercent(data.cycle.interval_used_percent)}`"
-        />
+          ><template #start-value
+            ><CostBreakdownValue
+              :total="0"
+              :breakdown="data.cycle.start_cost_breakdown"
+              :show-corrections="data.selected_provider !== 'cpa'"
+            />
+            / {{ formatPercent(0) }}</template
+          ><template #end-value
+            ><CostBreakdownValue
+              :total="data.cycle.selected_total_cost"
+              :breakdown="data.cycle.selected_total_cost_breakdown"
+              :show-corrections="data.selected_provider !== 'cpa'"
+            />
+            / 显示
+            {{ formatPercent(data.cycle.interval_used_percent) }}</template
+          ></CalculationBasisTimeline
+        >
         <div
           v-if="data.weekly_quota_model === 'constant_average'"
           class="mt-3 rounded-box border border-base-300 p-4"
@@ -97,13 +99,12 @@ defineExpose({ open, close });
           <p
             class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
           >
-            ({{
-              formatCostTerms(
-                data.cycle.selected_total_cost,
-                data.cycle.selected_total_cost_breakdown,
-                data.fast_correction_enabled,
-              )
-            }}) ÷ {{ formatPercent(data.cycle.interval_used_percent) }} =
+            (<CostBreakdownValue
+              :total="data.cycle.selected_total_cost"
+              :breakdown="data.cycle.selected_total_cost_breakdown"
+              :show-corrections="data.selected_provider !== 'cpa'"
+              terms-only
+            />) ÷ {{ formatPercent(data.cycle.interval_used_percent) }} =
             {{ formatCurrency(data.cycle.effective_usd_per_percent) }} / 1%
           </p>
         </div>
