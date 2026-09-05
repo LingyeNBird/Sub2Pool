@@ -2,19 +2,40 @@ name: Billing corrections review
 on:
   push:
     branches: [feat/traceable-billing-corrections]
+    paths: [.github/workflows/billing-corrections-review.yml]
 permissions:
   contents: read
 jobs:
-  source-snapshot:
+  dependencies:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Archive tracked review sources
-        run: git archive --format=tar.gz HEAD > /tmp/sub2pool-source.tar.gz
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+      - name: Download locked Python wheels for local testing
+        working-directory: backend
+        run: |
+          uv export --frozen --no-emit-project --format requirements-txt > /tmp/requirements.txt
+          python -m pip download --only-binary=:all: -r /tmp/requirements.txt -d /tmp/wheels
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install locked frontend dependencies
+        working-directory: frontend
+        run: |
+          npm install -g pnpm@10
+          pnpm install --frozen-lockfile
+          tar -czf /tmp/frontend-deps.tar.gz node_modules
       - uses: actions/upload-artifact@v4
         with:
-          name: billing-corrections-source
-          path: /tmp/sub2pool-source.tar.gz
+          name: billing-corrections-test-dependencies
+          path: |
+            /tmp/wheels
+            /tmp/requirements.txt
+            /tmp/frontend-deps.tar.gz
           retention-days: 3
