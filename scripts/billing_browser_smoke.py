@@ -167,6 +167,15 @@ def smoke():
                 "checks": ["single settings card", "all three editors", "rule reorder/cancel", "multiplier validation", "real settings PATCH/local replay", "single observation column", "negative correction breakdown", "390px modal layout"],
             }, ensure_ascii=False, indent=2))
         except Exception:
+            (OUTPUT / "failure-layout.json").write_text(json.dumps(page.evaluate("""() => ({
+                viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth,
+                overflow: [...document.querySelectorAll('body *')].map(element => {
+                    const rect = element.getBoundingClientRect();
+                    return {tag: element.tagName, classes: element.className,
+                        width: rect.width, left: rect.left, right: rect.right,
+                        text: element.textContent?.slice(0, 120)};
+                }).filter(rect => rect.width && (rect.right > innerWidth + 1 || rect.left < -1))
+            })"""), ensure_ascii=False, indent=2))
             page.screenshot(path=str(OUTPUT / "failure.png"), full_page=True)
             (OUTPUT / "failure-page.txt").write_text(page.locator("body").inner_text())
             raise

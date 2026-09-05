@@ -162,7 +162,7 @@ async function handleRevokeReadOnlyAPIKey() {
 
   <fieldset
     v-if="settings && auth.isStaff"
-    class="col-span-12 columns-1 gap-6 xl:columns-2"
+    class="col-span-12 min-w-0 columns-1 gap-6 xl:columns-2"
   >
     <Sub2APIConnectionCard
       v-model:settings="settings"
