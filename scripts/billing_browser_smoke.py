@@ -45,7 +45,10 @@ def seed():
     user.set_password("Synthetic-Local-Review-2026!")
     user.save()
     for announcement in ANNOUNCEMENTS:
-        AnnouncementRead.objects.get_or_create(user=user, announcement_code=announcement.code)
+        AnnouncementRead.objects.get_or_create(
+            user=user, announcement_code=announcement.code,
+            defaults={"read_at": timezone.now()},
+        )
     config = AppSettings.load()
     config.monitoring_enabled = False
     config.weekly_quota_model = "constant_average"
@@ -87,7 +90,9 @@ def wait_for_server(url):
 def smoke():
     errors = []
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = playwright.chromium.launch(
+            executable_path=os.environ.get("BILLING_BROWSER_EXECUTABLE") or None,
+        )
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.set_default_timeout(15000)

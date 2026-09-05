@@ -95,9 +95,12 @@ class BillingCorrectionRules:
         rule = first_match(self.model_rules, log.model)
         if rule is not None:
             model_factor = Decimal(rule["multiplier"])
-        after_fast = raw + money(raw * (fast_factor - ONE))
-        after_long = after_fast + money(after_fast * (long_factor - ONE))
-        final = after_long + money(after_long * (model_factor - ONE))
+        # A rounded reduction may exceed a sub-micro-dollar input. Clamp each
+        # stage's balance, not the signed correction, so costs stay nonnegative
+        # and the three differences still telescope to final minus raw.
+        after_fast = max(ZERO, raw + money(raw * (fast_factor - ONE)))
+        after_long = max(ZERO, after_fast + money(after_fast * (long_factor - ONE)))
+        final = max(ZERO, after_long + money(after_long * (model_factor - ONE)))
         return RequestCorrection(
             amounts=CorrectionAmounts(after_fast - raw, after_long - after_fast, final - after_long),
             raw_cost=raw, corrected_cost=final, long_context_unknown=unknown,
