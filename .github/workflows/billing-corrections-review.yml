@@ -1,0 +1,20 @@
+name: Billing corrections review
+on:
+  push:
+    branches: [feat/traceable-billing-corrections]
+permissions:
+  contents: read
+jobs:
+  source-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive tracked review sources
+        run: git archive --format=tar.gz HEAD > /tmp/sub2pool-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: billing-corrections-source
+          path: /tmp/sub2pool-source.tar.gz
+          retention-days: 3
