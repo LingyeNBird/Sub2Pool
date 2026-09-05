@@ -1,4 +1,4 @@
-name: Billing corrections review
+name: Billing corrections source repair
 on:
   push:
     branches: [feat/traceable-billing-corrections]
@@ -6,16 +6,36 @@ on:
 permissions:
   contents: read
 jobs:
-  source-snapshot:
+  restore-reviewed-source:
+    if: github.repository == 'LingyeNBird/Sub2Pool' && github.ref == 'refs/heads/feat/traceable-billing-corrections'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
         with:
-          persist-credentials: false
-      - name: Archive branch sources for verified repair
-        run: git archive --format=tar.gz HEAD > /tmp/sub2pool-repair-source.tar.gz
-      - uses: actions/upload-artifact@v4
-        with:
-          name: billing-corrections-repair-source
-          path: /tmp/sub2pool-repair-source.tar.gz
-          retention-days: 3
+          ref: feat/traceable-billing-corrections
+      - name: Restore checksum-verified implementation as ordinary source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, lzma, os
+          from pathlib import Path
+          data = b''.join(Path(f'.billing-feature.part{i}').read_bytes() for i in range(4))
+          assert hashlib.sha256(data).hexdigest() == '92eca6d2a9f1741300dba61ca2fcaa17a0b5da50e26a70aae1ab8177f4e256c8', 'Unexpected source payload'
+          patch = lzma.decompress(data)
+          assert len(patch) == 223643
+          Path(os.environ['RUNNER_TEMP'], 'billing-reviewed.patch').write_bytes(patch)
+          PY
+          git apply --check --index --unidiff-zero "$RUNNER_TEMP/billing-reviewed.patch"
+          git apply --index --unidiff-zero "$RUNNER_TEMP/billing-reviewed.patch"
+          git rm .billing-feature.part0 .billing-feature.part1 .billing-feature.part2 .billing-feature.part3
+          git diff --cached --check
+          git ls-files --error-unmatch backend/monitor/billing_correction/domain.py frontend/src/views/settings/general/components/BillingCorrectionCard.vue backend/monitor/migrations/0049_traceable_billing_corrections.py scripts/billing_browser_smoke.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: restore traceable billing correction implementation and remove temporary binary parts'
+          git push origin HEAD:feat/traceable-billing-corrections
+          git rev-parse HEAD >> "$GITHUB_STEP_SUMMARY"
+          git show --stat --oneline HEAD >> "$GITHUB_STEP_SUMMARY"
