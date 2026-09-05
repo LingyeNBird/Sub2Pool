@@ -21,7 +21,6 @@ jobs:
     timeout-minutes: 20
     env:
       DJANGO_DEBUG: 'true'
-      BILLING_REVIEW_OUTPUT: ${{ runner.temp }}/billing-review
     steps:
       - uses: actions/checkout@v7
         with:
@@ -32,6 +31,8 @@ jobs:
           set -euo pipefail
           test -z "$(git ls-files '.billing-feature.part*')"
           git ls-files --error-unmatch backend/monitor/billing_correction/domain.py backend/monitor/migrations/0049_traceable_billing_corrections.py frontend/src/views/settings/general/components/BillingCorrectionCard.vue scripts/billing_browser_smoke.py
+          export BILLING_REVIEW_OUTPUT="$RUNNER_TEMP/billing-review"
+          echo "BILLING_REVIEW_OUTPUT=$BILLING_REVIEW_OUTPUT" >> "$GITHUB_ENV"
           mkdir -p "$BILLING_REVIEW_OUTPUT"
           git rev-parse HEAD > "$BILLING_REVIEW_OUTPUT/tested-commit.txt"
           git ls-tree -r HEAD > "$BILLING_REVIEW_OUTPUT/source-manifest.txt"
