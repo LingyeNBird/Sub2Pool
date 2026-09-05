@@ -1,6 +1,8 @@
 name: Billing corrections browser regression
 
 on:
+  push:
+    branches: [feat/traceable-billing-corrections]
   pull_request:
     branches: [main]
   workflow_dispatch:
