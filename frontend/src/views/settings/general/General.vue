@@ -10,6 +10,7 @@ import DatabaseTransferCard from "./components/DatabaseTransferCard.vue";
 import CPAConnectionCard from "./components/CPAConnectionCard.vue";
 import DataMaintenanceCard from "./components/DataMaintenanceCard.vue";
 import EmailServiceCard from "./components/EmailServiceCard.vue";
+import ResearchCard from "./components/ResearchCard.vue";
 import BillingCorrectionCard from "./components/BillingCorrectionCard.vue";
 import LoginSecurityCard from "./components/LoginSecurityCard.vue";
 import ReadOnlyAPIKeyCard from "./components/ReadOnlyAPIKeyCard.vue";
@@ -204,6 +205,7 @@ async function handleRevokeReadOnlyAPIKey() {
       :saving="saving === 'billing-correction'"
       :save="saveBillingCorrection"
     />
+    <ResearchCard :demo="demoMode" />
     <SamplingStrategyCard
       v-model:settings="settings"
       :saving="saving === 'sampling'"

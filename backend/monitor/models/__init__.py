@@ -74,3 +74,5 @@ __all__ = [
     "PERCENT_VALIDATORS",
     "validate_service_url",
 ]
+
+from .research import ResearchSettings, ResearchRequestComponents

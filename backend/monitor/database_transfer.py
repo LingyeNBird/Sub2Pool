@@ -236,6 +236,39 @@ def _install_import_guard(
             now,
         ),
     )
+    # Always revoke consent and the copied schedule. Preserve a usable identity
+    # for deduplication/withdrawal on same-key restores, but a different SECRET_KEY
+    # cannot decrypt it. Clear only that unusable delivery identity/state; never
+    # try to withdraw from the source installation under a newly generated key.
+    if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='monitor_researchsettings'").fetchone():
+        from .research.transport import DeliveryError, decode_identity_seed
+
+        source.execute("""
+            UPDATE monitor_researchsettings SET enabled=0, consent_hash='',
+                consent_at=NULL, config_revision=config_revision+1,
+                lease_token='', lease_until=NULL, next_run_at=NULL,
+                summary='{}', last_computed_at=NULL, failures=0,
+                last_status='disabled', last_error=''
+        """)
+        for identity_id, encrypted, sent_endpoint in source.execute(
+            "SELECT id, identity_encrypted, last_sent_endpoint FROM monitor_researchsettings"
+        ).fetchall():
+            if encrypted:
+                try:
+                    decode_identity_seed(encrypted)
+                except DeliveryError:
+                    pass
+                else:
+                    continue
+            notice = (
+                "导入的科研签名身份不可用，已重置本地发送状态；重新授权后将创建新身份。"
+                "旧贡献未自动撤回，请在原实例撤回，或使用原密钥和备份恢复后撤回。"
+            ) if encrypted or sent_endpoint else ""
+            source.execute("""
+                UPDATE monitor_researchsettings SET identity_encrypted='',
+                    report_revision=0, last_sent_at=NULL, last_sent_hash='',
+                    last_sent_endpoint='', last_error=? WHERE id=?
+            """, (notice, identity_id))
     source.commit()
     return staged_token
 

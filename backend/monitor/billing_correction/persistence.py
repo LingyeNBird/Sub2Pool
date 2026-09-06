@@ -27,6 +27,9 @@ def persist_capture(observation, interval) -> None:
     for row in rows:
         row.capture = capture
     BillingUsageFact.objects.bulk_create(rows, batch_size=500)
+    # No separate upstream calls and no research facts when consent is off.
+    from ..research.capture import capture_components
+    capture_components(capture, logs)
 
 
 @transaction.atomic
