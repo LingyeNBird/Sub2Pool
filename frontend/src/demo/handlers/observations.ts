@@ -1,3 +1,4 @@
+import { correctionCalculated } from "@/utils/corrections";
 import type {
   FastCorrectionCalculateResult,
   FastCorrectionDetail,
@@ -18,6 +19,8 @@ function observationsData(context: DemoRequestContext): ObservationListData {
     state.monitoredAccounts[0];
   let items = [...state.observations].reverse().map((item) => ({
     ...item,
+    correction_calculated: item.correction_calculated ?? false,
+    legacy_fast_only: item.legacy_fast_only ?? item.fast_correction_calculated,
     account_id: account?.external_account_id ?? item.account_id,
   }));
   if (account?.provider === "cpa") items = [];
@@ -69,7 +72,7 @@ function fastCorrectionData(
     observation_id: observation.id,
     started_at: observation.interval_cost_started_at,
     ended_at: observation.observed_at,
-    calculated: true,
+    calculated: observation.correction_calculated ?? false,
     cost_basis: "actual",
     cost_basis_label: "实际扣费",
     request_count: totalRequests,
@@ -81,8 +84,10 @@ function fastCorrectionData(
     correction_total_usd: fastCost,
     long_context_correction_usd: 0,
     model_correction_usd: 0,
-    correction_facts_complete: false,
-    legacy_fast_only: true,
+    correction_calculated: observation.correction_calculated ?? false,
+    correction_facts_complete: observation.correction_facts_complete ?? false,
+    legacy_fast_only:
+      observation.legacy_fast_only ?? observation.fast_correction_calculated,
     corrected_fast_cost_usd: fastCost * 3,
     collection_error: "",
     users: state.participants.map((participant, index) => {
@@ -126,17 +131,35 @@ export function handleObservations(
       (item) => item.id === Number(fastCalculateMatch[1]),
     );
     if (!observation) return fail("观测不存在", 404);
-    if (!observation.fast_correction_calculated) {
-      observation.fast_correction_usd = Number(
+    // Demo captures only simulate status; they never query Sub2API.
+    if (
+      !correctionCalculated({
+        ...observation,
+        correction_calculated: observation.correction_calculated ?? false,
+      })
+    ) {
+      observation.fast_correction_usd ??= Number(
         (observation.selected_total_cost * 0.036).toFixed(6),
       );
       observation.fast_correction_calculated = true;
+      observation.correction_calculated = true;
+      observation.correction_facts_complete = true;
+      observation.legacy_fast_only = false;
+      observation.correction_total_usd = observation.fast_correction_usd;
+      observation.long_context_correction_usd = 0;
+      observation.model_correction_usd = 0;
       saveDemoState(state);
     }
     return ok({
       observation_id: observation.id,
       fast_correction_usd: observation.fast_correction_usd ?? 0,
       fast_correction_calculated: true,
+      correction_calculated: true,
+      correction_facts_complete: true,
+      legacy_fast_only: false,
+      correction_total_usd: observation.correction_total_usd,
+      long_context_correction_usd: observation.long_context_correction_usd,
+      model_correction_usd: observation.model_correction_usd,
     } satisfies FastCorrectionCalculateResult);
   }
   const fastMatch = /^observations\/(\d+)\/fast-correction$/.exec(pathname);

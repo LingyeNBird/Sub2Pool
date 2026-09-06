@@ -10,7 +10,10 @@ def with_correction_schemas(schemas: dict) -> dict:
         )
     }
     coverage = {
-        "correction_calculated": {"type": "boolean"},
+        "correction_calculated": {
+            "type": "boolean",
+            "description": "此区间已有原始请求捕获并按当前三类规则计算；仅有旧 FAST 汇总时为 false，可由管理员定向补算。未知模型/上下文判断字段另行警告。",
+        },
         "correction_facts_complete": {"type": "boolean"},
         "legacy_fast_only": {"type": "boolean"},
         "missing_correction_intervals": {"type": "integer", "minimum": 0},

@@ -52,8 +52,9 @@ def interval_corrections(observation, config, *, rules=None, include_models=Fals
     if capture is None:
         actual = config.cost_basis == "actual"
         value = observation.fast_correction_actual_cost if actual else observation.fast_correction_standard_cost
-        result.calculated = observation.fast_correction_actual_cost is not None and observation.fast_correction_standard_cost is not None
-        result.legacy_fast_only = result.calculated
+        # A frozen FAST subtotal does not prove the two new corrections were
+        # calculated. Keep that subtotal readable, but offer targeted backfill.
+        result.legacy_fast_only = observation.fast_correction_actual_cost is not None and observation.fast_correction_standard_cost is not None
         result.amounts = CorrectionAmounts(fast=value or ZERO)
         result.request_count = observation.fast_correction_request_count
         for row in observation.fast_corrections.all():

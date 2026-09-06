@@ -8,6 +8,14 @@ import type { FastCorrectionDetail, Observation } from "@/types/observations";
 import { formatCurrency } from "@/utils/formatters";
 import type { DialogController } from "../types";
 
+defineProps<{
+  editable: boolean;
+  pendingIds: Set<number>;
+  activeId: number | null;
+  calculationErrors: Record<number, string>;
+}>();
+const emit = defineEmits<{ calculate: [row: Observation] }>();
+const selected = ref<Observation | null>(null);
 const dialog = ref<HTMLDialogElement | null>(null);
 const data = ref<FastCorrectionDetail | null>(null);
 const loading = ref(false);
@@ -24,6 +32,7 @@ function requestCount(value: number | null) {
   return value === null ? "未知" : String(value);
 }
 async function open(observation: Observation) {
+  selected.value = observation;
   const version = ++requestVersion;
   data.value = null;
   message.value = "";
@@ -46,7 +55,16 @@ function close() {
   ++requestVersion;
   dialog.value?.close();
 }
-defineExpose<DialogController<[Observation]>>({ open, close });
+async function refresh(observationId: number) {
+  if (dialog.value?.open && selected.value?.id === observationId) {
+    await open(selected.value);
+  }
+}
+defineExpose<DialogController<[Observation]> & { refresh: typeof refresh }>({
+  open,
+  close,
+  refresh,
+});
 </script>
 
 <template>
@@ -109,6 +127,37 @@ defineExpose<DialogController<[Observation]>>({ open, close });
               {{ formatCurrency(data.corrected_cost_usd) }}
             </div>
           </div>
+        </div>
+        <div v-if="!data.correction_facts_complete" class="mb-4 space-y-2">
+          <p class="text-sm opacity-70">
+            修正合计未计算完整。管理员可只从上游补齐本区间的原始请求，再计算三项修正；失败不会覆盖已有数据。
+          </p>
+          <p
+            v-if="calculationErrors[data.observation_id]"
+            class="text-sm text-error"
+            role="alert"
+          >
+            {{ calculationErrors[data.observation_id] }}
+          </p>
+          <button
+            v-if="editable && selected && selected.provider !== 'cpa'"
+            type="button"
+            class="btn btn-primary btn-sm"
+            :disabled="pendingIds.has(data.observation_id)"
+            @click="emit('calculate', selected)"
+          >
+            <span
+              v-if="activeId === data.observation_id"
+              class="loading loading-xs loading-spinner"
+            ></span>
+            {{
+              activeId === data.observation_id
+                ? "计算中"
+                : pendingIds.has(data.observation_id)
+                  ? "等待中"
+                  : "从上游补算此区间"
+            }}
+          </button>
         </div>
         <CorrectionDetails :breakdown="data" />
         <p class="mt-3 text-sm opacity-65">

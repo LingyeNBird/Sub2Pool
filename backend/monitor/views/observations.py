@@ -1,4 +1,4 @@
-"""观测记录查询、FAST 明细与人工重放控制接口。"""
+"""观测记录查询、修正合计明细、区间补算与人工重放控制接口。"""
 
 from decimal import Decimal
 
@@ -154,8 +154,10 @@ class ObservationListView(PageAccessAPIView):
                     "model_diagnostics": item.model_diagnostics,
                     **correction.payload(),
                     "correction_total_usd": float(correction.amounts.total) if correction.calculated else None,
-                    "fast_correction_usd": float(correction.amounts.fast) if correction.calculated else None,
-                    "fast_correction_calculated": correction.calculated,
+                    "fast_correction_usd": float(correction.amounts.fast) if correction.calculated or correction.legacy_fast_only else None,
+                    # Retain the legacy field's FAST-only meaning. The total
+                    # has its own completeness flag and can still need backfill.
+                    "fast_correction_calculated": correction.calculated or correction.legacy_fast_only,
                     "valid_sample": item.valid_sample,
                     "sample_note": item.sample_note,
                     "rate_method": item.raw_window.get(
@@ -304,7 +306,7 @@ class ReadOnlyObservationFastCorrectionDetailView(
     http_method_names = ["get", "head", "options"]
 
 class ObservationFastCorrectionCalculateView(AdminAPIView):
-    """只补算一条缺失 FAST 事实的原始采样区间。"""
+    """从上游补齐单条缺失/旧 FAST-only 区间的原始请求并重算三项修正。"""
 
     def post(self, _request, observation_id: int):
         config = AppSettings.load()

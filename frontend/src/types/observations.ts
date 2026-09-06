@@ -64,7 +64,8 @@ export interface FastCorrectionUserDetail extends CorrectionBreakdown {
 export interface FastCorrectionCalculateResult extends CorrectionBreakdown {
   observation_id: number;
   fast_correction_usd: number;
-  fast_correction_calculated: true;
+  fast_correction_calculated: boolean;
+  correction_calculated?: boolean;
 }
 export interface FastCorrectionDetail extends CorrectionBreakdown {
   raw_cost_usd?: number | null;

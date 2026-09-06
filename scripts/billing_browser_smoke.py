@@ -12,7 +12,13 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 import urllib.request
+from urllib.parse import parse_qs, urlparse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = Path(os.environ.get("BILLING_REVIEW_OUTPUT", ROOT / "billing-review-output")).resolve()
@@ -26,20 +32,76 @@ django.setup()
 from django.core.management import call_command  # noqa: E402
 from django.contrib.auth import get_user_model  # noqa: E402
 from django.utils import timezone  # noqa: E402
-from monitor.models import AppSettings, Observation, AnnouncementRead  # noqa: E402
+from monitor.models import AppSettings, Observation, AnnouncementRead, ObservationBillingCapture, BillingUsageFact  # noqa: E402
 from monitor.tests.helpers import create_monitored_account, create_participant  # noqa: E402
 from monitor.tests.billing_correction.test_corrections import log  # noqa: E402
 from monitor.fast_correction.domain import aggregate_fast_logs  # noqa: E402
 from monitor.fast_correction.persistence import apply_fast_interval  # noqa: E402
 from monitor.fast_correction.rules import FastCorrectionRuleSet  # noqa: E402
 from monitor.replay import rebuild_account  # noqa: E402
+from monitor.secrets import encrypt_secret  # noqa: E402
 from monitor.announcements import ANNOUNCEMENTS  # noqa: E402
-from datetime import timedelta  # noqa: E402
+from datetime import datetime, timedelta  # noqa: E402
 from decimal import Decimal as D  # noqa: E402
 from playwright.sync_api import sync_playwright, expect  # noqa: E402
 
 
-def seed():
+UPSTREAM = {"rows": [], "calls": [], "fail_next": False}
+SEED_IDS = {}
+
+
+class SyntheticUpstream(BaseHTTPRequestHandler):
+    """Only a local read-only usage API; never forwards requests anywhere."""
+    def do_GET(self):
+        query = parse_qs(urlparse(self.path).query)
+        path = urlparse(self.path).path
+        UPSTREAM["calls"].append({"path": path, "query": query})
+        if path != "/api/v1/admin/usage" or self.headers.get("x-api-key") != "Synthetic-Sub2API-Local-Only":
+            self.send_json(400, {"message": "Unexpected synthetic upstream request"})
+            return
+        if UPSTREAM["fail_next"]:
+            UPSTREAM["fail_next"] = False
+            self.send_json(503, {"message": "Synthetic upstream outage"})
+            return
+        zone = ZoneInfo(query["timezone"][0])
+        rows = [row for row in UPSTREAM["rows"]
+                if query["start_date"][0] <= datetime.fromisoformat(row["created_at"]).astimezone(zone).date().isoformat() <= query["end_date"][0]]
+        self.send_json(200, {"code": 0, "data": {
+            "items": rows, "page": 1, "pages": 1,
+            "total": len(rows), "page_size": int(query["page_size"][0]),
+        }})
+
+    def send_json(self, status, payload):
+        body = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args):
+        pass  # No headers or synthetic credentials in evidence logs.
+
+
+def database_snapshot():
+    # Playwright runs an event loop on its thread. Keep ORM checks on a separate
+    # synchronous connection instead of disabling Django's async-safety guard.
+    def read():
+        from django.db import connections
+        try:
+            return {
+                "captures": list(ObservationBillingCapture.objects.values_list("observation_id", flat=True)),
+                "facts": BillingUsageFact.objects.count(),
+                "observations": {row.id: {"cost": row.selected_total_cost, "fast": row.fast_correction_actual_cost}
+                                 for row in Observation.objects.all()},
+            }
+        finally:
+            connections.close_all()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(read).result()
+
+
+def seed(upstream_url):
     call_command("migrate", verbosity=0)
     user, _ = get_user_model().objects.get_or_create(username="billing-reviewer", defaults={"is_staff": True, "is_superuser": True})
     user.set_password("Synthetic-Local-Review-2026!")
@@ -51,6 +113,8 @@ def seed():
         )
     config = AppSettings.load()
     config.monitoring_enabled = False
+    config.sub2api_base_url = upstream_url
+    config.sub2api_admin_token_encrypted = encrypt_secret("Synthetic-Sub2API-Local-Only")
     config.weekly_quota_model = "constant_average"
     config.save()
     create_monitored_account()
@@ -74,6 +138,26 @@ def seed():
         )
         apply_fast_interval(observation, interval)
         observation.save()
+        SEED_IDS[index] = observation.id
+        raw = interval.logs[0]
+        UPSTREAM["rows"].append({
+            "id": raw.id, "account_id": raw.account_id, "user_id": raw.user_id,
+            "created_at": raw.created_at.isoformat(), "model": raw.model,
+            "service_tier": raw.service_tier, "total_cost": str(raw.total_cost),
+            "actual_cost": str(raw.actual_cost), "input_tokens": raw.input_tokens,
+            "cache_creation_tokens": raw.cache_creation_tokens, "cache_read_tokens": raw.cache_read_tokens,
+            "long_context_billing_applied": raw.long_context_billing_applied,
+            "api_key_id": raw.api_key_id, "api_key": {"name": raw.api_key_name},
+        })
+        if index in (2, 3):
+            # Real pre-upgrade states: old FAST subtotal and completely missing.
+            ObservationBillingCapture.objects.filter(observation=observation).delete()
+            if index == 3:
+                observation.fast_corrections.all().delete()
+                Observation.objects.filter(pk=observation.id).update(
+                    fast_correction_started_at=None, fast_correction_actual_cost=None,
+                    fast_correction_standard_cost=None, fast_correction_request_count=None,
+                )
     rebuild_account(7, config)
 
 
@@ -161,38 +245,91 @@ def smoke():
             page.set_viewport_size({"width": 390, "height": 844})
             page.screenshot(path=str(OUTPUT / "observation-corrections-mobile.png"))
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+            dialog.locator(".modal-action").get_by_role("button", name="关闭", exact=True).click()
+            page.set_viewport_size({"width": 1440, "height": 1000})
+            expect(table.get_by_role("button", name="未计算", exact=True)).to_have_count(2)
+            legacy_row = table.locator("tbody tr").filter(has=page.get_by_role("button", name="已有明细", exact=True))
+            expect(legacy_row).to_have_count(1)
+            # The real backend makes a failing HTTP read; old data must survive.
+            UPSTREAM["fail_next"] = True
+            with page.expect_response(lambda response: response.url.endswith(f"/{SEED_IDS[2]}/fast-correction/calculate")) as failed:
+                legacy_row.get_by_role("button", name="未计算", exact=True).click()
+            assert failed.value.status == 502
+            expect(page.get_by_text(re.compile("Synthetic upstream outage"))).to_be_visible()
+            expect(legacy_row.get_by_role("button", name="未计算", exact=True)).to_be_enabled()
+            snapshot = database_snapshot()
+            assert SEED_IDS[2] not in snapshot["captures"]
+            assert snapshot["observations"][SEED_IDS[2]]["fast"] == 25
+            legacy_row.get_by_role("button", name="已有明细", exact=True).click()
+            repair = dialog.get_by_role("button", name="从上游补算此区间", exact=True)
+            expect(repair).to_be_visible()
+            latest_before = snapshot["observations"][SEED_IDS[6]]["cost"]
+            with page.expect_response(lambda response: response.url.endswith(f"/{SEED_IDS[2]}/fast-correction/calculate")) as repaired:
+                repair.click()
+            assert repaired.value.status == 200
+            assert repaired.value.json()["data"]["correction_total_usd"] == -37.5
+            expect(dialog.get_by_text("−$37.50", exact=True).first).to_be_visible()
+            expect(dialog.get_by_role("button", name="从上游补算此区间", exact=True)).to_have_count(0)
+            page.screenshot(path=str(OUTPUT / "legacy-interval-backfilled.png"))
+            assert database_snapshot()["observations"][SEED_IDS[6]]["cost"] == latest_before - D("62.5")
+            dialog.locator(".modal-action").get_by_role("button", name="关闭", exact=True).click()
+            expect(table.get_by_role("button", name="未计算", exact=True)).to_have_count(1)
+            with page.expect_response(lambda response: response.url.endswith(f"/{SEED_IDS[3]}/fast-correction/calculate")) as new_interval:
+                table.get_by_role("button", name="未计算", exact=True).click()
+            assert new_interval.value.status == 200
+            expect(table.get_by_role("button", name="未计算", exact=True)).to_have_count(0)
+            expect(page.get_by_text("已补算 1 个区间的修正合计，并更新相关结论", exact=True)).to_be_visible()
+            expect(table.locator("tbody tr")).to_have_count(6)
+            snapshot = database_snapshot()
+            assert len(snapshot["captures"]) == snapshot["facts"] == 6
+            assert len(UPSTREAM["calls"]) == 3, UPSTREAM["calls"]
+            assert all(call["path"] == "/api/v1/admin/usage" for call in UPSTREAM["calls"])
+            page.screenshot(path=str(OUTPUT / "all-intervals-backfilled.png"))
             assert not errors, errors
+            (OUTPUT / "upstream-read-evidence.json").write_text(json.dumps(UPSTREAM["calls"], ensure_ascii=False, indent=2))
             (OUTPUT / "browser-results.json").write_text(json.dumps({
-                "passed": True, "page_errors": errors,
-                "checks": ["single settings card", "all three editors", "rule reorder/cancel", "multiplier validation", "real settings PATCH/local replay", "single observation column", "negative correction breakdown", "390px modal layout"],
+                "passed": True, "page_errors": errors, "upstream_read_count": len(UPSTREAM["calls"]),
+                "checks": ["single settings card", "all three editors", "rule reorder/cancel", "multiplier validation", "real settings PATCH/local replay", "single observation column", "negative correction breakdown", "390px modal layout", "legacy FAST-only uncalculated link", "failed upstream read preserves data", "detail backfill and retry", "new missing interval backfill", "suffix refresh", "only local read-only usage endpoint"],
             }, ensure_ascii=False, indent=2))
         except Exception:
-            (OUTPUT / "failure-layout.json").write_text(json.dumps(page.evaluate("""() => ({
-                viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth,
-                overflow: [...document.querySelectorAll('body *')].map(element => {
-                    const rect = element.getBoundingClientRect();
-                    return {tag: element.tagName, classes: element.className,
-                        width: rect.width, left: rect.left, right: rect.right,
-                        text: element.textContent?.slice(0, 120)};
-                }).filter(rect => rect.width && (rect.right > innerWidth + 1 || rect.left < -1))
-            })"""), ensure_ascii=False, indent=2))
-            page.screenshot(path=str(OUTPUT / "failure.png"), full_page=True)
-            (OUTPUT / "failure-page.txt").write_text(page.locator("body").inner_text())
+            # Save the real assertion/navigation failure even if Chromium has
+            # lost its execution context while collecting screenshots.
+            (OUTPUT / "failure.txt").write_text(traceback.format_exc())
+            try:
+                (OUTPUT / "failure-layout.json").write_text(json.dumps(page.evaluate("""() => ({
+                    viewport: innerWidth, scrollWidth: document.documentElement.scrollWidth,
+                    overflow: [...document.querySelectorAll('body *')].map(element => {
+                        const rect = element.getBoundingClientRect();
+                        return {tag: element.tagName, classes: element.className,
+                            width: rect.width, left: rect.left, right: rect.right,
+                            text: element.textContent?.slice(0, 120)};
+                    }).filter(rect => rect.width && (rect.right > innerWidth + 1 || rect.left < -1))
+                })"""), ensure_ascii=False, indent=2))
+                page.screenshot(path=str(OUTPUT / "failure.png"), full_page=True)
+                (OUTPUT / "failure-page.txt").write_text(page.locator("body").inner_text())
+            except Exception:
+                (OUTPUT / "diagnostic-failure.txt").write_text(traceback.format_exc())
             raise
         finally:
             browser.close()
 
 
 if __name__ == "__main__":
-    seed()
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), SyntheticUpstream)
+    worker = Thread(target=upstream.serve_forever, daemon=True)
+    worker.start()
     processes = []
     try:
+        seed(f"http://127.0.0.1:{upstream.server_port}")
         processes.append(subprocess.Popen([sys.executable, "manage.py", "runserver", "127.0.0.1:8000", "--noreload"], cwd=ROOT / "backend", stdout=open(OUTPUT / "django.log", "w"), stderr=subprocess.STDOUT))
         processes.append(subprocess.Popen(["node_modules/.bin/vite", "--host", "127.0.0.1"], cwd=ROOT / "frontend", stdout=open(OUTPUT / "vite.log", "w"), stderr=subprocess.STDOUT))
         wait_for_server("http://127.0.0.1:8000/api/auth/client-config")
         wait_for_server("http://127.0.0.1:5173/login")
         smoke()
     finally:
+        upstream.shutdown()
+        upstream.server_close()
+        worker.join(timeout=5)
         for process in processes:
             process.terminate()
         for process in processes:

@@ -3,6 +3,7 @@ import PaginationControls from "@/components/common/PaginationControls.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import type { PaginationMeta } from "@/types/common";
 import type { Observation } from "@/types/observations";
+import { correctionCalculated } from "@/utils/corrections";
 import {
   correctionTotal,
   formatCorrectionCurrency,
@@ -234,7 +235,7 @@ function isAtOrAfter(row: Observation, start: Observation) {
                 </td>
                 <td v-if="fastCorrectionEnabled">
                   <button
-                    v-if="row.fast_correction_calculated"
+                    v-if="correctionCalculated(row)"
                     type="button"
                     class="link cursor-pointer font-medium tabular-nums link-hover"
                     @click="emit('fastCorrectionDetail', row)"
@@ -267,6 +268,15 @@ function isAtOrAfter(row: Observation, start: Observation) {
                     }}
                   </button>
                   <span v-else class="opacity-60">未计算</span>
+                  <button
+                    v-if="!correctionCalculated(row) && row.legacy_fast_only"
+                    type="button"
+                    class="ml-2 link text-xs link-hover"
+                    title="查看已保存的旧 FAST 明细；修正合计尚未完整计算"
+                    @click="emit('fastCorrectionDetail', row)"
+                  >
+                    已有明细
+                  </button>
                 </td>
                 <td>{{ formatPercent(row.delta_percent) }}</td>
                 <td>{{ formatCurrency(row.sample_usd_per_percent) }}</td>
