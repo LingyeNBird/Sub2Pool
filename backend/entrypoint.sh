@@ -12,14 +12,17 @@ python manage.py runmonitor &
 monitor_pid=$!
 python manage.py runcpacollector &
 collector_pid=$!
+python manage.py runresearch &
+research_pid=$!
 gunicorn pinche.wsgi:application --bind 0.0.0.0:8000 --workers 1 --threads 4 --timeout 120 --access-logfile - --error-logfile - &
 web_pid=$!
 
 shutdown() {
     trap - TERM INT
-    kill -TERM "$monitor_pid" "$collector_pid" "$web_pid" 2>/dev/null || true
+    kill -TERM "$monitor_pid" "$collector_pid" "$research_pid" "$web_pid" 2>/dev/null || true
     wait "$monitor_pid" 2>/dev/null || true
     wait "$collector_pid" 2>/dev/null || true
+    wait "$research_pid" 2>/dev/null || true
     wait "$web_pid" 2>/dev/null || true
 }
 

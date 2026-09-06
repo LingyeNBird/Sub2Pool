@@ -1,0 +1,851 @@
+{
+  "synthetic_only": true,
+  "method": "log-capacity-loco/1",
+  "method_digest": "101fda3561b057ec1d44036b5a900843ee407a36b464fc20a589a67bc1780437",
+  "seeds_per_scenario": 5,
+  "cycles_per_simulation": 5,
+  "blocks_per_cycle": 20,
+  "warning": "This benchmark tests a deliberately specified generator; it does not calibrate causal probabilities on real OpenAI subscriptions.",
+  "rows": [
+    {
+      "truth": "unchanged",
+      "drift": 0.025,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "unchanged",
+      "winner_support": 0.56933594
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.025,
+      "seed": 2,
+      "status": "drift_sensitive",
+      "winner": null,
+      "winner_support": 0.0
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.025,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "unchanged",
+      "winner_support": 0.82910156
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.025,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "unchanged",
+      "winner_support": 0.7578125
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.025,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "unchanged",
+      "winner_support": 0.69726562
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.1,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 0.33984375
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.1,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 0.59765625
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.1,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "unchanged",
+      "winner_support": 0.640625
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.1,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "unchanged",
+      "winner_support": 0.91699219
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.1,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "unchanged",
+      "winner_support": 0.80566406
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.3,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "unchanged",
+      "winner_support": 0.35742188
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.3,
+      "seed": 2,
+      "status": "drift_sensitive",
+      "winner": null,
+      "winner_support": 0.0
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.3,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "unchanged",
+      "winner_support": 0.66699219
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.3,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "unchanged",
+      "winner_support": 0.62988281
+    },
+    {
+      "truth": "unchanged",
+      "drift": 0.3,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "unchanged",
+      "winner_support": 0.99511719
+    },
+    {
+      "truth": "global",
+      "drift": 0.025,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.78417969
+    },
+    {
+      "truth": "global",
+      "drift": 0.025,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "global",
+      "drift": 0.025,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.87890625
+    },
+    {
+      "truth": "global",
+      "drift": 0.025,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.99804688
+    },
+    {
+      "truth": "global",
+      "drift": 0.025,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "global",
+      "drift": 0.1,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.71679688
+    },
+    {
+      "truth": "global",
+      "drift": 0.1,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.828125
+    },
+    {
+      "truth": "global",
+      "drift": 0.1,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.93554688
+    },
+    {
+      "truth": "global",
+      "drift": 0.1,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "global",
+      "drift": 0.1,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.90234375
+    },
+    {
+      "truth": "global",
+      "drift": 0.3,
+      "seed": 1,
+      "status": "drift_sensitive",
+      "winner": null,
+      "winner_support": 0.0
+    },
+    {
+      "truth": "global",
+      "drift": 0.3,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "mixed",
+      "winner_support": 0.73046875
+    },
+    {
+      "truth": "global",
+      "drift": 0.3,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.98046875
+    },
+    {
+      "truth": "global",
+      "drift": 0.3,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.89160156
+    },
+    {
+      "truth": "global",
+      "drift": 0.3,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.98144531
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.025,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.025,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.025,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.025,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.025,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.1,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.1,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 0.52636719
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.1,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 0.99609375
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.1,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.1,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 0.99902344
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.3,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 0.66210938
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.3,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "mixed",
+      "winner_support": 0.53613281
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.3,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 0.88671875
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.3,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 0.55175781
+    },
+    {
+      "truth": "cache_read",
+      "drift": 0.3,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 0.98828125
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.025,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.025,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.025,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 0.92871094
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.025,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.025,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 0.99316406
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.1,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 0.99902344
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.1,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.1,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 0.99707031
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.1,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.1,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.3,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 0.95117188
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.3,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.3,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 0.95605469
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.3,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 0.92871094
+    },
+    {
+      "truth": "cache_creation",
+      "drift": 0.3,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "cache_creation",
+      "winner_support": 0.97460938
+    },
+    {
+      "truth": "output",
+      "drift": 0.025,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "output",
+      "drift": 0.025,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "output",
+      "drift": 0.025,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "output",
+      "drift": 0.025,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 0.984375
+    },
+    {
+      "truth": "output",
+      "drift": 0.025,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 0.99121094
+    },
+    {
+      "truth": "output",
+      "drift": 0.1,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 0.99804688
+    },
+    {
+      "truth": "output",
+      "drift": 0.1,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 0.56542969
+    },
+    {
+      "truth": "output",
+      "drift": 0.1,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "output",
+      "drift": 0.1,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "output",
+      "drift": 0.1,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "output",
+      "drift": 0.3,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 0.8984375
+    },
+    {
+      "truth": "output",
+      "drift": 0.3,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "mixed",
+      "winner_support": 0.70898438
+    },
+    {
+      "truth": "output",
+      "drift": 0.3,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 0.98632812
+    },
+    {
+      "truth": "output",
+      "drift": 0.3,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 0.95898438
+    },
+    {
+      "truth": "output",
+      "drift": 0.3,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "output",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "input",
+      "drift": 0.025,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 0.99902344
+    },
+    {
+      "truth": "input",
+      "drift": 0.025,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "input",
+      "drift": 0.025,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "input",
+      "drift": 0.025,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "input",
+      "drift": 0.025,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 0.99511719
+    },
+    {
+      "truth": "input",
+      "drift": 0.1,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 0.95605469
+    },
+    {
+      "truth": "input",
+      "drift": 0.1,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 0.86621094
+    },
+    {
+      "truth": "input",
+      "drift": 0.1,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 0.99609375
+    },
+    {
+      "truth": "input",
+      "drift": 0.1,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "input",
+      "drift": 0.1,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "input",
+      "drift": 0.3,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 0.99121094
+    },
+    {
+      "truth": "input",
+      "drift": 0.3,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "mixed",
+      "winner_support": 0.50292969
+    },
+    {
+      "truth": "input",
+      "drift": 0.3,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 0.97949219
+    },
+    {
+      "truth": "input",
+      "drift": 0.3,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 0.99414062
+    },
+    {
+      "truth": "input",
+      "drift": 0.3,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 0.96875
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.025,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "mixed",
+      "winner_support": 0.97167969
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.025,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "mixed",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.025,
+      "seed": 3,
+      "status": "drift_sensitive",
+      "winner": null,
+      "winner_support": 0.0
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.025,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "mixed",
+      "winner_support": 1.0
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.025,
+      "seed": 5,
+      "status": "drift_sensitive",
+      "winner": null,
+      "winner_support": 0.0
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.1,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "mixed",
+      "winner_support": 0.9609375
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.1,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "mixed",
+      "winner_support": 0.99804688
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.1,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "mixed",
+      "winner_support": 0.53515625
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.1,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "mixed",
+      "winner_support": 0.97949219
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.1,
+      "seed": 5,
+      "status": "drift_sensitive",
+      "winner": null,
+      "winner_support": 0.0
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.3,
+      "seed": 1,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.47363281
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.3,
+      "seed": 2,
+      "status": "exploratory",
+      "winner": "global",
+      "winner_support": 0.49414062
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.3,
+      "seed": 3,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 0.54492188
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.3,
+      "seed": 4,
+      "status": "exploratory",
+      "winner": "input",
+      "winner_support": 0.46386719
+    },
+    {
+      "truth": "mixed",
+      "drift": 0.3,
+      "seed": 5,
+      "status": "exploratory",
+      "winner": "cache_read",
+      "winner_support": 0.96386719
+    }
+  ]
+}

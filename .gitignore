@@ -12,3 +12,4 @@ backend/staticfiles/*
 !backend/staticfiles/.gitkeep
 reference/
 billing-review-output/
+/research-review-output/

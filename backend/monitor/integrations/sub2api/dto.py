@@ -58,6 +58,8 @@ class Sub2APIUsageLog:
     cache_creation_tokens: int | None = None
     cache_read_tokens: int | None = None
     long_context_billing_applied: bool | None = None
+    # Optional raw standard-cost components, not estimated from current prices.
+    component_costs: tuple[Decimal, Decimal, Decimal, Decimal] | None = None
 
     def selected(self, basis: str) -> Decimal:
         return self.actual_cost if basis == "actual" else self.total_cost

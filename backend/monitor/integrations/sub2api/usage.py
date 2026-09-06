@@ -1,6 +1,6 @@
 """Read-only usage aggregation and request-log resources."""
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -263,6 +263,7 @@ class UsageResourceMixin:
                         cache_creation_tokens=_optional_tokens(raw, "cache_creation_tokens"),
                         cache_read_tokens=_optional_tokens(raw, "cache_read_tokens"),
                         long_context_billing_applied=_optional_long_context_flag(raw),
+                        component_costs=_component_costs(raw),
                     )
                 )
 
@@ -318,3 +319,22 @@ def _optional_long_context_flag(raw: dict) -> bool | None:
     if value is not None and not isinstance(value, bool):
         raise Sub2APIError("Sub2API 返回了无效字段 long_context_billing_applied")
     return value
+
+
+def _component_costs(raw: dict) -> tuple | None:
+    """Research is optional: bad/missing components must not break billing sampling."""
+    if not isinstance(raw, dict):
+        return None
+    values = []
+    for name in ("input_cost", "cache_creation_cost", "cache_read_cost", "output_cost"):
+        value = raw.get(name)
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            value = Decimal(str(value))
+        except (ValueError, TypeError, InvalidOperation):
+            return None
+        if not value.is_finite() or not 0 <= value <= Decimal("1e12") or len(str(value)) > 96:
+            return None
+        values.append(value)
+    return tuple(values)

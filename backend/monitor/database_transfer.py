@@ -236,6 +236,16 @@ def _install_import_guard(
             now,
         ),
     )
+    # An imported backup must never silently restart telemetry or clone a
+    # previously authorized sharing schedule. Retain the key for explicit
+    # withdrawal, but require fresh administrator consent on this installation.
+    if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='monitor_researchsettings'").fetchone():
+        source.execute("""
+            UPDATE monitor_researchsettings SET enabled=0, consent_hash='',
+                consent_at=NULL, config_revision=config_revision+1,
+                lease_token='', lease_until=NULL, next_run_at=NULL,
+                last_status='disabled', last_error=''
+        """)
     source.commit()
     return staged_token
 
