@@ -56,8 +56,18 @@ class SyntheticUpstream(BaseHTTPRequestHandler):
         query = parse_qs(urlparse(self.path).query)
         path = urlparse(self.path).path
         UPSTREAM["calls"].append({"path": path, "query": query})
-        if path != "/api/v1/admin/usage" or self.headers.get("x-api-key") != "Synthetic-Sub2API-Local-Only":
+        if self.headers.get("x-api-key") != "Synthetic-Sub2API-Local-Only":
             self.send_json(400, {"message": "Unexpected synthetic upstream request"})
+            return
+        if path == "/api/v1/admin/accounts":
+            # The existing settings page automatically discovers accounts.
+            self.send_json(200, {"code": 0, "data": {"items": [{
+                "id": 7, "name": "Synthetic account", "platform": "openai",
+                "type": "oauth", "status": "active", "schedulable": True,
+            }], "page": 1, "pages": 1, "total": 1}})
+            return
+        if path != "/api/v1/admin/usage":
+            self.send_json(400, {"message": "Unexpected synthetic upstream path"})
             return
         if UPSTREAM["fail_next"]:
             UPSTREAM["fail_next"] = False
@@ -186,7 +196,12 @@ def smoke():
             page.get_by_label("密码", exact=True).fill("Synthetic-Local-Review-2026!")
             page.get_by_role("button", name="登录", exact=True).click()
             page.wait_for_url("http://127.0.0.1:5173/")
-            page.goto("http://127.0.0.1:5173/settings")
+            with page.expect_response(lambda response: response.url.endswith("/api/settings/openai-accounts")) as discovered:
+                page.goto("http://127.0.0.1:5173/settings")
+            assert discovered.value.status == 200
+            assert len(UPSTREAM["calls"]) == 1
+            assert UPSTREAM["calls"][0]["path"] == "/api/v1/admin/accounts"
+            discovery_calls = list(UPSTREAM["calls"])
             heading = page.get_by_role("heading", name="计费修正", exact=True)
             expect(heading).to_be_visible()
             card = page.locator("section").filter(has=heading)
@@ -227,6 +242,7 @@ def smoke():
             with page.expect_response(lambda response: response.url.endswith("/api/settings") and response.request.method == "PATCH") as changed:
                 dialog.get_by_role("button", name="保存规则并重算", exact=True).click()
             assert changed.value.status == 200
+            assert UPSTREAM["calls"] == discovery_calls  # Policy save is entirely local.
             expect(page.locator("dialog[open]")).to_have_count(0)
             page.goto("http://127.0.0.1:5173/observations")
             expect(page.get_by_role("columnheader", name="修正合计", exact=True)).to_have_count(1)
@@ -250,6 +266,10 @@ def smoke():
             expect(table.get_by_role("button", name="未计算", exact=True)).to_have_count(2)
             legacy_row = table.locator("tbody tr").filter(has=page.get_by_role("button", name="已有明细", exact=True))
             expect(legacy_row).to_have_count(1)
+            # Separate backfill reads from the settings page's account discovery.
+            assert UPSTREAM["calls"] == discovery_calls
+            backfill_start = len(UPSTREAM["calls"])
+            is_list_response = lambda response: urlparse(response.url).path == "/api/observations" and response.request.method == "GET"
             # The real backend makes a failing HTTP read; old data must survive.
             UPSTREAM["fail_next"] = True
             with page.expect_response(lambda response: response.url.endswith(f"/{SEED_IDS[2]}/fast-correction/calculate")) as failed:
@@ -264,31 +284,44 @@ def smoke():
             repair = dialog.get_by_role("button", name="从上游补算此区间", exact=True)
             expect(repair).to_be_visible()
             latest_before = snapshot["observations"][SEED_IDS[6]]["cost"]
-            with page.expect_response(lambda response: response.url.endswith(f"/{SEED_IDS[2]}/fast-correction/calculate")) as repaired:
-                repair.click()
+            with page.expect_response(is_list_response) as refreshed_legacy:
+                with page.expect_response(lambda response: response.url.endswith(f"/{SEED_IDS[2]}/fast-correction/calculate")) as repaired:
+                    repair.click()
             assert repaired.value.status == 200
             assert repaired.value.json()["data"]["correction_total_usd"] == -37.5
             expect(dialog.get_by_text("−$37.50", exact=True).first).to_be_visible()
             expect(dialog.get_by_role("button", name="从上游补算此区间", exact=True)).to_have_count(0)
             page.screenshot(path=str(OUTPUT / "legacy-interval-backfilled.png"))
-            assert database_snapshot()["observations"][SEED_IDS[6]]["cost"] == latest_before - D("62.5")
+            latest_after = database_snapshot()["observations"][SEED_IDS[6]]["cost"]
+            assert latest_after == latest_before - D("62.5")
+            refreshed_rows = refreshed_legacy.value.json()["data"]["items"]
+            assert next(row for row in refreshed_rows if row["id"] == SEED_IDS[6])["selected_total_cost"] == float(latest_after)
             dialog.locator(".modal-action").get_by_role("button", name="关闭", exact=True).click()
             expect(table.get_by_role("button", name="未计算", exact=True)).to_have_count(1)
-            with page.expect_response(lambda response: response.url.endswith(f"/{SEED_IDS[3]}/fast-correction/calculate")) as new_interval:
-                table.get_by_role("button", name="未计算", exact=True).click()
+            with page.expect_response(is_list_response) as refreshed_new:
+                with page.expect_response(lambda response: response.url.endswith(f"/{SEED_IDS[3]}/fast-correction/calculate")) as new_interval:
+                    table.get_by_role("button", name="未计算", exact=True).click()
             assert new_interval.value.status == 200
             expect(table.get_by_role("button", name="未计算", exact=True)).to_have_count(0)
             expect(page.get_by_text("已补算 1 个区间的修正合计，并更新相关结论", exact=True)).to_be_visible()
             expect(table.locator("tbody tr")).to_have_count(6)
             snapshot = database_snapshot()
             assert len(snapshot["captures"]) == snapshot["facts"] == 6
-            assert len(UPSTREAM["calls"]) == 3, UPSTREAM["calls"]
-            assert all(call["path"] == "/api/v1/admin/usage" for call in UPSTREAM["calls"])
+            refreshed_rows = refreshed_new.value.json()["data"]["items"]
+            latest_row = next(row for row in refreshed_rows if row["id"] == SEED_IDS[6])
+            assert latest_row["selected_total_cost"] == float(latest_after - D("37.5"))
+            # Check the adopted rate actually rendered from the refreshed list.
+            rate_text = f"${latest_row['effective_usd_per_percent']:.2f}"
+            expect(table.locator("tbody tr").first.locator("td").nth(8)).to_have_text(rate_text)
+            backfill_calls = UPSTREAM["calls"][backfill_start:]
+            assert len(backfill_calls) == 3, backfill_calls
+            assert all(call["path"] == "/api/v1/admin/usage" for call in backfill_calls)
             page.screenshot(path=str(OUTPUT / "all-intervals-backfilled.png"))
             assert not errors, errors
             (OUTPUT / "upstream-read-evidence.json").write_text(json.dumps(UPSTREAM["calls"], ensure_ascii=False, indent=2))
             (OUTPUT / "browser-results.json").write_text(json.dumps({
                 "passed": True, "page_errors": errors, "upstream_read_count": len(UPSTREAM["calls"]),
+                "backfill_read_count": len(backfill_calls), "account_discovery_read_count": len(discovery_calls),
                 "checks": ["single settings card", "all three editors", "rule reorder/cancel", "multiplier validation", "real settings PATCH/local replay", "single observation column", "negative correction breakdown", "390px modal layout", "legacy FAST-only uncalculated link", "failed upstream read preserves data", "detail backfill and retry", "new missing interval backfill", "suffix refresh", "only local read-only usage endpoint"],
             }, ensure_ascii=False, indent=2))
         except Exception:
