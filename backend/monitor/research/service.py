@@ -91,20 +91,33 @@ def run_due(now=None):
 
 def withdraw():
     """Explicitly authorized removal, including while future sharing is disabled."""
+    signing_error = None
     with transaction.atomic():
         config = ResearchSettings.objects.select_for_update().get(pk=ResearchSettings.load().pk)
         config.enabled = False
         config.config_revision += 1
         config.next_run_at = None
         config.lease_token, config.lease_until = "", None
-        if not config.last_sent_endpoint or not config.identity_encrypted:
+        if not config.last_sent_endpoint:
             config.last_status = "disabled"
             config.save()
             return "nothing_sent"
         config.report_revision += 1
-        payload = transport.packet(config, endpoint=config.last_sent_endpoint, withdraw=True)
-        config.last_status = "withdrawing"
+        try:
+            # A missing seed cannot withdraw an earlier identity. packet() is
+            # allowed to create a seed for new reports, not for this operation.
+            if not config.identity_encrypted:
+                raise transport.DeliveryError(transport.IDENTITY_ERROR_MESSAGE)
+            payload = transport.packet(config, endpoint=config.last_sent_endpoint, withdraw=True)
+            config.last_status, config.last_error = "withdrawing", ""
+        except transport.DeliveryError as exc:
+            signing_error = exc
+            config.last_status, config.last_error = "withdrawal_failed", str(exc)
         config.save()
+    # Raise only AFTER committing the explicit stop. A bad key must not roll
+    # back enabled=False or turn an admin withdrawal into an unhandled 500.
+    if signing_error is not None:
+        raise signing_error
     try:
         ack = transport.send(config.last_sent_endpoint, *payload)
         if ack.get("revision") != config.report_revision:

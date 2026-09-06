@@ -192,14 +192,24 @@ def test_no_redirects_or_credentials_or_extra_identifying_headers(monkeypatch):
 def test_database_import_clears_authorization_but_keeps_withdrawal_key():
     import sqlite3
     import uuid
+    from contextlib import closing
     from types import SimpleNamespace
+    from django.db import connection
     from monitor.database_transfer import _install_import_guard
-    source=sqlite3.connect(':memory:')
-    source.execute('CREATE TABLE monitor_historymaintenancestate(account_id INTEGER PRIMARY KEY, fact_revision INTEGER, fence_token INTEGER, lease_owner TEXT, lease_expires_at TEXT, updated_at TEXT)')
-    source.execute('CREATE TABLE monitor_researchsettings(enabled INTEGER, consent_hash TEXT, consent_at TEXT, config_revision INTEGER, lease_token TEXT, lease_until TEXT, next_run_at TEXT, last_status TEXT, last_error TEXT, identity_encrypted TEXT)')
-    source.execute("INSERT INTO monitor_researchsettings VALUES(1,'granted','now',4,'running','future','future','sent','','encrypted-test-seed')")
-    guard=SimpleNamespace(account_id=0,token=4,owner=uuid.uuid4(),expires_at=timezone.now()+timedelta(minutes=5))
-    _install_import_guard(source,guard)
-    value=source.execute('SELECT enabled,consent_hash,config_revision,lease_token,last_status,identity_encrypted FROM monitor_researchsettings').fetchone()
-    assert value==(0,'',5,'','disabled','encrypted-test-seed')
-    source.close()
+
+    config = enable()
+    transport.identity(config, config.endpoint)
+    config.config_revision = 4
+    config.save()
+    with closing(sqlite3.connect(':memory:')) as source:
+        source.execute('CREATE TABLE monitor_historymaintenancestate(account_id INTEGER PRIMARY KEY, fact_revision INTEGER, fence_token INTEGER, lease_owner TEXT, lease_expires_at TEXT, updated_at TEXT)')
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT sql FROM sqlite_master WHERE name='monitor_researchsettings'")
+            source.execute(cursor.fetchone()[0])
+            cursor.execute('SELECT * FROM monitor_researchsettings')
+            rows = cursor.fetchall()
+            source.executemany('INSERT INTO monitor_researchsettings VALUES (' + ','.join('?' for _ in cursor.description) + ')', rows)
+        guard = SimpleNamespace(account_id=0, token=4, owner=uuid.uuid4(), expires_at=timezone.now()+timedelta(minutes=5))
+        _install_import_guard(source, guard)
+        value = source.execute('SELECT enabled,consent_hash,config_revision,lease_token,last_status,identity_encrypted FROM monitor_researchsettings').fetchone()
+        assert value == (0, '', 5, '', 'disabled', config.identity_encrypted)

@@ -53,10 +53,31 @@ def destination_ready(endpoint):
     return host != "invalid" and not host.endswith(".invalid")
 
 
+IDENTITY_ERROR_MESSAGE = (
+    "科研签名身份无法解密或已损坏；请恢复原 DJANGO_SECRET_KEY，"
+    "或重新导入备份并授权以重置科研身份。旧贡献需在原实例撤回。"
+)
+
+
+def decode_identity_seed(encrypted):
+    """Validate an existing identity; never silently rotate a contributor key."""
+    try:
+        if not isinstance(encrypted, str) or not encrypted:
+            raise ValueError
+        root = base64.b64decode(decrypt_secret(encrypted), validate=True)
+        if len(root) != 32:
+            raise ValueError
+        return root
+    except (ValueError, TypeError):
+        # Includes malformed Fernet/base64 and UnicodeError. Never expose the
+        # ciphertext or the lower-level exception through the API or logs.
+        raise DeliveryError(IDENTITY_ERROR_MESSAGE) from None
+
+
 def identity(config, endpoint):
     if not config.identity_encrypted:
         config.identity_encrypted = encrypt_secret(base64.b64encode(secrets.token_bytes(32)).decode())
-    root = base64.b64decode(decrypt_secret(config.identity_encrypted), validate=True)
+    root = decode_identity_seed(config.identity_encrypted)
     # Different receiving origins/studies get unlinkable random public keys.
     seed = hashlib.sha256(root + b"\0" + endpoint.encode() + b"\0" + STUDY.encode()).digest()
     private = Ed25519PrivateKey.from_private_bytes(seed)
