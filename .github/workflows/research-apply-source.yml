@@ -1,0 +1,50 @@
+name: Apply verified research sources
+on:
+  push:
+    branches: [feat/opt-in-gpt6-research]
+    paths: [.github/workflows/research-apply-source.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.repository == 'LingyeNBird/Sub2Pool'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify patch and write real tracked source files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, subprocess
+          blobs = ['25d803a64b54a30d98d9b224c2bcbf9a58a80713', 'baf97fbb2ba0d6307efa28c7c37fab035d264bff', 'fd04e16325af297f1b1a7a955a7abf54ec590289', '98e0bbf49882ff1a54050b131080e39b7e932a7f']
+          pieces = []
+          for sha in blobs:
+              response = json.loads(subprocess.check_output(['gh', 'api', 'repos/LingyeNBird/Sub2Pool/git/blobs/' + sha]))
+              raw = base64.b64decode(response['content'])
+              assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest() == sha
+              pieces.append(raw)
+          packed = b''.join(pieces)
+          assert hashlib.sha256(packed).hexdigest() == 'eec743c24d6b3b444bd597d0c756b93d60006c2d40ca834746f7bc7743bb0b7e'
+          payload = json.loads(lzma.decompress(packed))
+          assert len(payload['hashes']) == 36
+          for name in payload['hashes']:
+              path = pathlib.PurePosixPath(name)
+              assert not path.is_absolute() and '..' not in path.parts
+              assert name in ('.gitignore', 'README.md') or path.parts[0] in ('backend', 'frontend', 'docs', 'scripts')
+              assert not any(part in ('.git', '.env', 'node_modules', '.venv') for part in path.parts)
+          patch = pathlib.Path('/tmp/research-verified.patch')
+          patch.write_text(payload['patch'])
+          subprocess.run(['git', 'apply', '--check', str(patch)], check=True)
+          subprocess.run(['git', 'apply', '--index', str(patch)], check=True)
+          changed = subprocess.check_output(['git','diff','--cached','--name-only']).decode().splitlines()
+          assert set(changed) == set(payload['hashes'])
+          for name, expected in payload['hashes'].items():
+              assert subprocess.check_output(['git','hash-object',name]).decode().strip() == expected, name
+          subprocess.run(['git','diff','--cached','--check'], check=True)
+          print('Verified 36 actual source files; no archive is part of the working tree.')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: add explicit opt-in GPT-6 component research with private local inference'
+          git push origin HEAD:refs/heads/feat/opt-in-gpt6-research
