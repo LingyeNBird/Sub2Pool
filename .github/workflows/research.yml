@@ -1,0 +1,73 @@
+name: Opt-in research verification
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: research-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DJANGO_DEBUG: 'true'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Record tested source and verify delivery
+        run: |
+          test -f backend/monitor/research/estimator.py
+          test -f frontend/src/views/settings/general/components/ResearchCard.vue
+          test ! -f .github/workflows/research-apply-source.yml
+          mkdir -p "$RUNNER_TEMP/research-review"
+          echo "RESEARCH_REVIEW_OUTPUT=$RUNNER_TEMP/research-review" >> "$GITHUB_ENV"
+          git rev-parse HEAD > "$RUNNER_TEMP/research-review/tested-commit.txt"
+          git ls-tree -r HEAD > "$RUNNER_TEMP/research-review/source-manifest.txt"
+          git diff --check
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+      - name: Research permissions, science, protocol, lifecycle and migrations
+        working-directory: backend
+        run: |
+          uv run --frozen pytest monitor/tests/research --junitxml="$RESEARCH_REVIEW_OUTPUT/research-tests.xml"
+          uv run --frozen python manage.py makemigrations --check --dry-run
+          uv run --frozen python manage.py check
+          uv run --frozen python ../scripts/research_simulation.py --seeds 5 --output "$RESEARCH_REVIEW_OUTPUT/synthetic-benchmark.json"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: corepack enable
+      - name: Check and build production and demo
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check
+          pnpm build
+          pnpm build:demo
+      - name: Install isolated browser test dependency
+        working-directory: backend
+        run: uv run --frozen --with playwright==1.57.0 python -m playwright install --with-deps chromium
+      - name: Exercise consent, raw facts, local inference, signed HTTP and withdrawal
+        working-directory: backend
+        run: uv run --frozen --with playwright==1.57.0 python ../scripts/research_browser_smoke.py
+      - name: Retain synthetic evidence only, never databases or credentials
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opt-in-research-evidence
+          retention-days: 7
+          path: |
+            ${{ env.RESEARCH_REVIEW_OUTPUT }}/*.png
+            ${{ env.RESEARCH_REVIEW_OUTPUT }}/*.json
+            ${{ env.RESEARCH_REVIEW_OUTPUT }}/*.txt
+            ${{ env.RESEARCH_REVIEW_OUTPUT }}/*.xml
+            ${{ env.RESEARCH_REVIEW_OUTPUT }}/*.log
