@@ -16,6 +16,7 @@ import type {
   ObservationListData,
 } from "@/types/observations";
 import { monitoredAccountLabel } from "@/utils/accounts";
+import { correctionCalculated } from "@/utils/corrections";
 
 import CostDeltaDetailDialog from "./components/CostDeltaDetailDialog.vue";
 import FastCorrectionDetailDialog from "./components/FastCorrectionDetailDialog.vue";
@@ -71,6 +72,8 @@ const fastCorrectionEnabled = ref(true);
 const fastCorrectionPendingIds = ref<Set<number>>(new Set());
 const fastCorrectionActiveId = ref<number | null>(null);
 const fastCorrectionQueue: number[] = [];
+const fastCorrectionErrors = ref<Record<number, string>>({});
+let processingCorrections = false;
 
 const filterDialog = ref<InstanceType<typeof ObservationFilterDialog> | null>(
   null,
@@ -110,9 +113,9 @@ function queryString() {
   return query.toString();
 }
 
-async function load() {
+async function load(clearMessage = true) {
   loading.value = true;
-  message.value = "";
+  if (clearMessage) message.value = "";
   try {
     const [observations, monitorSchedule] = await Promise.all([
       api<ObservationListData>(`observations?${queryString()}`),
@@ -121,7 +124,9 @@ async function load() {
     rows.value = observations.items;
     pagination.value = observations.pagination;
     Object.assign(summary, observations.summary);
-    fastCorrectionEnabled.value = observations.fast_correction_enabled;
+    fastCorrectionEnabled.value =
+      observations.corrections_available ??
+      observations.fast_correction_enabled;
     applySchedule(monitorSchedule);
   } catch (error) {
     message.value =
@@ -156,47 +161,65 @@ function setFastCorrectionPending(observationId: number, active: boolean) {
 }
 
 async function processFastCorrectionQueue() {
-  if (fastCorrectionActiveId.value !== null) return;
-  while (fastCorrectionQueue.length) {
-    const observationId = fastCorrectionQueue.shift();
-    if (observationId === undefined) continue;
-    const visibleRow = rows.value.find((item) => item.id === observationId);
-    if (visibleRow?.fast_correction_calculated) {
-      setFastCorrectionPending(observationId, false);
-      continue;
-    }
-
-    fastCorrectionActiveId.value = observationId;
-    try {
-      const result = await api<FastCorrectionCalculateResult>(
-        `observations/${observationId}/fast-correction/calculate`,
-        { method: "POST" },
-      );
-      const current = rows.value.find(
-        (item) => item.id === result.observation_id,
-      );
-      if (current) {
-        current.fast_correction_usd = result.fast_correction_usd;
-        current.fast_correction_calculated = result.fast_correction_calculated;
+  if (processingCorrections) return;
+  processingCorrections = true;
+  let updated = 0;
+  try {
+    while (fastCorrectionQueue.length) {
+      const observationId = fastCorrectionQueue.shift();
+      if (observationId === undefined) continue;
+      const visibleRow = rows.value.find((item) => item.id === observationId);
+      if (visibleRow && correctionCalculated(visibleRow)) {
+        setFastCorrectionPending(observationId, false);
+        continue;
       }
-    } catch (error) {
-      message.value =
-        error instanceof ApiError ? error.message : "计算 FAST 修正失败";
-    } finally {
-      fastCorrectionActiveId.value = null;
-      setFastCorrectionPending(observationId, false);
+      fastCorrectionActiveId.value = observationId;
+      try {
+        const result = await api<FastCorrectionCalculateResult>(
+          `observations/${observationId}/fast-correction/calculate`,
+          { method: "POST" },
+        );
+        const current = rows.value.find(
+          (item) => item.id === result.observation_id,
+        );
+        if (current) Object.assign(current, result);
+        updated += 1;
+        await fastCorrectionDetailDialog.value?.refresh(observationId);
+      } catch (error) {
+        message.value =
+          error instanceof ApiError ? error.message : "计算修正合计失败";
+        fastCorrectionErrors.value[observationId] = message.value;
+      } finally {
+        fastCorrectionActiveId.value = null;
+        setFastCorrectionPending(observationId, false);
+      }
     }
+  } finally {
+    // Backfill replays the suffix: refresh costs/rates as well as the clicked
+    // subtotal. Keep any error from another queued interval visible for retry.
+    if (updated) {
+      success.value = `已补算 ${updated} 个区间的修正合计，并更新相关结论`;
+      await load(false);
+    }
+    processingCorrections = false;
+    // A click can arrive while the final list refresh is in flight.
+    if (fastCorrectionQueue.length) void processFastCorrectionQueue();
   }
 }
 
 function calculateFastCorrection(row: Observation) {
   if (
-    row.fast_correction_calculated ||
+    !auth.isStaff ||
+    row.provider === "cpa" ||
+    correctionCalculated(row) ||
     fastCorrectionPendingIds.value.has(row.id)
-  ) {
+  )
     return;
+  if (fastCorrectionPendingIds.value.size === 0) {
+    message.value = "";
+    success.value = "";
   }
-  if (fastCorrectionPendingIds.value.size === 0) message.value = "";
+  delete fastCorrectionErrors.value[row.id];
   setFastCorrectionPending(row.id, true);
   fastCorrectionQueue.push(row.id);
   void processFastCorrectionQueue();
@@ -446,7 +469,14 @@ onMounted(initialize);
 
   <ObservationFilterDialog ref="filterDialog" @apply="applyFilters" />
   <CostDeltaDetailDialog ref="costDetailDialog" />
-  <FastCorrectionDetailDialog ref="fastCorrectionDetailDialog" />
+  <FastCorrectionDetailDialog
+    ref="fastCorrectionDetailDialog"
+    :editable="auth.isStaff"
+    :pending-ids="fastCorrectionPendingIds"
+    :active-id="fastCorrectionActiveId"
+    :calculation-errors="fastCorrectionErrors"
+    @calculate="calculateFastCorrection"
+  />
   <ObservationDetailDialog ref="detailDialog" />
   <ExcludeObservationDialog
     v-if="auth.isStaff"

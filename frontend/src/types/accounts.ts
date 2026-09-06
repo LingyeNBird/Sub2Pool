@@ -1,3 +1,4 @@
+import type { CorrectionBreakdown } from "./common";
 export type QuotaProfile = "auto" | "plus" | "pro_5x" | "pro_20x";
 export type EffectiveQuotaProfile = Exclude<QuotaProfile, "auto">;
 export type AccountProvider = "sub2api" | "cpa";
@@ -74,7 +75,9 @@ export interface AccountUsageStatus {
   error_code: string | null;
   error: string | null;
 }
-export interface AccountUsageStats {
+export interface AccountUsageStats extends CorrectionBreakdown {
+  account_cost_with_correction_usd?: number | null;
+  correction_collected_until?: string | null;
   days: number | null;
   actual_days_used: number | null;
   account_cost_usd: number | null;

@@ -10,7 +10,7 @@ import DatabaseTransferCard from "./components/DatabaseTransferCard.vue";
 import CPAConnectionCard from "./components/CPAConnectionCard.vue";
 import DataMaintenanceCard from "./components/DataMaintenanceCard.vue";
 import EmailServiceCard from "./components/EmailServiceCard.vue";
-import FastCorrectionCard from "./components/FastCorrectionCard.vue";
+import BillingCorrectionCard from "./components/BillingCorrectionCard.vue";
 import LoginSecurityCard from "./components/LoginSecurityCard.vue";
 import ReadOnlyAPIKeyCard from "./components/ReadOnlyAPIKeyCard.vue";
 import NotificationRulesCard from "./components/NotificationRulesCard.vue";
@@ -63,7 +63,7 @@ const {
   saveAllocation,
   saveSampling,
   saveEmail,
-  saveFastCorrection,
+  saveBillingCorrection,
   saveNotifications,
   exportDatabase,
   importDatabase,
@@ -162,7 +162,7 @@ async function handleRevokeReadOnlyAPIKey() {
 
   <fieldset
     v-if="settings && auth.isStaff"
-    class="col-span-12 columns-1 gap-6 xl:columns-2"
+    class="col-span-12 min-w-0 columns-1 gap-6 xl:columns-2 [&_.label]:whitespace-normal"
   >
     <Sub2APIConnectionCard
       v-model:settings="settings"
@@ -199,10 +199,10 @@ async function handleRevokeReadOnlyAPIKey() {
       :saving="saving === 'allocation'"
       @save="saveAllocation"
     />
-    <FastCorrectionCard
+    <BillingCorrectionCard
       v-model:settings="settings"
-      :saving="saving === 'fast-correction'"
-      :save="saveFastCorrection"
+      :saving="saving === 'billing-correction'"
+      :save="saveBillingCorrection"
     />
     <SamplingStrategyCard
       v-model:settings="settings"

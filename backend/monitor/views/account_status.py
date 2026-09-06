@@ -8,6 +8,8 @@ from django.utils import timezone
 
 from .base import PageAccessAPIView, ok
 from ..access import visible_accounts_for
+from ..billing_correction.domain import BillingCorrectionRules, CorrectionAmounts
+from ..billing_correction.observations import interval_corrections
 from ..api_auth import APIKeyAuthentication
 from ..cpa.usage import cpa_events_cost
 from ..integrations.cpa import CPAClient, CPAError
@@ -25,30 +27,21 @@ from ..particle_trajectory import cycle_usage_history
 STATS_DAYS = 30
 
 
-def _fast_correction_totals(
-    account_ids: list[int],
-    *,
-    cost_basis: str,
-    observed_after: datetime,
-    observed_before: datetime,
-) -> dict[int, Decimal]:
-    field = (
-        "fast_correction_actual_cost"
-        if cost_basis == "actual"
-        else "fast_correction_standard_cost"
-    )
-    totals = (
-        Observation.objects.filter(
-            account_id__in=account_ids,
-            observed_at__range=(observed_after, observed_before),
-        )
-        .values("account_id")
-        .annotate(total=Sum(field))
-    )
-    return {
-        int(row["account_id"]): row["total"] or Decimal("0")
-        for row in totals
-    }
+def _correction_totals(account_ids, *, config, observed_after, observed_before) -> dict:
+    rules = BillingCorrectionRules(config)
+    totals = {}
+    observations = Observation.objects.filter(
+        account_id__in=account_ids, observed_at__range=(observed_after, observed_before),
+    ).select_related("billing_capture").prefetch_related("billing_capture__facts", "fast_corrections").order_by("observed_at", "id")
+    for observation in observations:
+        value = interval_corrections(observation, config, rules=rules, started_at=observed_after, ended_at=observed_before)
+        row = totals.setdefault(observation.account_id, {"amounts": CorrectionAmounts(), "missing_correction_intervals": 0, "unknown_long_context_request_count": 0, "correction_collected_until": None})
+        row["amounts"] += value.amounts
+        row["missing_correction_intervals"] += int(not value.facts_complete)
+        row["unknown_long_context_request_count"] += value.unknown_long_context_request_count
+        if value.facts_complete:
+            row["correction_collected_until"] = observation.observed_at.isoformat()
+    return totals
 
 
 def _base_account_row(account: MonitoredAccount) -> dict[str, Any]:
@@ -232,6 +225,10 @@ def _cpa_status_rows(
                 "days": STATS_DAYS,
                 "actual_days_used": actual_days,
                 "account_cost_usd": totals["account_cost_usd"],
+                "correction_total_usd": None,
+                "long_context_correction_usd": None,
+                "model_correction_usd": None,
+                "account_cost_with_correction_usd": None,
                 "fast_correction_usd": None,
                 "account_cost_with_fast_correction_usd": None,
                 "standard_cost_usd": None,
@@ -280,9 +277,9 @@ class AccountStatusView(PageAccessAPIView):
         cpa_accounts = [
             account for account in accounts if account.provider == "cpa"
         ]
-        correction_totals = _fast_correction_totals(
+        correction_totals = _correction_totals(
             [account.fact_key for account in sub2api_accounts],
-            cost_basis=config.cost_basis,
+            config=config,
             observed_after=sampled_at - timedelta(days=STATS_DAYS),
             observed_before=sampled_at,
         )
@@ -363,19 +360,17 @@ class AccountStatusView(PageAccessAPIView):
                                 upstream_id,
                                 days=STATS_DAYS,
                             )
-                            correction = correction_totals.get(
-                                account.fact_key,
-                                Decimal("0"),
-                            )
-                            stats["fast_correction_usd"] = float(correction)
+                            correction = correction_totals.get(account.fact_key, {})
+                            amounts = correction.get("amounts", CorrectionAmounts())
+                            stats.update(amounts.payload())
+                            stats["missing_correction_intervals"] = correction.get("missing_correction_intervals", 0)
+                            stats["correction_facts_complete"] = bool(correction) and not stats["missing_correction_intervals"]
+                            stats["unknown_long_context_request_count"] = correction.get("unknown_long_context_request_count", 0)
+                            stats["correction_collected_until"] = correction.get("correction_collected_until")
                             account_cost = stats.get("account_cost_usd")
-                            stats[
-                                "account_cost_with_fast_correction_usd"
-                            ] = (
-                                float(Decimal(str(account_cost)) + correction)
-                                if account_cost is not None
-                                else None
-                            )
+                            # Preserve old API semantics; the UI uses the new all-corrections total.
+                            stats["account_cost_with_fast_correction_usd"] = float(Decimal(str(account_cost)) + amounts.fast) if account_cost is not None else None
+                            stats["account_cost_with_correction_usd"] = float(Decimal(str(account_cost)) + amounts.total) if account_cost is not None else None
                             row["stats"] = stats
                         except Sub2APIError as exc:
                             row["warnings"].append(

@@ -455,6 +455,14 @@ function accountStatusData(state: DemoState): AccountStatusData {
           actual_days_used: isCPA ? 0 : 26,
           account_cost_usd: isCPA ? 0 : statsAccountCost,
           fast_correction_usd: isCPA ? null : fixture.fastCorrection,
+          correction_total_usd: isCPA ? null : fixture.fastCorrection,
+          long_context_correction_usd: isCPA ? null : 0,
+          model_correction_usd: isCPA ? null : 0,
+          correction_facts_complete: false,
+          legacy_fast_only: !isCPA,
+          account_cost_with_correction_usd: isCPA
+            ? null
+            : Number((statsAccountCost + fixture.fastCorrection).toFixed(2)),
           account_cost_with_fast_correction_usd: isCPA
             ? null
             : Number((statsAccountCost + fixture.fastCorrection).toFixed(2)),

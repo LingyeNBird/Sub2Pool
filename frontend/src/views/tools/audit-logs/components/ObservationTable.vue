@@ -3,7 +3,13 @@ import PaginationControls from "@/components/common/PaginationControls.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import type { PaginationMeta } from "@/types/common";
 import type { Observation } from "@/types/observations";
-import { formatCurrency, formatPercent } from "@/utils/formatters";
+import { correctionCalculated } from "@/utils/corrections";
+import {
+  correctionTotal,
+  formatCorrectionCurrency,
+  formatCurrency,
+  formatPercent,
+} from "@/utils/formatters";
 
 import type { ObservationFilterKind, ObservationFilters } from "../types";
 
@@ -148,7 +154,7 @@ function isAtOrAfter(row: Observation, start: Observation) {
                 </th>
                 <th>上游已用</th>
                 <th>成本增量</th>
-                <th v-if="fastCorrectionEnabled">FAST 修正</th>
+                <th v-if="fastCorrectionEnabled">修正合计</th>
                 <th>百分比增量</th>
                 <th>累计样本美元 / 1%</th>
                 <th>采用值</th>
@@ -229,19 +235,19 @@ function isAtOrAfter(row: Observation, start: Observation) {
                 </td>
                 <td v-if="fastCorrectionEnabled">
                   <button
-                    v-if="row.fast_correction_calculated"
+                    v-if="correctionCalculated(row)"
                     type="button"
                     class="link cursor-pointer font-medium tabular-nums link-hover"
                     @click="emit('fastCorrectionDetail', row)"
                   >
-                    {{ formatCurrency(row.fast_correction_usd) }}
+                    {{ formatCorrectionCurrency(correctionTotal(row)) }}
                   </button>
                   <button
-                    v-else-if="editable"
+                    v-else-if="editable && row.provider !== 'cpa'"
                     type="button"
                     class="inline-flex link cursor-pointer items-center gap-1 font-medium link-hover disabled:cursor-wait disabled:opacity-70"
                     :disabled="fastCorrectionPendingIds.has(row.id)"
-                    title="只计算这一条记录的 FAST 修正"
+                    title="只补齐此区间的原始请求事实并重算修正合计"
                     @click="emit('calculateFastCorrection', row)"
                   >
                     <span
@@ -262,6 +268,15 @@ function isAtOrAfter(row: Observation, start: Observation) {
                     }}
                   </button>
                   <span v-else class="opacity-60">未计算</span>
+                  <button
+                    v-if="!correctionCalculated(row) && row.legacy_fast_only"
+                    type="button"
+                    class="ml-2 link text-xs link-hover"
+                    title="查看已保存的旧 FAST 明细；修正合计尚未完整计算"
+                    @click="emit('fastCorrectionDetail', row)"
+                  >
+                    已有明细
+                  </button>
                 </td>
                 <td>{{ formatPercent(row.delta_percent) }}</td>
                 <td>{{ formatCurrency(row.sample_usd_per_percent) }}</td>

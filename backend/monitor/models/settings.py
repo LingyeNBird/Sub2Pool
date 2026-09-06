@@ -6,6 +6,10 @@ from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 
+from ..billing_correction.rules import (
+    default_long_context_correction_rules, default_model_correction_rules,
+    validate_long_context_correction_rules, validate_model_correction_rules,
+)
 from ..fast_correction.rules import (
     default_fast_correction_rules,
     validate_fast_correction_rules,
@@ -267,11 +271,22 @@ class AppSettings(models.Model):
         ),
         default="time_varying",
     )
-    # 开关和规则只控制新采样；已落库的历史修正事实永久保留并参与重放。
+    # Current rules replay saved request facts; legacy FAST-only evidence stays frozen.
     fast_correction_enabled = models.BooleanField(default=True)
     fast_correction_rules = models.JSONField(
         default=default_fast_correction_rules,
+        blank=True,
         validators=[validate_fast_correction_rules],
+    )
+    long_context_correction_enabled = models.BooleanField(default=True)
+    long_context_correction_rules = models.JSONField(
+        default=default_long_context_correction_rules, blank=True,
+        validators=[validate_long_context_correction_rules],
+    )
+    model_correction_enabled = models.BooleanField(default=True)
+    model_correction_rules = models.JSONField(
+        default=default_model_correction_rules, blank=True,
+        validators=[validate_model_correction_rules],
     )
     initial_usd_per_percent = models.DecimalField(
         max_digits=12, decimal_places=4, default=Decimal("16")

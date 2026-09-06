@@ -1,49 +1,78 @@
 <script setup lang="ts">
 import { ref } from "vue";
-
+import CorrectionAmount from "@/components/common/CorrectionAmount.vue";
+import CorrectionDetails from "@/components/common/CorrectionDetails.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
 import type { FastCorrectionDetail, Observation } from "@/types/observations";
 import { formatCurrency } from "@/utils/formatters";
-
 import type { DialogController } from "../types";
 
+defineProps<{
+  editable: boolean;
+  pendingIds: Set<number>;
+  activeId: number | null;
+  calculationErrors: Record<number, string>;
+}>();
+const emit = defineEmits<{ calculate: [row: Observation] }>();
+const selected = ref<Observation | null>(null);
 const dialog = ref<HTMLDialogElement | null>(null);
 const data = ref<FastCorrectionDetail | null>(null);
 const loading = ref(false);
 const message = ref("");
 const dateTime = useDateTime();
-
+let requestVersion = 0;
+const evidenceLabels: Record<string, string> = {
+  upstream_flag: "上游实际计费标记",
+  input_tokens_threshold: "输入 Token 阈值",
+  missing_input_facts: "缺少判断事实",
+  not_matched: "未命中或未启用",
+};
 function requestCount(value: number | null) {
   return value === null ? "未知" : String(value);
 }
-
 async function open(observation: Observation) {
+  selected.value = observation;
+  const version = ++requestVersion;
   data.value = null;
   message.value = "";
   loading.value = true;
-  dialog.value?.showModal();
+  if (!dialog.value?.open) dialog.value?.showModal();
   try {
-    data.value = await api<FastCorrectionDetail>(
+    const result = await api<FastCorrectionDetail>(
       `observations/${observation.id}/fast-correction`,
     );
+    if (version === requestVersion) data.value = result;
   } catch (error) {
-    message.value =
-      error instanceof ApiError ? error.message : "加载 FAST 修正明细失败";
+    if (version === requestVersion)
+      message.value =
+        error instanceof ApiError ? error.message : "加载修正合计明细失败";
   } finally {
-    loading.value = false;
+    if (version === requestVersion) loading.value = false;
   }
 }
-
 function close() {
+  ++requestVersion;
   dialog.value?.close();
 }
-
-defineExpose<DialogController<[Observation]>>({ open, close });
+async function refresh(observationId: number) {
+  if (dialog.value?.open && selected.value?.id === observationId) {
+    await open(selected.value);
+  }
+}
+defineExpose<DialogController<[Observation]> & { refresh: typeof refresh }>({
+  open,
+  close,
+  refresh,
+});
 </script>
 
 <template>
-  <dialog ref="dialog" class="modal">
+  <dialog
+    ref="dialog"
+    class="modal"
+    aria-labelledby="observation-correction-title"
+  >
     <div class="modal-box max-w-5xl">
       <form method="dialog">
         <button
@@ -53,13 +82,13 @@ defineExpose<DialogController<[Observation]>>({ open, close });
           ✕
         </button>
       </form>
-      <h2 class="pr-10 text-lg font-bold">FAST 修正明细</h2>
-
+      <h2 id="observation-correction-title" class="pr-10 text-lg font-bold">
+        修正合计明细
+      </h2>
       <div v-if="loading" class="flex justify-center py-12">
         <span class="loading loading-lg loading-spinner"></span>
       </div>
-      <div v-else-if="message" class="mt-4 alert alert-error">
-        <AppIcon name="exclamation-triangle" class="size-5" />
+      <div v-else-if="message" class="mt-4 alert alert-error" role="alert">
         <span>{{ message }}</span>
       </div>
       <template v-else-if="data">
@@ -67,84 +96,82 @@ defineExpose<DialogController<[Observation]>>({ open, close });
           {{ dateTime(data.started_at) }} 至 {{ dateTime(data.ended_at) }} ·
           {{ data.cost_basis_label }}口径
         </p>
-
-        <div
-          class="stats mt-4 w-full stats-vertical bg-base-200 lg:stats-horizontal"
-        >
-          <div class="stat">
-            <div class="stat-title">区间全部请求</div>
-            <div class="stat-value text-2xl">
-              {{ requestCount(data.request_count) }}
-            </div>
-          </div>
-          <div class="stat">
-            <div class="stat-title">FAST 请求</div>
-            <div class="stat-value text-2xl text-primary">
-              {{ data.fast_request_count }}
-            </div>
-          </div>
-          <div class="stat">
-            <div class="stat-title">非 FAST 请求</div>
-            <div class="stat-value text-2xl">
-              {{ requestCount(data.non_fast_request_count) }}
-            </div>
-          </div>
-        </div>
-
-        <div
-          v-if="data.request_count === null"
-          class="mt-4 alert text-sm alert-warning"
-        >
-          <AppIcon name="exclamation-triangle" class="size-5 shrink-0" />
-          <span>
-            这条旧记录没有保存完整请求数。系统不会根据当前仍可查询的日志推测历史完整性，未知状态会保持不变。
-          </span>
-        </div>
         <div
           v-if="data.collection_error"
           class="mt-4 alert text-sm alert-error"
         >
-          <AppIcon name="exclamation-triangle" class="size-5 shrink-0" />
           <span>{{ data.collection_error }}</span>
         </div>
-
         <div
-          class="stats mt-4 w-full stats-vertical bg-base-200 lg:stats-horizontal"
+          class="stats my-4 w-full stats-vertical bg-base-200 lg:stats-horizontal"
         >
           <div class="stat">
-            <div class="stat-title">FAST 原成本</div>
+            <div class="stat-title">区间请求（FAST / 非 FAST）</div>
             <div class="stat-value text-xl">
-              {{ formatCurrency(data.fast_billed_cost_usd) }}
+              {{ requestCount(data.request_count) }}
+            </div>
+            <div class="stat-desc">
+              {{ data.fast_request_count }} /
+              {{ requestCount(data.non_fast_request_count) }}
             </div>
           </div>
           <div class="stat">
-            <div class="stat-title">模型规则修正</div>
-            <div class="stat-value text-xl text-primary">
-              {{ formatCurrency(data.correction_usd) }}
+            <div class="stat-title">全部请求原成本</div>
+            <div class="stat-value text-xl">
+              {{ formatCurrency(data.raw_cost_usd) }}
             </div>
           </div>
           <div class="stat">
-            <div class="stat-title">修正后 FAST 成本</div>
+            <div class="stat-title">修正后成本</div>
             <div class="stat-value text-xl">
-              {{ formatCurrency(data.corrected_fast_cost_usd) }}
+              {{ formatCurrency(data.corrected_cost_usd) }}
             </div>
           </div>
         </div>
-        <p class="mt-2 text-sm opacity-65">
-          修正金额按采样时生效的模型规则逐条计算后汇总。
+        <div v-if="!data.correction_facts_complete" class="mb-4 space-y-2">
+          <p class="text-sm opacity-70">
+            修正合计未计算完整。管理员可只从上游补齐本区间的原始请求，再计算三项修正；失败不会覆盖已有数据。
+          </p>
+          <p
+            v-if="calculationErrors[data.observation_id]"
+            class="text-sm text-error"
+            role="alert"
+          >
+            {{ calculationErrors[data.observation_id] }}
+          </p>
+          <button
+            v-if="editable && selected && selected.provider !== 'cpa'"
+            type="button"
+            class="btn btn-primary btn-sm"
+            :disabled="pendingIds.has(data.observation_id)"
+            @click="emit('calculate', selected)"
+          >
+            <span
+              v-if="activeId === data.observation_id"
+              class="loading loading-xs loading-spinner"
+            ></span>
+            {{
+              activeId === data.observation_id
+                ? "计算中"
+                : pendingIds.has(data.observation_id)
+                  ? "等待中"
+                  : "从上游补算此区间"
+            }}
+          </button>
+        </div>
+        <CorrectionDetails :breakdown="data" />
+        <p class="mt-3 text-sm opacity-65">
+          有完整原始事实的区间按当前设置重算；修改规则不需要重新请求上游。未保存完整事实的旧记录保持可见并明确标记。
         </p>
-
         <div class="mt-4 overflow-x-auto">
-          <table class="table min-w-[50rem] table-sm">
+          <table class="table table-sm">
             <thead>
               <tr>
                 <th>Sub2API 用户</th>
                 <th>全部请求</th>
-                <th>FAST</th>
-                <th>非 FAST</th>
-                <th>FAST 原成本</th>
-                <th>修正</th>
-                <th>修正后 FAST 成本</th>
+                <th>原成本</th>
+                <th>修正合计</th>
+                <th>修正后成本</th>
               </tr>
             </thead>
             <tbody>
@@ -156,28 +183,87 @@ defineExpose<DialogController<[Observation]>>({ open, close });
                   </div>
                 </td>
                 <td>{{ requestCount(item.request_count) }}</td>
-                <td>{{ item.fast_request_count }}</td>
-                <td>{{ requestCount(item.non_fast_request_count) }}</td>
                 <td class="tabular-nums">
-                  {{ formatCurrency(item.fast_billed_cost_usd) }}
+                  {{ formatCurrency(item.raw_cost_usd) }}
                 </td>
-                <td class="font-medium tabular-nums">
-                  {{ formatCurrency(item.correction_usd) }}
+                <td>
+                  <CorrectionAmount
+                    :breakdown="{
+                      ...item,
+                      correction_facts_complete: data.correction_facts_complete,
+                    }"
+                  />
                 </td>
                 <td class="tabular-nums">
-                  {{ formatCurrency(item.corrected_fast_cost_usd) }}
+                  {{ formatCurrency(item.corrected_cost_usd) }}
                 </td>
               </tr>
               <tr v-if="data.users.length === 0">
-                <td colspan="7" class="py-6 text-center opacity-60">
-                  该区间没有请求日志
+                <td colspan="5" class="py-6 text-center opacity-60">
+                  没有可展示的用户请求事实
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
+        <details
+          v-if="data.model_details?.length"
+          class="collapse-arrow collapse mt-4 bg-base-200"
+        >
+          <summary class="collapse-title font-medium">
+            模型匹配与倍率追溯
+          </summary>
+          <div class="collapse-content overflow-x-auto">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>模型 / 档位</th>
+                  <th>请求数</th>
+                  <th>FAST × 长上下文 × 模型</th>
+                  <th>长上下文依据</th>
+                  <th>修正合计</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, index) in data.model_details" :key="index">
+                  <td>
+                    <div class="font-mono">{{ item.model || "未知模型" }}</div>
+                    <div class="text-xs opacity-60">
+                      {{ item.service_tier || "普通" }}
+                    </div>
+                  </td>
+                  <td>{{ item.request_count }}</td>
+                  <td class="font-mono">
+                    {{ item.fast_factor }} × {{ item.long_context_factor }} ×
+                    {{ item.model_factor }}
+                  </td>
+                  <td>
+                    {{
+                      evidenceLabels[item.long_context_evidence] ??
+                      item.long_context_evidence
+                    }}
+                  </td>
+                  <td><CorrectionAmount :breakdown="item" /></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+        <details
+          v-if="data.rules"
+          class="collapse-arrow collapse mt-3 bg-base-200"
+        >
+          <summary class="collapse-title font-medium">当前规则快照</summary>
+          <div class="collapse-content">
+            <p class="mb-2 font-mono text-xs break-all opacity-60">
+              {{ data.rules_digest }}
+            </p>
+            <pre class="overflow-x-auto text-xs">{{
+              JSON.stringify(data.rules, null, 2)
+            }}</pre>
+          </div>
+        </details>
       </template>
-
       <div class="modal-action">
         <button class="btn" @click="close">关闭</button>
       </div>

@@ -382,9 +382,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     ]);
   }
 
-  async function saveFastCorrection() {
+  async function saveBillingCorrection() {
     if (!settings.value) return false;
-    saving.value = "fast-correction";
+    saving.value = "billing-correction";
     message.value = "";
     success.value = "";
     try {
@@ -393,20 +393,35 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
         body: jsonBody({
           fast_correction_enabled: settings.value.fast_correction_enabled,
           fast_correction_rules: settings.value.fast_correction_rules,
+          long_context_correction_enabled:
+            settings.value.long_context_correction_enabled,
+          long_context_correction_rules:
+            settings.value.long_context_correction_rules,
+          model_correction_enabled: settings.value.model_correction_enabled,
+          model_correction_rules: settings.value.model_correction_rules,
         }),
       });
       settings.value.fast_correction_enabled = updated.fast_correction_enabled;
       settings.value.fast_correction_rules = updated.fast_correction_rules;
+      settings.value.long_context_correction_enabled =
+        updated.long_context_correction_enabled;
+      settings.value.long_context_correction_rules =
+        updated.long_context_correction_rules;
+      settings.value.model_correction_enabled =
+        updated.model_correction_enabled;
+      settings.value.model_correction_rules = updated.model_correction_rules;
+      settings.value.correction_missing_intervals =
+        updated.correction_missing_intervals;
       settings.value.fast_correction_rebuild_recommended =
         updated.fast_correction_rebuild_recommended;
       settings.value.fast_correction_missing_intervals =
         updated.fast_correction_missing_intervals;
       historyRebuildPlan.value = null;
-      success.value = "FAST 修正设置已保存";
+      success.value = "计费修正设置已保存";
       return true;
     } catch (error) {
       message.value =
-        error instanceof ApiError ? error.message : "保存 FAST 修正设置失败";
+        error instanceof ApiError ? error.message : "保存 计费修正设置失败";
       return false;
     } finally {
       saving.value = "";
@@ -769,7 +784,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     saveNotifications,
     exportDatabase,
     importDatabase,
-    saveFastCorrection,
+    saveBillingCorrection,
     createHistoricalRebuildPlan,
     applyHistoricalRebuildPlan,
     test,

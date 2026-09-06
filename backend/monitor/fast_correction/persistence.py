@@ -1,5 +1,7 @@
 """FAST 修正事实的数据库持久化。"""
 
+from django.db import transaction
+
 from .domain import FastCorrectionInterval
 from ..models import Observation, ObservationFastCorrection
 
@@ -23,12 +25,16 @@ def detail_rows(
     ]
 
 
+@transaction.atomic
 def apply_fast_interval(
     observation: Observation,
     interval: FastCorrectionInterval,
 ) -> None:
     """在调用者的事务中覆盖一个观测区间的可重建 FAST 修正事实。"""
 
+    from ..billing_correction.persistence import persist_capture
+
+    persist_capture(observation, interval)
     observation.fast_correction_started_at = interval.started_at
     observation.fast_correction_request_count = interval.request_count
     observation.fast_correction_standard_cost = (

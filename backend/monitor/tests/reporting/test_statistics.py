@@ -91,6 +91,9 @@ def test_disabled_fast_mode_still_reports_saved_historical_correction():
         "sub2api_cost_usd": 100.0,
         "fast_correction_usd": 25.0,
         "total_cost_usd": 125.0,
+        "correction_total_usd": 25.0, "long_context_correction_usd": 0.0,
+        "model_correction_usd": 0.0, "correction_facts_complete": False,
+        "missing_correction_intervals": 1, "unknown_long_context_request_count": 0,
     }
 
 
@@ -268,6 +271,9 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
             "sub2api_cost_usd": 200.0,
             "fast_correction_usd": 0.0,
             "total_cost_usd": 200.0,
+            "correction_total_usd": 0.0, "long_context_correction_usd": 0.0,
+            "model_correction_usd": 0.0, "correction_facts_complete": False,
+            "missing_correction_intervals": 1, "unknown_long_context_request_count": 0,
         },
         "start_percent": 10.0,
         "end_cost_usd": 300.0,
@@ -275,6 +281,9 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
             "sub2api_cost_usd": 300.0,
             "fast_correction_usd": 0.0,
             "total_cost_usd": 300.0,
+            "correction_total_usd": 0.0, "long_context_correction_usd": 0.0,
+            "model_correction_usd": 0.0, "correction_facts_complete": False,
+            "missing_correction_intervals": 2, "unknown_long_context_request_count": 0,
         },
         "end_percent": 15.0,
         "cost_delta_usd": 100.0,
@@ -294,6 +303,9 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
             "sub2api_cost_usd": 200.0,
             "fast_correction_usd": 0.0,
             "total_cost_usd": 200.0,
+            "correction_total_usd": 0.0, "long_context_correction_usd": 0.0,
+            "model_correction_usd": 0.0, "correction_facts_complete": False,
+            "missing_correction_intervals": 1, "unknown_long_context_request_count": 0,
         },
         "start_percent": 10.0,
         "end_cost_usd": 300.0,
@@ -301,6 +313,9 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
             "sub2api_cost_usd": 300.0,
             "fast_correction_usd": 0.0,
             "total_cost_usd": 300.0,
+            "correction_total_usd": 0.0, "long_context_correction_usd": 0.0,
+            "model_correction_usd": 0.0, "correction_facts_complete": False,
+            "missing_correction_intervals": 2, "unknown_long_context_request_count": 0,
         },
         "end_percent": 15.0,
         "cost_delta_usd": 100.0,
@@ -548,8 +563,8 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
         **headers,
     ).json()["data"]
     assert model_specific["participant_total_usd"] == 100.0
-    assert calls == {"keys": 2, "logs": 2}
-    assert ParticipantAPIUsageSnapshot.objects.count() == 2
+    assert calls == {"keys": 1, "logs": 1}
+    assert ParticipantAPIUsageSnapshot.objects.count() == 1
 
     config.fast_correction_enabled = False
     config.save(update_fields=["fast_correction_enabled"])
@@ -559,8 +574,8 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
     ).json()["data"]
     assert uncorrected["fast_correction_enabled"] is False
     assert uncorrected["participant_total_usd"] == 100.0
-    assert calls == {"keys": 3, "logs": 3}
-    assert ParticipantAPIUsageSnapshot.objects.count() == 3
+    assert calls == {"keys": 1, "logs": 1}
+    assert ParticipantAPIUsageSnapshot.objects.count() == 1
     assert (
         client.get(
             f"/api/statistics/participants/{hidden.id}/api-usage",

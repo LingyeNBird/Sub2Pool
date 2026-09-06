@@ -127,8 +127,7 @@ def fetch_fast_correction(
 ) -> tuple[FastCorrectionInterval | None, str]:
     """读取一个原始采样区间的 FAST 请求；失败不阻断核心百分比采样。"""
 
-    if not config.fast_correction_enabled:
-        return None, ""
+    # Capture all requests even while every correction is off: later edits are local.
     if not callable(getattr(client, "usage_logs", None)):
         return None, ""
 

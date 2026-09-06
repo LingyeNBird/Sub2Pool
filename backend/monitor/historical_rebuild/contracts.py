@@ -6,6 +6,7 @@ from datetime import datetime
 import os
 from typing import Any
 
+from ..billing_correction.rules import CORRECTION_SETTINGS
 from ..accounting.contracts import ALGORITHM_VERSION
 from ..fact_utils import (
     canonical_digest,
@@ -19,6 +20,8 @@ from ..models import (
     MonitoredAccount,
     Observation,
     ObservationFastCorrection,
+    ObservationBillingCapture,
+    BillingUsageFact,
     ParticipantBalanceSample,
     ParticipantSnapshot,
     PoolParticipant,
@@ -57,7 +60,7 @@ def config_digest(
         "safety_factor",
         "daily_estimate_min_percent_span",
     )
-    values = {field: getattr(config, field) for field in fields}
+    values = {field: getattr(config, field) for field in set(fields) | CORRECTION_SETTINGS}
     values["account"] = {
         "external_account_id": account.external_account_id,
         "quota_query_mode": account.quota_query_mode,
@@ -114,6 +117,12 @@ def source_fact_digest(account_id: int) -> str:
             .order_by("observation_id", "sub2api_user_id", "id")
             .values()
             .iterator(chunk_size=512),
+            "billing_captures": ObservationBillingCapture.objects.filter(
+                observation__account_id=account_id
+            ).order_by("observation_id").values().iterator(chunk_size=512),
+            "billing_usage_facts": BillingUsageFact.objects.filter(
+                capture__observation__account_id=account_id
+            ).order_by("capture_id", "source_log_id").values().iterator(chunk_size=512),
             "participant_usage": ParticipantUsageSample.objects.filter(
                 account_id=account_id
             )

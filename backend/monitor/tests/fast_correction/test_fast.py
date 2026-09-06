@@ -194,6 +194,10 @@ def test_sampling_applies_ordered_model_fast_correction_rules(monkeypatch):
             "fast_billed_cost_usd": 80.0,
             "correction_usd": 0.0,
             "corrected_fast_cost_usd": 80.0,
+            "raw_cost_usd": 180.0, "corrected_cost_usd": 180.0,
+            "fast_correction_usd": 0.0, "long_context_correction_usd": 0.0,
+            "model_correction_usd": 0.0, "correction_total_usd": 0.0,
+            "unknown_long_context_request_count": 1,
         },
         {
             "sub2api_user_id": 52,
@@ -206,13 +210,17 @@ def test_sampling_applies_ordered_model_fast_correction_rules(monkeypatch):
             "fast_billed_cost_usd": 20.0,
             "correction_usd": 5.0,
             "corrected_fast_cost_usd": 25.0,
+            "raw_cost_usd": 20.0, "corrected_cost_usd": 25.0,
+            "fast_correction_usd": 5.0, "long_context_correction_usd": 0.0,
+            "model_correction_usd": 0.0, "correction_total_usd": 5.0,
+            "unknown_long_context_request_count": 0,
         },
     ]
     snapshot = ParticipantSnapshot.objects.get(participant=participant)
     assert snapshot.selected_cost == Decimal("150")
 
 @pytest.mark.django_db
-def test_disabled_fast_correction_skips_log_reads_and_preserves_null_interval(
+def test_disabled_fast_correction_still_captures_raw_requests_for_future_repricing(
     monkeypatch,
 ):
     config = AppSettings.load()
@@ -250,14 +258,15 @@ def test_disabled_fast_correction_skips_log_reads_and_preserves_null_interval(
             return UserBalance(Decimal("500"), Decimal("0"))
 
         def usage_logs(self, **_kwargs):
-            raise AssertionError("关闭 FAST 修正后不应读取请求日志")
+            return []  # Capture an explicit empty interval, rather than unknown evidence.
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
     run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     observation = Observation.objects.get()
-    assert observation.fast_correction_standard_cost is None
-    assert observation.fast_correction_actual_cost is None
+    assert observation.fast_correction_standard_cost == Decimal("0")
+    assert observation.fast_correction_actual_cost == Decimal("0")
+    assert observation.billing_capture.request_count == 0
     assert observation.selected_total_cost == Decimal("100")
 
 @pytest.mark.django_db
@@ -406,6 +415,10 @@ def test_admin_can_calculate_one_missing_fast_interval_without_bulk_rebuild(
         "observation_id": target.id,
         "fast_correction_usd": 20.0,
         "fast_correction_calculated": True,
+        "correction_calculated": True, "correction_facts_complete": True,
+        "correction_total_usd": 20.0, "legacy_fast_only": False,
+        "long_context_correction_usd": 0.0, "model_correction_usd": 0.0,
+        "missing_model_request_count": 0, "unknown_long_context_request_count": 0,
     }
     assert calls == [
         (7, previous.observed_at, target.observed_at, "Asia/Shanghai")

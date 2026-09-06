@@ -7,7 +7,7 @@ from .participants import Participant
 
 
 class ParticipantAPIUsageSnapshot(models.Model):
-    """一次参与者 API 密钥用量汇总结论；不保存逐条请求日志。"""
+    """Cached projection with a verified interval in the raw request ledger."""
 
     participant = models.ForeignKey(
         Participant,
@@ -38,6 +38,10 @@ class ParticipantAPIUsageSnapshot(models.Model):
         default=0,
     )
     api_keys = models.JSONField(default=list)
+    raw_facts_available = models.BooleanField(default=False)
+    raw_request_count = models.PositiveIntegerField(null=True, blank=True)
+    raw_user_id = models.BigIntegerField(null=True, blank=True)
+    raw_api_keys = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["-observed_at", "-id"]

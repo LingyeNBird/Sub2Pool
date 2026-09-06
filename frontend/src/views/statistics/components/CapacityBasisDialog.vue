@@ -3,14 +3,10 @@ import { ref } from "vue";
 
 import CalculationBasisHeader from "@/components/common/CalculationBasisHeader.vue";
 import CalculationBasisTimeline from "@/components/common/CalculationBasisTimeline.vue";
+import CostBreakdownValue from "@/components/common/CostBreakdownValue.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import type { StatisticsData } from "@/types/statistics";
-import {
-  formatCostBreakdown,
-  formatCostTerms,
-  formatCurrency,
-  formatPercent,
-} from "@/utils/formatters";
+import { formatCurrency, formatPercent } from "@/utils/formatters";
 
 defineProps<{
   data: StatisticsData;
@@ -55,18 +51,29 @@ defineExpose({ open, close });
         />
         <CalculationBasisTimeline
           :start-time="dateTime(data.capacity_summary.cycle.starts_at)"
-          :start-value="`${formatCostBreakdown(
-            data.capacity_summary.cycle.start_cost_usd,
-            data.capacity_summary.cycle.start_cost_breakdown,
-            data.fast_correction_enabled,
-          )} / ${formatPercent(data.capacity_summary.cycle.start_percent)}`"
           :end-time="dateTime(data.capacity_summary.cycle.observed_at)"
-          :end-value="`${formatCostBreakdown(
-            data.capacity_summary.cycle.end_cost_usd,
-            data.capacity_summary.cycle.end_cost_breakdown,
-            data.fast_correction_enabled,
-          )} / ${formatPercent(data.capacity_summary.cycle.end_percent)}`"
-        />
+          ><template #start-value
+            ><CostBreakdownValue
+              :total="data.capacity_summary.cycle.start_cost_usd"
+              :breakdown="data.capacity_summary.cycle.start_cost_breakdown"
+              :show-corrections="data.account.provider !== 'cpa'"
+            />
+            /
+            {{
+              formatPercent(data.capacity_summary.cycle.start_percent)
+            }}</template
+          ><template #end-value
+            ><CostBreakdownValue
+              :total="data.capacity_summary.cycle.end_cost_usd"
+              :breakdown="data.capacity_summary.cycle.end_cost_breakdown"
+              :show-corrections="data.account.provider !== 'cpa'"
+            />
+            /
+            {{
+              formatPercent(data.capacity_summary.cycle.end_percent)
+            }}</template
+          ></CalculationBasisTimeline
+        >
         <div class="mt-3 rounded-box border border-base-300 p-4">
           <div class="text-center text-sm font-semibold opacity-60">
             周期累计端点公式
@@ -74,19 +81,17 @@ defineExpose({ open, close });
           <p
             class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
           >
-            (({{
-              formatCostTerms(
-                data.capacity_summary.cycle.end_cost_usd,
-                data.capacity_summary.cycle.end_cost_breakdown,
-                data.fast_correction_enabled,
-              )
-            }}) − ({{
-              formatCostTerms(
-                data.capacity_summary.cycle.start_cost_usd,
-                data.capacity_summary.cycle.start_cost_breakdown,
-                data.fast_correction_enabled,
-              )
-            }})) ÷ ({{
+            ((<CostBreakdownValue
+              :total="data.capacity_summary.cycle.end_cost_usd"
+              :breakdown="data.capacity_summary.cycle.end_cost_breakdown"
+              :show-corrections="data.account.provider !== 'cpa'"
+              terms-only
+            />) − (<CostBreakdownValue
+              :total="data.capacity_summary.cycle.start_cost_usd"
+              :breakdown="data.capacity_summary.cycle.start_cost_breakdown"
+              :show-corrections="data.account.provider !== 'cpa'"
+              terms-only
+            />)) ÷ ({{
               formatPercent(data.capacity_summary.cycle.end_percent)
             }}
             − {{ formatPercent(data.capacity_summary.cycle.start_percent) }}) ×
@@ -107,18 +112,29 @@ defineExpose({ open, close });
         />
         <CalculationBasisTimeline
           :start-time="dateTime(data.capacity_summary.today.observed_from)"
-          :start-value="`${formatCostBreakdown(
-            data.capacity_summary.today.start_cost_usd,
-            data.capacity_summary.today.start_cost_breakdown,
-            data.fast_correction_enabled,
-          )} / ${formatPercent(data.capacity_summary.today.start_percent)}`"
           :end-time="dateTime(data.capacity_summary.today.observed_to)"
-          :end-value="`${formatCostBreakdown(
-            data.capacity_summary.today.end_cost_usd,
-            data.capacity_summary.today.end_cost_breakdown,
-            data.fast_correction_enabled,
-          )} / ${formatPercent(data.capacity_summary.today.end_percent)}`"
-        />
+          ><template #start-value
+            ><CostBreakdownValue
+              :total="data.capacity_summary.today.start_cost_usd"
+              :breakdown="data.capacity_summary.today.start_cost_breakdown"
+              :show-corrections="data.account.provider !== 'cpa'"
+            />
+            /
+            {{
+              formatPercent(data.capacity_summary.today.start_percent)
+            }}</template
+          ><template #end-value
+            ><CostBreakdownValue
+              :total="data.capacity_summary.today.end_cost_usd"
+              :breakdown="data.capacity_summary.today.end_cost_breakdown"
+              :show-corrections="data.account.provider !== 'cpa'"
+            />
+            /
+            {{
+              formatPercent(data.capacity_summary.today.end_percent)
+            }}</template
+          ></CalculationBasisTimeline
+        >
         <div class="mt-3 rounded-box border border-base-300 p-4">
           <div class="text-center text-sm font-semibold opacity-60">
             日内增量公式
@@ -126,19 +142,17 @@ defineExpose({ open, close });
           <p
             class="mt-2 text-center font-mono text-base leading-relaxed font-semibold sm:text-lg"
           >
-            (({{
-              formatCostTerms(
-                data.capacity_summary.today.end_cost_usd,
-                data.capacity_summary.today.end_cost_breakdown,
-                data.fast_correction_enabled,
-              )
-            }}) − ({{
-              formatCostTerms(
-                data.capacity_summary.today.start_cost_usd,
-                data.capacity_summary.today.start_cost_breakdown,
-                data.fast_correction_enabled,
-              )
-            }})) ÷ ({{
+            ((<CostBreakdownValue
+              :total="data.capacity_summary.today.end_cost_usd"
+              :breakdown="data.capacity_summary.today.end_cost_breakdown"
+              :show-corrections="data.account.provider !== 'cpa'"
+              terms-only
+            />) − (<CostBreakdownValue
+              :total="data.capacity_summary.today.start_cost_usd"
+              :breakdown="data.capacity_summary.today.start_cost_breakdown"
+              :show-corrections="data.account.provider !== 'cpa'"
+              terms-only
+            />)) ÷ ({{
               formatPercent(data.capacity_summary.today.end_percent)
             }}
             − {{ formatPercent(data.capacity_summary.today.start_percent) }}) ×

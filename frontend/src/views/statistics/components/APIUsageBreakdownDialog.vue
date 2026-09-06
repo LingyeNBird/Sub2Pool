@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CorrectionAmount from "@/components/common/CorrectionAmount.vue";
 import { computed, ref } from "vue";
 
 import { useDateTime } from "@/composables/useDateTime";
@@ -69,7 +70,7 @@ defineExpose({ open, close });
         </h2>
         <span
           class="responsive-help-tooltip tooltip tooltip-bottom"
-          data-tip="只统计当前上游周期。各 API 金额由 Sub2API 请求日志按密钥汇总；启用 FAST 修正时，priority 请求会按官方 2.5 倍相对 Sub2API 2 倍补足。该结论不参与粒子滤波，最多每小时刷新一次。"
+          data-tip="只统计当前上游周期。各 API 金额由本地原始请求事实按当前 FAST、长上下文与模型倍率规则汇总；修改规则可直接重算。该用量面板不参与粒子滤波，上游事实最多每小时刷新一次。"
         >
           <button
             type="button"
@@ -172,9 +173,10 @@ defineExpose({ open, close });
           统计区间：{{ dateTime(data.starts_at) }} 至
           {{ dateTime(data.observed_to) }}；成本口径：{{
             data.cost_basis === "actual" ? "实际扣费" : "标准扣费"
-          }}；FAST 修正：{{
-            data.fast_correction_enabled ? "已应用" : "未应用"
-          }}。结论生成时间：{{ dateTime(data.observed_to) }}。
+          }};<CorrectionAmount
+            :breakdown="data"
+            label="修正合计 "
+          />。结论生成时间：{{ dateTime(data.observed_to) }}。
         </p>
       </template>
 

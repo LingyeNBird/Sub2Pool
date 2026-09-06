@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework.serializers import ValidationError
 from rest_framework.permissions import IsAuthenticated
 
+from ..billing_correction.rules import CORRECTION_SETTINGS
 from ..access import HasPageAccess, visible_accounts_for
 from ..api_auth import APIKeyAuthentication, generate_api_key
 from ..cpa.collector_state import get_collector_status
@@ -42,6 +43,8 @@ DERIVED_RESULT_SETTINGS = frozenset(
         "recommendation_change_usd",
     }
 )
+DERIVED_RESULT_SETTINGS |= CORRECTION_SETTINGS
+
 CPA_PRICING_SETTINGS = frozenset(
     {
         "cpa_fast_multiplier",
@@ -64,7 +67,7 @@ PLAN_RELEVANT_SETTINGS = frozenset(
     }
 )
 
-
+PLAN_RELEVANT_SETTINGS |= CORRECTION_SETTINGS
 
 
 def _temporary_sub2api_client(

@@ -1,0 +1,77 @@
+name: Billing corrections browser regression
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: billing-corrections-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  billing-regression:
+    name: Source integrity, migration and browser regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DJANGO_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify actual source delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git ls-files '.billing-feature.part*')"
+          git ls-files --error-unmatch backend/monitor/billing_correction/domain.py backend/monitor/migrations/0049_traceable_billing_corrections.py frontend/src/views/settings/general/components/BillingCorrectionCard.vue scripts/billing_browser_smoke.py
+          export BILLING_REVIEW_OUTPUT="$RUNNER_TEMP/billing-review"
+          echo "BILLING_REVIEW_OUTPUT=$BILLING_REVIEW_OUTPUT" >> "$GITHUB_ENV"
+          mkdir -p "$BILLING_REVIEW_OUTPUT"
+          git rev-parse HEAD > "$BILLING_REVIEW_OUTPUT/tested-commit.txt"
+          git ls-tree -r HEAD > "$BILLING_REVIEW_OUTPUT/source-manifest.txt"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+      - name: Test billing policies and migration
+        working-directory: backend
+        run: |
+          uv run --frozen pytest monitor/tests/billing_correction monitor/tests/migrations/test_billing_corrections.py --junitxml="$BILLING_REVIEW_OUTPUT/billing-tests.xml"
+          uv run --frozen python manage.py makemigrations --check --dry-run
+          uv run --frozen python manage.py check
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: corepack enable
+      - name: Check and build both frontends
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check
+          pnpm build
+          pnpm build:demo
+      - name: Install isolated browser test dependency
+        working-directory: backend
+        run: uv run --frozen --with playwright==1.57.0 python -m playwright install --with-deps chromium
+      - name: Exercise settings, local repricing and correction details
+        working-directory: backend
+        run: uv run --frozen --with playwright==1.57.0 python ../scripts/billing_browser_smoke.py
+      - name: Retain review evidence without databases or credentials
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-regression-evidence
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/billing-review/*.png
+            ${{ runner.temp }}/billing-review/*.json
+            ${{ runner.temp }}/billing-review/*.txt
+            ${{ runner.temp }}/billing-review/*.xml
+            ${{ runner.temp }}/billing-review/*.log

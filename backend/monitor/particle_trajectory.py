@@ -268,6 +268,7 @@ def particle_trajectory_data(
         correction_prefix=FastCorrectionPrefix(
             account.fact_key,
             config.cost_basis,
+            config,
         ),
     )
     seed = stable_segment_seed(account.fact_key, segment)
