@@ -26,7 +26,7 @@ ANNOUNCEMENTS = (
         published_at="2026-09-05T00:00:00Z",
         severity="info",
         paragraphs=(
-            '根据这两篇帖子的相关研究：https://linux.do/t/topic/2861126 和https://linux.do/t/topic/2860543 ，目前已将 GPT-6 系列的默认计费倍率设置成了 1.8。如果您在 sub2API 中已经设置了这一计费倍率，还请您前往系统设置的模型计费倍率设置项中，将计费倍率改成 1。 在默认情况下，您不需要进行任何操作',
+            '根据这两篇帖子的相关研究：https://linux.do/t/topic/2861126 和https://linux.do/t/topic/2860543 ，目前已将 GPT-6 系列的默认计费倍率设置成了 1.8。如果您在 sub2API 中已经关闭了长上下文阶梯计费，还请您前往系统设置的模型计费倍率设置项中，将计费倍率改成 1。 在默认情况下，您不需要进行任何操作',
         ),
     ),
     SystemAnnouncement(
