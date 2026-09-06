@@ -243,7 +243,7 @@ async function saveRules() {
             <AppIcon name="x-mark" class="size-4" />
           </button>
         </header>
-        <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
+        <div class="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-6">
           <div class="alert items-start text-sm alert-info">
             <span
               >支持 *
@@ -268,41 +268,58 @@ async function saveRules() {
           <fieldset
             v-for="(rule, index) in draftRules"
             :key="index"
-            class="fieldset rounded-box border border-base-300 bg-base-200 p-4"
+            class="@container/rule relative fieldset min-w-0 gap-2 rounded-box border border-base-300 bg-base-200 p-3"
             :disabled="saving"
           >
-            <legend class="fieldset-legend">规则 {{ index + 1 }}</legend>
-            <div class="mb-2 flex justify-end gap-1">
+            <legend class="sr-only">规则 {{ index + 1 }}</legend>
+            <div class="flex min-h-8 items-center pr-32" aria-hidden="true">
+              <span class="font-semibold">规则 {{ index + 1 }}</span>
+            </div>
+            <div class="absolute top-2 right-2 flex items-center gap-0.5">
               <button
                 type="button"
-                class="btn btn-ghost btn-xs"
+                class="btn btn-square btn-ghost btn-sm"
                 :disabled="index === 0"
                 aria-label="上移规则"
+                title="上移规则"
                 @click="moveRule(index, -1)"
               >
-                ↑
+                <AppIcon name="chevron-up" class="size-4" />
               </button>
               <button
                 type="button"
-                class="btn btn-ghost btn-xs"
+                class="btn btn-square btn-ghost btn-sm"
                 :disabled="index === draftRules.length - 1"
                 aria-label="下移规则"
+                title="下移规则"
                 @click="moveRule(index, 1)"
               >
-                ↓
+                <AppIcon name="chevron-up" class="size-4 rotate-180" />
               </button>
               <button
                 type="button"
-                class="btn btn-ghost text-error btn-xs"
+                class="btn btn-ghost px-2 text-error btn-sm"
                 aria-label="删除规则"
+                title="删除规则"
                 @click="draftRules.splice(index, 1)"
               >
                 删除
               </button>
             </div>
-            <div class="grid gap-4 sm:grid-cols-2">
-              <label class="fieldset"
-                ><span class="fieldset-legend">模型匹配</span
+            <div
+              class="grid grid-cols-2 items-end gap-x-3 gap-y-2"
+              :class="{
+                '@lg/rule:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem]':
+                  active === 'fast',
+                '@2xl/rule:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_10rem]':
+                  active === 'long',
+                '@sm/rule:grid-cols-[minmax(0,1fr)_8.5rem]': active === 'model',
+              }"
+            >
+              <label
+                class="col-span-2 fieldset min-w-0 gap-1 p-0 @sm/rule:col-span-1"
+                ><span class="m-0 fieldset-legend block p-0 leading-snug"
+                  >模型匹配</span
                 ><input
                   v-model.trim="rule.model_pattern"
                   type="text"
@@ -310,8 +327,11 @@ async function saveRules() {
                   maxlength="160"
                   placeholder="gpt-6*"
               /></label>
-              <label v-if="active === 'model'" class="fieldset"
-                ><span class="fieldset-legend">计费倍率</span
+              <label
+                v-if="active === 'model'"
+                class="fieldset min-w-0 gap-1 p-0"
+                ><span class="m-0 fieldset-legend block p-0 leading-snug"
+                  >计费倍率</span
                 ><input
                   v-model="rule.multiplier"
                   type="number"
@@ -322,8 +342,8 @@ async function saveRules() {
                   inputmode="decimal"
               /></label>
               <template v-else>
-                <label class="fieldset"
-                  ><span class="fieldset-legend"
+                <label class="fieldset min-w-0 gap-1 p-0"
+                  ><span class="m-0 fieldset-legend block p-0 leading-snug"
                     >Sub2API {{ active === "long" ? "双倍" : "FAST" }}倍率</span
                   ><input
                     v-model="rule.source_multiplier"
@@ -334,8 +354,9 @@ async function saveRules() {
                     step="0.01"
                     inputmode="decimal"
                 /></label>
-                <label class="fieldset"
-                  ><span class="fieldset-legend">修正目标倍率</span
+                <label class="fieldset min-w-0 gap-1 p-0"
+                  ><span class="m-0 fieldset-legend block p-0 leading-snug"
+                    >修正目标倍率</span
                   ><input
                     v-model="rule.target_multiplier"
                     type="number"
@@ -345,8 +366,11 @@ async function saveRules() {
                     step="0.01"
                     inputmode="decimal"
                 /></label>
-                <label v-if="active === 'long'" class="fieldset"
-                  ><span class="fieldset-legend">兜底阈值（输入 Token）</span
+                <label
+                  v-if="active === 'long'"
+                  class="col-span-2 fieldset min-w-0 gap-1 p-0 @sm/rule:col-span-1"
+                  ><span class="m-0 fieldset-legend block p-0 leading-snug"
+                    >兜底阈值（输入 Token）</span
                   ><input
                     v-model="rule.threshold_tokens"
                     type="number"

@@ -44,6 +44,7 @@ from monitor.announcements import ANNOUNCEMENTS  # noqa: E402
 from datetime import datetime, timedelta  # noqa: E402
 from decimal import Decimal as D  # noqa: E402
 from playwright.sync_api import sync_playwright, expect  # noqa: E402
+from billing_rule_layout import check_rule_layout  # noqa: E402
 
 
 UPSTREAM = {"rows": [], "calls": [], "fail_next": False}
@@ -210,6 +211,7 @@ def smoke():
             configure = card.get_by_role("button", name=re.compile("配置规则"))
             expect(configure).to_have_count(3)
             card.screenshot(path=str(OUTPUT / "settings-card.png"))
+            check_rule_layout(page, configure, OUTPUT)
             configure.nth(0).click()
             dialog = page.locator("dialog[open]").last
             expect(dialog.get_by_role("heading", name="FAST 模型修正规则")).to_be_visible()
@@ -322,7 +324,7 @@ def smoke():
             (OUTPUT / "browser-results.json").write_text(json.dumps({
                 "passed": True, "page_errors": errors, "upstream_read_count": len(UPSTREAM["calls"]),
                 "backfill_read_count": len(backfill_calls), "account_discovery_read_count": len(discovery_calls),
-                "checks": ["single settings card", "all three editors", "rule reorder/cancel", "multiplier validation", "real settings PATCH/local replay", "single observation column", "negative correction breakdown", "390px modal layout", "legacy FAST-only uncalculated link", "failed upstream read preserves data", "detail backfill and retry", "new missing interval backfill", "suffix refresh", "only local read-only usage endpoint"],
+                "checks": ["three compact editors at six widths", "rule add/move/delete/cancel", "single settings card", "all three editors", "rule reorder/cancel", "multiplier validation", "real settings PATCH/local replay", "single observation column", "negative correction breakdown", "390px modal layout", "legacy FAST-only uncalculated link", "failed upstream read preserves data", "detail backfill and retry", "new missing interval backfill", "suffix refresh", "only local read-only usage endpoint"],
             }, ensure_ascii=False, indent=2))
         except Exception:
             # Save the real assertion/navigation failure even if Chromium has
