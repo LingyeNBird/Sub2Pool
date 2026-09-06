@@ -1,0 +1,34 @@
+name: Isolated research v2 source snapshot
+on:
+  push:
+    branches: [feat/pooled-research-v2]
+    paths: [.github/workflows/research-v2-source-snapshot.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 8e18ca57a918a2d4e36196b2849d1c02d27ea2ff
+          path: pool
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: LingyeNBird/CodexSubscribeStudy
+          ref: 9f157f4d58479dfa4a2c591f4d4fd9ba36bc9026
+          path: study
+          persist-credentials: false
+      - name: Export tracked sources and manifests only
+        run: |
+          mkdir -p /tmp/research-v2-snapshot
+          git -C pool archive --prefix=Sub2Pool/ --format=tar.gz HEAD > /tmp/research-v2-snapshot/Sub2Pool.tar.gz
+          git -C study archive --prefix=CodexSubscribeStudy/ --format=tar.gz HEAD > /tmp/research-v2-snapshot/CodexSubscribeStudy.tar.gz
+          git -C pool ls-tree -r HEAD > /tmp/research-v2-snapshot/Sub2Pool-manifest.txt
+          git -C study ls-tree -r HEAD > /tmp/research-v2-snapshot/CodexSubscribeStudy-manifest.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-v2-pinned-sources
+          path: /tmp/research-v2-snapshot
+          retention-days: 3
