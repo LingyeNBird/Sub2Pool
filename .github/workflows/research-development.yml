@@ -1,0 +1,38 @@
+name: Research development snapshot
+on:
+  push:
+    branches: [feat/opt-in-gpt6-research]
+    paths: [.github/workflows/research-development.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Export source and manifest
+        run: |
+          mkdir -p /tmp/research-dev
+          git archive --format=tar.gz HEAD > /tmp/research-dev/source.tar.gz
+          git ls-tree -r HEAD > /tmp/research-dev/source-manifest.txt
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.x'
+          cache: false
+      - name: Prepare isolated Go embedded database dependencies
+        run: |
+          mkdir /tmp/research-go
+          cd /tmp/research-go
+          go mod init github.com/LingyeNBird/CodexSubscribeStudy
+          go get go.etcd.io/bbolt@v1.4.3
+          printf 'package main\nimport _ "go.etcd.io/bbolt"\nfunc main() {}\n' > main.go
+          go mod tidy
+          go mod vendor
+          tar -czf /tmp/research-dev/go-dependencies.tar.gz go.mod go.sum vendor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-development-snapshot
+          path: /tmp/research-dev
+          retention-days: 3
