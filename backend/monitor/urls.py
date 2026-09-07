@@ -80,12 +80,11 @@ from .views.users import (
     SystemUserPermissionView,
 )
 
-from .views.research import ResearchSettingsView, ResearchRunView, ResearchWithdrawView
+from .views.research import ResearchSettingsView, ResearchRunView
 
 urlpatterns = [
     path("settings/research", ResearchSettingsView.as_view()),
     path("settings/research/run", ResearchRunView.as_view()),
-    path("settings/research/withdraw", ResearchWithdrawView.as_view()),
     path("health", HealthView.as_view()),
     path("auth/client-config", AuthClientConfigView.as_view()),
     path("auth/network-check", NetworkCheckView.as_view()),

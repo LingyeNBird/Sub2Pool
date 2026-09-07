@@ -1,3 +1,4 @@
+# Legacy v1 reference and regression tests only. The active worker uses pooled_data/pooled.
 """Blocked, out-of-cycle predictive comparison with latent capacity drift.
 
 This is an observational model-comparison experiment, NOT an estimate of

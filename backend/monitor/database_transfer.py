@@ -237,9 +237,8 @@ def _install_import_guard(
         ),
     )
     # Always revoke consent and the copied schedule. Preserve a usable identity
-    # for deduplication/withdrawal on same-key restores, but a different SECRET_KEY
-    # cannot decrypt it. Clear only that unusable delivery identity/state; never
-    # try to withdraw from the source installation under a newly generated key.
+    # for deduplication on same-key restores, but a different SECRET_KEY cannot
+    # decrypt it. Clear only the unusable local delivery identity and state.
     if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='monitor_researchsettings'").fetchone():
         from .research.transport import DeliveryError, decode_identity_seed
 
@@ -262,7 +261,7 @@ def _install_import_guard(
                     continue
             notice = (
                 "导入的科研签名身份不可用，已重置本地发送状态；重新授权后将创建新身份。"
-                "旧贡献未自动撤回，请在原实例撤回，或使用原密钥和备份恢复后撤回。"
+                "接收网站上的已提交贡献仍按其长期保留规则保存。"
             ) if encrypted or sent_endpoint else ""
             source.execute("""
                 UPDATE monitor_researchsettings SET identity_encrypted='',

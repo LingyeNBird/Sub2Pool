@@ -1,4 +1,5 @@
 """Separate explicit consent and immutable research facts from billing settings."""
+import uuid
 from django.db import models
 from ..research.protocol import DEFAULT_ENDPOINT
 
@@ -45,3 +46,19 @@ class ResearchRequestComponents(models.Model):
     cache_creation_cost = models.CharField(max_length=96)
     cache_read_cost = models.CharField(max_length=96)
     output_cost = models.CharField(max_length=96)
+
+
+class ResearchEvidenceBatch(models.Model):
+    """Local reproducible projection; source identifiers NEVER leave this database."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account_id = models.BigIntegerField()
+    resets_at = models.DateTimeField()
+    source_fingerprints = models.JSONField(default=dict)
+    summary = models.JSONField(default=dict)
+    sent_hashes = models.JSONField(default=dict)
+    archived_source = models.BooleanField(default=False)
+    computed_at = models.DateTimeField(null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["account_id", "resets_at"], name="research_batch_account_cycle")]

@@ -12,13 +12,14 @@ import json
 import secrets
 import socket
 import ssl
+import uuid
 from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from django.conf import settings as django_settings
 from ..secrets import decrypt_secret, encrypt_secret
-from .protocol import PROTOCOL, STUDY, METHOD, canonical, method_digest
+from .pooled_protocol import PROTOCOL, STUDY, METHOD, canonical, method_digest, MAX_BODY
 
 
 class DeliveryError(RuntimeError):
@@ -55,7 +56,7 @@ def destination_ready(endpoint):
 
 IDENTITY_ERROR_MESSAGE = (
     "科研签名身份无法解密或已损坏；请恢复原 DJANGO_SECRET_KEY，"
-    "或重新导入备份并授权以重置科研身份。旧贡献需在原实例撤回。"
+    "或重新导入备份并授权以恢复科研身份。"
 )
 
 
@@ -85,16 +86,21 @@ def identity(config, endpoint):
     return private, base64.b64encode(public).decode()
 
 
-def packet(config, summary=None, *, endpoint=None, withdraw=False):
+def packet(config, summary, *, endpoint=None, batch_id=None):
     endpoint = endpoint or config.endpoint
     private, public = identity(config, endpoint)
+    if batch_id is None:
+        raise DeliveryError("科研批次标识缺失，未发送")
     payload = {"protocol": PROTOCOL, "study_id": STUDY, "method": METHOD,
                "method_digest": method_digest(), "public_key": public, "revision": config.report_revision}
-    if not withdraw:
-        payload["summary"] = summary
-    path = "/api/v1/withdraw" if withdraw else "/api/v1/reports"
+    # Origin-isolated random-looking batch IDs remain stable across updates.
+    secret = private.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
+    digest = hashlib.sha256(secret + b"\0batch\0" + str(batch_id).encode()).digest()
+    payload["batch_id"] = str(uuid.UUID(bytes=digest[:16], version=4))
+    payload["summary"] = summary
+    path = "/api/reports"
     body = canonical(payload)
-    signature = base64.b64encode(private.sign(b"CodexSubscribeStudy/1\nPOST\n" + path.encode() + b"\n" + body)).decode()
+    signature = base64.b64encode(private.sign(b"CodexSubscribeStudy\nPOST\n" + path.encode() + b"\n" + body)).decode()
     return path, body, signature
 
 
@@ -102,7 +108,7 @@ def send(endpoint, path, body, signature):
     endpoint = normalize_endpoint(endpoint)
     if not destination_ready(endpoint):
         raise DeliveryError("接收地址尚未配置，未发出网络请求")
-    if len(body) > 32768:
+    if len(body) > MAX_BODY:
         raise DeliveryError("统计报告超过安全大小限制")
     parts = urlsplit(endpoint)
     host, port = parts.hostname, parts.port or (443 if parts.scheme == "https" else 80)

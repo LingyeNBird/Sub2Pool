@@ -75,4 +75,4 @@ __all__ = [
     "validate_service_url",
 ]
 
-from .research import ResearchSettings, ResearchRequestComponents
+from .research import ResearchSettings, ResearchRequestComponents, ResearchEvidenceBatch

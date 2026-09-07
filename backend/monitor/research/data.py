@@ -1,3 +1,4 @@
+# Legacy v1 reference and regression tests only. The active worker uses pooled_data/pooled.
 """Build disjoint quota blocks from raw snapshots, never from the quota filter.
 
 All identities and times in these dataclasses stay LOCAL. The report builder

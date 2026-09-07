@@ -4,9 +4,9 @@ from django.utils import timezone
 from rest_framework import serializers
 from .base import AdminAPIView, ok, error
 from ..models.research import ResearchSettings
-from ..research.protocol import POLICY, STUDY, consent_digest, descriptor
-from ..research.service import authorized, withdraw
-from ..research.transport import normalize_endpoint, destination_ready, DeliveryError
+from ..research.pooled_protocol import POLICY, STUDY, consent_digest, descriptor
+from ..research.service import authorized
+from ..research.transport import normalize_endpoint, destination_ready
 
 
 class ConsentSerializer(serializers.Serializer):
@@ -43,17 +43,18 @@ def state(config):
         "consent_current": authorized(config), "policy_version": POLICY,
         "last_computed_at": config.last_computed_at, "last_sent_at": config.last_sent_at,
         "next_run_at": config.next_run_at, "last_status": config.last_status, "last_error": config.last_error,
-        "can_withdraw": bool(config.last_sent_endpoint), "last_sent_endpoint": config.last_sent_endpoint,
         "summary": config.summary, "method": descriptor(),
         "available_projects": [{"id": STUDY, "title": "GPT-6 额度异常归因"}],
         "privacy": [
-            "仅发送滚动 90 天的请求总次数、GPT-6/5.6 次数、取整后的标准成本总额、总额度百分点、有效区间/周期数量和质量计数。",
-            "发送固定候选原因的预测评分均值/协方差、重抽样支持度、代表性倍率、方法版本；不发送单条请求、逐区间数据或时间序列。",
-            "不发送提示词、回答、Token 明细、账号/参与者名称或 ID、API Key、Sub2API 地址、IP 字段。",
-            "使用随机生成、按接收网站隔离的公开密钥标识去重和撤回；属于去标识化分享，不是不可关联的绝对匿名。",
-            "直接联网时接收网站及其反向代理仍能看到出口 IP；应用不记录 IP，不代表网络层完全不可见。",
-            "关闭后停止启动发送任务；已经发出的请求可能完成。关闭不会自动删除已提交统计，可单独撤回。",
-            "只有至少 200 条合格请求才发送；样本不足或不可识别时不展示结论。科研结果不会自动修改计费规则或参与者额度。",
+            "无请求数、区间数、周期数或本地置信度门槛；一条请求也能贡献，没有对应额度时只贡献规模、不伪造归因信息。",
+            "发送每个随机批次的请求/标准成本/额度汇总、质量计数、共同倍率网格的证据曲线、信息矩阵与候选下GPT-6额度份额。原始区间和时间线留在本地。",
+            "不采集、不发送、也不在科研分析中使用粒子滤波或平均恒定容量估值；没有估值辅助分析。",
+            "不发送提示词、回答、Token明细、账号或参与者名称/ID、API Key、Sub2API地址或IP字段。单条小贡献不承诺最低人数匿名保护。",
+            "FAST目标固定2倍、GPT-5.6/6长上下文不额外翻倍，其他模型计费假定正确；只联合研究GPT-6四个分项倍率，不改变运行计费或其他科研。",
+            "随机安装公钥和网站隔离批次标识用于替换去重；属于可关联的去标识化分享，不是绝对匿名。网络接收端及反向代理仍可见出口IP。",
+            "同批次更新替换，不同批次持续保留，不因120天未更新、关闭科研、更换身份或导入数据库而删除。",
+            "关闭后不再启动发送；已进入网络的请求可能完成。统计支持度以固定前提和工作模型为条件，不能等同官方计费机制的已校准概率。",
+
         ],
     }
 
@@ -102,15 +103,4 @@ class ResearchRunView(AdminAPIView):
         if not authorized(config):
             return error("请先开启并确认科研共创授权", 400)
         ResearchSettings.objects.filter(pk=1).update(next_run_at=timezone.now())
-        return ok({"scheduled": True, "message": "已排入独立科研进程；接收地址配置完成且满足最小样本量时会按授权发送"}, 202)
-
-
-class ResearchWithdrawView(AdminAPIView):
-    def post(self, request):
-        if request.data.get("confirm") is not True:
-            return error("撤回会停止后续发送，请明确确认", 400)
-        try:
-            result = withdraw()
-        except DeliveryError as exc:
-            return error(str(exc), 502)
-        return ok({"status": result})
+        return ok({"scheduled": True, "message": "已排入独立科研进程；接收地址配置完成时会按授权发送"}, 202)
