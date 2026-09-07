@@ -30,8 +30,6 @@ jobs:
     env:
       DJANGO_DEBUG: "true"
       OPENBLAS_NUM_THREADS: "1"
-      BILLING_REVIEW_OUTPUT: ${{ runner.temp }}/ci-results/billing
-      RESEARCH_REVIEW_OUTPUT: ${{ runner.temp }}/ci-results/research
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
@@ -40,6 +38,8 @@ jobs:
       - name: 记录测试版本
         run: |
           mkdir -p "$RUNNER_TEMP/ci-results"
+          echo "BILLING_REVIEW_OUTPUT=$RUNNER_TEMP/ci-results/billing" >> "$GITHUB_ENV"
+          echo "RESEARCH_REVIEW_OUTPUT=$RUNNER_TEMP/ci-results/research" >> "$GITHUB_ENV"
           git rev-parse HEAD > "$RUNNER_TEMP/ci-results/tested-commit.txt"
           git ls-tree -r HEAD > "$RUNNER_TEMP/ci-results/source-manifest.txt"
           git diff --check
