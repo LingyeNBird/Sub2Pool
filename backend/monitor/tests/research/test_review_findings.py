@@ -96,13 +96,13 @@ def assert_consent_revoked(row):
 def verify_packet(path, body, signature):
     packet = json.loads(body)
     Ed25519PublicKey.from_public_bytes(base64.b64decode(packet['public_key'])).verify(
-        base64.b64decode(signature), b'CodexSubscribeStudy/2\nPOST\n' + path.encode() + b'\n' + body,
+        base64.b64decode(signature), b'CodexSubscribeStudy\nPOST\n' + path.encode() + b'\n' + body,
     )
     return packet
 
 
-def test_import_same_key_preserves_identity_revision_and_explicit_withdrawal(monkeypatch):
-    original, public = delivered_settings()
+def test_import_same_key_preserves_identity_and_delivery_state(monkeypatch):
+    original, _ = delivered_settings()
     with closing(sqlite3.connect(':memory:')) as source:
         stage_settings(source)
         row = import_guard(source)
@@ -111,18 +111,10 @@ def test_import_same_key_preserves_identity_revision_and_explicit_withdrawal(mon
         assert row[field] == getattr(original, field)
     assert row['last_sent_at'] is not None
     config = install_settings(row)
-    assert state(config)['can_withdraw'] and not state(config)['consent_current']
-    calls = []
-    def send(endpoint, path, body, signature):
-        packet = verify_packet(path, body, signature)
-        assert endpoint == original.endpoint and path == '/api/v2/withdraw'
-        assert packet['public_key'] == public and packet['revision'] == 18
-        calls.append(packet)
-        return {'accepted': True, 'revision': packet['revision']}
-    monkeypatch.setattr(transport, 'send', send)
-    assert service.run_due() == 'disabled'
-    assert service.withdraw() == 'withdrawn'
-    assert len(calls) == 1
+    network = Mock(side_effect=AssertionError('disabled import must not send'))
+    monkeypatch.setattr(transport, 'send', network)
+    assert not state(config)['consent_current']
+    assert service.run_due() == 'disabled' and not network.called
 
 
 @pytest.mark.parametrize('damage', ['different_key', 'bad_ciphertext', 'non_ascii', 'bad_base64', 'short_seed', 'missing_seed'])
@@ -146,10 +138,9 @@ def test_import_unusable_identity_resets_only_local_delivery_state(damage, monke
     assert_consent_revoked(row)
     assert row['identity_encrypted'] == '' and row['report_revision'] == 0
     assert row['last_sent_at'] is None and row['last_sent_hash'] == row['last_sent_endpoint'] == ''
-    assert '原实例' in row['last_error'] and '重置' in row['last_error']
+    assert '长期保留' in row['last_error'] and '重置' in row['last_error']
     assert row['endpoint'] == config.endpoint and json.loads(row['projects']) == config.projects
     imported = install_settings(row)
-    assert not state(imported)['can_withdraw']
     assert service.run_due() == 'disabled' and not network.called
 
 
@@ -166,7 +157,7 @@ def test_reconsent_after_cross_key_import_can_sign_and_send_again(admin, monkeyp
     def send(endpoint, path, body, signature):
         packet = verify_packet(path, body, signature)
         assert packet['public_key'] != previous_public
-        assert packet['revision'] == 1 and endpoint == original.endpoint
+        assert packet['revision'] == 1 and endpoint == original.endpoint and path == '/api/reports'
         calls.append(packet)
         return {'accepted': True, 'revision': 1}
     monkeypatch.setattr(transport, 'send', send)
@@ -174,23 +165,6 @@ def test_reconsent_after_cross_key_import_can_sign_and_send_again(admin, monkeyp
     assert len(calls) == 1 and ResearchSettings.load().identity_encrypted
 
 
-@pytest.mark.parametrize('value', ['broken-ciphertext', '非ASCII密文', '', 'bad-base64', 'short-seed'])
-def test_withdrawal_signing_failure_still_commits_stop_and_keeps_old_identity(admin, monkeypatch, value):
-    config, _ = delivered_settings()
-    config.lease_token, config.lease_until = '', None
-    encrypted = {'bad-base64': encrypt_secret('!'), 'short-seed': encrypt_secret(base64.b64encode(b'bad').decode())}.get(value, value)
-    config.identity_encrypted = encrypted
-    config.save()
-    network = Mock(side_effect=AssertionError('invalid identity must never be sent'))
-    monkeypatch.setattr(transport, 'send', network)
-    client, headers = admin
-    response = client.post('/api/settings/research/withdraw', data='{"confirm":true}', content_type='application/json', **headers)
-    assert response.status_code == 502
-    config.refresh_from_db()
-    assert not config.enabled and config.last_status == 'withdrawal_failed'
-    assert config.next_run_at is None and config.lease_token == '' and config.lease_until is None
-    assert config.identity_encrypted == encrypted and config.last_sent_endpoint
-    assert '科研签名身份' in config.last_error and not network.called
 
 
 def test_worker_classifies_lost_key_without_silent_identity_rotation(monkeypatch):
@@ -239,7 +213,7 @@ def test_real_http_encoder_retains_tls_pinning_and_valid_explicit_host_port(monk
     monkeypatch.setattr(transport.socket, 'getaddrinfo', lambda *a, **kw: [(2, 1, 6, '', ('8.8.8.8', 443))])
     monkeypatch.setattr(transport.socket, 'create_connection', dial)
     monkeypatch.setattr(transport.ssl, 'create_default_context', lambda: tls)
-    result = transport.send('https://receiver.example.org', '/api/v1/reports', b'{}', 'signature')
+    result = transport.send('https://receiver.example.org', '/api/reports', b'{}', 'signature')
     assert result['accepted'] is True
     assert b'Host: receiver.example.org:443\r\n' in sock.sent
     dial.assert_called_once_with(('8.8.8.8', 443), timeout=10)

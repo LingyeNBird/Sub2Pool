@@ -5,9 +5,9 @@ import struct
 from pathlib import Path
 from .protocol import STUDY, FAMILIES, LABELS, candidates, canonical
 
-PROTOCOL = "codex-cost-study/2"
-METHOD = "pooled-profile/raw-only-2"
-POLICY = "research-consent/2"
+PROTOCOL = "codex-cost-study"
+METHOD = "pooled-profile/raw-only"
+POLICY = "research-consent"
 DEFAULT_ENDPOINT = "https://codex.nightunderfly.online"
 MAX_BODY = 262144
 QUALITY_KEYS = (

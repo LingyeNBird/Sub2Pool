@@ -5,8 +5,8 @@ from rest_framework import serializers
 from .base import AdminAPIView, ok, error
 from ..models.research import ResearchSettings
 from ..research.pooled_protocol import POLICY, STUDY, consent_digest, descriptor
-from ..research.service import authorized, withdraw
-from ..research.transport import normalize_endpoint, destination_ready, DeliveryError
+from ..research.service import authorized
+from ..research.transport import normalize_endpoint, destination_ready
 
 
 class ConsentSerializer(serializers.Serializer):
@@ -43,7 +43,6 @@ def state(config):
         "consent_current": authorized(config), "policy_version": POLICY,
         "last_computed_at": config.last_computed_at, "last_sent_at": config.last_sent_at,
         "next_run_at": config.next_run_at, "last_status": config.last_status, "last_error": config.last_error,
-        "can_withdraw": bool(config.last_sent_endpoint), "last_sent_endpoint": config.last_sent_endpoint,
         "summary": config.summary, "method": descriptor(),
         "available_projects": [{"id": STUDY, "title": "GPT-6 额度异常归因"}],
         "privacy": [
@@ -52,8 +51,8 @@ def state(config):
             "不采集、不发送、也不在科研分析中使用粒子滤波或平均恒定容量估值；没有估值辅助分析。",
             "不发送提示词、回答、Token明细、账号或参与者名称/ID、API Key、Sub2API地址或IP字段。单条小贡献不承诺最低人数匿名保护。",
             "FAST目标固定2倍、GPT-5.6/6长上下文不额外翻倍，其他模型计费假定正确；只联合研究GPT-6四个分项倍率，不改变运行计费或其他科研。",
-            "随机安装公钥和网站隔离批次标识用于替换去重、明确撤回；属于可关联的去标识化分享，不是绝对匿名。网络接收端及反向代理仍可见出口IP。",
-            "不同历史批次持续保留，不因120天未更新自动清理。关闭、迁移和更换身份不会自动撤回远端贡献；只有单独确认撤回才发送删除请求。",
+            "随机安装公钥和网站隔离批次标识用于替换去重；属于可关联的去标识化分享，不是绝对匿名。网络接收端及反向代理仍可见出口IP。",
+            "同批次更新替换，不同批次持续保留，不因120天未更新、关闭科研、更换身份或导入数据库而删除。",
             "关闭后不再启动发送；已进入网络的请求可能完成。统计支持度以固定前提和工作模型为条件，不能等同官方计费机制的已校准概率。",
 
         ],
@@ -104,15 +103,4 @@ class ResearchRunView(AdminAPIView):
         if not authorized(config):
             return error("请先开启并确认科研共创授权", 400)
         ResearchSettings.objects.filter(pk=1).update(next_run_at=timezone.now())
-        return ok({"scheduled": True, "message": "已排入独立科研进程；接收地址配置完成且满足最小样本量时会按授权发送"}, 202)
-
-
-class ResearchWithdrawView(AdminAPIView):
-    def post(self, request):
-        if request.data.get("confirm") is not True:
-            return error("撤回会停止后续发送，请明确确认", 400)
-        try:
-            result = withdraw()
-        except DeliveryError as exc:
-            return error(str(exc), 502)
-        return ok({"status": result})
+        return ok({"scheduled": True, "message": "已排入独立科研进程；接收地址配置完成时会按授权发送"}, 202)

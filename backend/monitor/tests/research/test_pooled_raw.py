@@ -1,4 +1,4 @@
-"""Raw-only v2: no sample gate, no estimator feedback, no automatic data loss."""
+"""Raw-only contract: no sample gate, estimator feedback or automatic data loss."""
 from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal as D
@@ -55,7 +55,7 @@ def test_one_request_one_interval_is_a_contribution_not_a_local_verdict(monkeypa
     packets = []
     def send(_endpoint, path, body, signature):
         data = json.loads(body); packets.append(data)
-        assert path == '/api/v2/reports' and signature
+        assert path == '/api/reports' and signature
         return {'revision':data['revision']}
     monkeypatch.setattr(transport, 'send', send)
     assert service.run_due() == 'sent'

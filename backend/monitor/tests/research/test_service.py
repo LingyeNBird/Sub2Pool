@@ -86,8 +86,7 @@ def test_normal_user_cannot_read_or_write_research(admin):
     get_user_model().objects.create_user('viewer',password='Viewer-Secret-2026!')
     viewer=Client();headers,_=jwt_login(viewer,username='viewer',password='Viewer-Secret-2026!')
     assert viewer.get('/api/settings/research',**headers).status_code==403
-    for path in ['settings/research/run','settings/research/withdraw']:
-        assert viewer.post('/api/'+path,**headers).status_code==403
+    assert viewer.post('/api/settings/research/run',**headers).status_code==403
     assert Client().get('/api/settings/research').status_code in (401,403)
 
 
@@ -106,8 +105,8 @@ def test_local_report_signature_dedupe_and_revisions(monkeypatch):
     packets=[]
     def send(endpoint,path,body,signature):
         data=json.loads(body);packets.append(data)
-        Ed25519PublicKey.from_public_bytes(base64.b64decode(data['public_key'])).verify(base64.b64decode(signature),b'CodexSubscribeStudy/2\nPOST\n'+path.encode()+b'\n'+body)
-        assert set(data)=={'protocol','study_id','method','method_digest','public_key','revision'} | ({'summary','batch_id'} if path.endswith('reports') else set())
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(data['public_key'])).verify(base64.b64decode(signature),b'CodexSubscribeStudy\nPOST\n'+path.encode()+b'\n'+body)
+        assert set(data)=={'protocol','study_id','method','method_digest','public_key','revision','summary','batch_id'}
         assert all(x not in body for x in [b'account_id',b'user_id',b'created_at',b'prompt',b'api_key'])
         return {'accepted':True,'revision':data['revision']}
     monkeypatch.setattr(transport,'send',send)
@@ -115,9 +114,6 @@ def test_local_report_signature_dedupe_and_revisions(monkeypatch):
     ResearchSettings.objects.update(next_run_at=None)
     assert service.run_due()=='unchanged'
     assert len(packets)==1
-    assert service.withdraw()=='withdrawn'
-    assert len(packets)==2 and packets[1]['revision']==2 and 'summary' not in packets[1]
-    assert not ResearchSettings.load().enabled
 
 
 def test_consent_revocation_during_computation_prevents_transmission(monkeypatch):
@@ -131,7 +127,7 @@ def test_consent_revocation_during_computation_prevents_transmission(monkeypatch
     assert not send.called
 
 
-def test_failed_analysis_and_uncertain_delivery_are_safe_and_withdrawable(monkeypatch):
+def test_failed_analysis_and_uncertain_delivery_preserve_state(monkeypatch):
     enable()
     def broken(now, **kwargs): raise RuntimeError('sensitive-account-name-and-IP')
     monkeypatch.setattr(service,'collect_batches',broken)
@@ -143,10 +139,6 @@ def test_failed_analysis_and_uncertain_delivery_are_safe_and_withdrawable(monkey
     assert service.run_due()=='delivery_failed'
     settings=ResearchSettings.load()
     assert settings.last_sent_endpoint and settings.identity_encrypted and settings.last_sent_at is None
-    with pytest.raises(transport.DeliveryError): service.withdraw()
-    assert ResearchSettings.load().last_status=='withdrawal_failed'
-    monkeypatch.setattr(transport,'send',lambda endpoint,path,body,sig:{'accepted':True,'revision':json.loads(body)['revision']})
-    assert service.withdraw()=='withdrawn'
 
 
 def test_method_or_scope_change_invalidates_old_consent(monkeypatch):
@@ -161,7 +153,6 @@ def test_single_flight_and_manual_run_queue(admin,monkeypatch):
     assert client.post('/api/settings/research/run',**headers).status_code==202
     ResearchSettings.objects.update(lease_until=timezone.now()+timedelta(minutes=5))
     assert service.run_due()=='busy'
-    assert client.post('/api/settings/research/withdraw',data='{}',content_type='application/json',**headers).status_code==400
 
 
 def test_identity_is_origin_isolated_and_seed_never_sent():
@@ -177,7 +168,7 @@ def test_identity_is_origin_isolated_and_seed_never_sent():
 def test_private_or_mixed_dns_is_blocked_before_socket(monkeypatch,addresses):
     monkeypatch.setattr(transport.socket,'getaddrinfo',lambda *args,**kwargs:[(2,1,6,'',(ip,443)) for ip in addresses])
     sock=Mock();monkeypatch.setattr(transport.socket,'create_connection',sock)
-    with pytest.raises(transport.DeliveryError): transport.send('https://receiver.example.org','/api/v1/reports',b'{}','test')
+    with pytest.raises(transport.DeliveryError): transport.send('https://receiver.example.org','/api/reports',b'{}','test')
     assert not sock.called
 
 
@@ -192,11 +183,11 @@ def test_no_redirects_or_credentials_or_extra_identifying_headers(monkeypatch):
     monkeypatch.setattr(transport.socket,'create_connection',lambda *a,**kw:Mock())
     monkeypatch.setattr(transport.ssl,'create_default_context',lambda:Mock(wrap_socket=lambda sock,server_hostname:sock))
     monkeypatch.setattr(transport.http.client,'HTTPConnection',Connection)
-    with pytest.raises(transport.DeliveryError,match='307'): transport.send('https://receiver.example.org','/api/v1/reports',b'{}','test')
+    with pytest.raises(transport.DeliveryError,match='307'): transport.send('https://receiver.example.org','/api/reports',b'{}','test')
     assert set(captured)=={'Content-Type','Accept','X-Study-Signature'}
 
 
-def test_database_import_clears_authorization_but_keeps_withdrawal_key():
+def test_database_import_clears_authorization_but_keeps_identity():
     import sqlite3
     import uuid
     from contextlib import closing

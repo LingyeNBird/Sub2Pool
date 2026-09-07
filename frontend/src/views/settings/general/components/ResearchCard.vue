@@ -17,7 +17,6 @@ const saving = ref(false);
 const error = ref("");
 const notice = ref("");
 const consent = ref<HTMLDialogElement | null>(null);
-const withdrawal = ref<HTMLDialogElement | null>(null);
 const accepted = ref(false);
 const dateTime = useDateTime();
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -41,9 +40,6 @@ const statusNames: Record<string, string> = {
   insufficient_data: "样本不足，暂不发送",
   delivery_failed: "发送失败，等待重试",
   analysis_failed: "分析失败，等待重试",
-  withdrawing: "撤回中",
-  withdrawal_failed: "已停止发送，撤回需重试",
-  withdrawn: "统计已撤回",
   unidentifiable: "用量组成难以区分，暂不归因",
   model_mismatch: "候选模型均不适配",
   drift_sensitive: "结论对额度波动假设敏感",
@@ -126,7 +122,7 @@ async function stop() {
     });
     form.enabled = false;
     notice.value =
-      "已停止后续发送；已经发出的请求可能完成，历史贡献可单独撤回。";
+      "已停止后续发送；已经发出的请求可能完成，已提交贡献仍会长期保留。";
     error.value = "";
   } catch (cause) {
     error.value =
@@ -146,25 +142,6 @@ async function run() {
     error.value = cause instanceof ApiError ? cause.message : "任务安排失败";
   } finally {
     saving.value = false;
-  }
-}
-async function withdraw() {
-  ++readVersion;
-  fetching = false;
-  saving.value = true;
-  try {
-    await api("settings/research/withdraw", {
-      method: "POST",
-      body: JSON.stringify({ confirm: true }),
-    });
-    notice.value = "已停止分享并撤回本安装在该网站的全部历史贡献。";
-    withdrawal.value?.close();
-  } catch (cause) {
-    error.value =
-      cause instanceof ApiError ? cause.message : "撤回失败；可再次重试";
-  } finally {
-    saving.value = false;
-    await load(true);
   }
 }
 function preventSavingClose(event: Event) {
@@ -245,7 +222,7 @@ onBeforeUnmount(() => {
           /></label>
           <p class="text-xs break-words opacity-65">
             默认接收网站已配置。也可填写你信任的 HTTPS
-            根地址；更换网站须重新授权，不会自动撤回旧贡献。留空时仅本地分析。
+            根地址；更换网站须重新授权，原网站贡献仍会长期保留。留空时仅本地分析。
           </p>
           <label class="flex flex-wrap items-center gap-2 text-sm"
             ><span>分析间隔（小时）</span
@@ -325,7 +302,7 @@ onBeforeUnmount(() => {
               查看待分享的统计内容
             </summary>
             <p class="mt-2 text-xs opacity-65">
-              预览一个批次的全部统计字段，此外只附协议/方法版本、随机公钥与批次标识、递增版本和签名。不同批次分别提交，原始请求与时间线留在本地。
+              预览一个批次的全部统计字段，此外只附协议、方法、随机公钥、批次标识、递增序号和签名。不同批次分别提交，原始请求与时间线留在本地。
             </p>
             <pre class="mt-2 max-h-72 overflow-auto text-xs">{{
               JSON.stringify(summary.preview, null, 2)
@@ -340,14 +317,6 @@ onBeforeUnmount(() => {
             {{ line }}
           </p>
         </details>
-        <button
-          v-if="state.can_withdraw"
-          class="btn btn-outline text-error btn-sm"
-          :disabled="saving"
-          @click="withdrawal?.showModal()"
-        >
-          停止并撤回已提交统计
-        </button>
       </template>
       <p v-else-if="error" class="text-sm text-error">
         {{ error }}
@@ -409,39 +378,6 @@ onBeforeUnmount(() => {
             @click="save(true)"
           >
             同意并开启
-          </button>
-        </div>
-      </div>
-    </dialog>
-    <dialog
-      ref="withdrawal"
-      class="modal"
-      aria-labelledby="research-withdraw-title"
-      @cancel="preventSavingClose"
-    >
-      <div class="modal-box">
-        <h2 id="research-withdraw-title" class="text-lg font-bold">
-          停止并撤回统计？
-        </h2>
-        <p class="mt-3 text-sm break-words">
-          会向上次发送或尝试发送的网站
-          {{ state?.last_sent_endpoint }}
-          发送签名撤回请求，并停止后续分享。网站会删除本安装的历史批次及当前统计，保留无统计内容的版本墓碑防止旧请求恢复数据。外部缓存或部署备份不保证立即消失。
-        </p>
-        <p v-if="error" class="mt-3 text-error" role="alert">{{ error }}</p>
-        <div class="modal-action">
-          <button
-            class="btn btn-sm"
-            :disabled="saving"
-            @click="withdrawal?.close()"
-          >
-            取消</button
-          ><button
-            class="btn btn-error btn-sm"
-            :disabled="saving"
-            @click="withdraw"
-          >
-            确认撤回
           </button>
         </div>
       </div>

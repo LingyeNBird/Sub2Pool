@@ -27,8 +27,6 @@ export interface ResearchState {
   next_run_at: string | null;
   last_status: string;
   last_error: string;
-  can_withdraw: boolean;
-  last_sent_endpoint: string;
   summary: ResearchSummary | Record<string, never>;
   method: { method: string; labels: string[]; components: string[] };
   privacy: string[];

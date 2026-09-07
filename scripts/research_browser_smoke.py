@@ -1,4 +1,4 @@
-"""Consent -> existing raw facts -> worker -> signed local HTTP -> withdrawal.
+"""Consent -> existing raw facts -> worker -> signed local HTTP -> stop sharing.
 
 Only temporary accounts and quota data; never production endpoints or credentials.
 The loopback exception lives solely in a generated test settings module.
@@ -46,7 +46,7 @@ class Receiver(BaseHTTPRequestHandler):
     def do_POST(self):
         length=int(self.headers['Content-Length']);assert length<=262144
         body=self.rfile.read(length);data=json.loads(body)
-        Ed25519PublicKey.from_public_bytes(base64.b64decode(data['public_key'])).verify(base64.b64decode(self.headers['X-Study-Signature']),b'CodexSubscribeStudy/2\nPOST\n'+self.path.encode()+b'\n'+body)
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(data['public_key'])).verify(base64.b64decode(self.headers['X-Study-Signature']),b'CodexSubscribeStudy\nPOST\n'+self.path.encode()+b'\n'+body)
         assert data['method_digest']==method_digest()
         assert not any(key in body for key in (b'account_id',b'prompt',b'api_key',b'created_at',b'capacity',b'auxiliary',b'particle',b'constant'))
         PACKETS.append({'path':self.path,'revision':data['revision'],'has_summary':'summary' in data,'requests':data.get('summary',{}).get('requests')})
@@ -128,15 +128,10 @@ def smoke(endpoint):
             card.get_by_role('button',name='立即停止分享',exact=True).click()
             expect(card.get_by_text('未开启',exact=True)).to_be_visible()
             assert sync(run_due)=='disabled' and len(PACKETS)==1
-            card.get_by_role('button',name='停止并撤回已提交统计',exact=True).click()
-            dialog.get_by_role('button',name='确认撤回',exact=True).click()
-            expect(page.locator('dialog[open]')).to_have_count(0)
-            expect(card.get_by_text('统计已撤回',exact=True)).to_be_visible()
-            assert len(PACKETS)==2 and PACKETS[1]['path']=='/api/v2/withdraw' and not PACKETS[1]['has_summary']
-            assert PACKETS[1]['revision']>PACKETS[0]['revision']
+            assert PACKETS[0]['path']=='/api/reports'
             assert not errors,errors
             (OUTPUT/'browser-results.json').write_text(json.dumps({'synthetic_only':True,'passed':True,'page_errors':errors,'packets':PACKETS,
-                'checks':['off by default','cancel is not consent','privacy destination notice','blank local-only destination sends nothing','one FAST long request accepted','no PF constant or auxiliary inputs','real original components','independent worker computation','new origin reconsent','signed HTTP aggregate only','mobile consent','immediate stop','signed withdrawal']},indent=2)+'\n')
+                'checks':['off by default','cancel is not consent','privacy destination notice','blank local-only destination sends nothing','one FAST long request accepted','no PF constant or auxiliary inputs','real original components','independent worker computation','new origin reconsent','signed HTTP aggregate only','mobile consent','immediate stop preserves submitted facts']},indent=2)+'\n')
         except Exception:
             (OUTPUT/'failure.txt').write_text(traceback.format_exc());page.screenshot(path=str(OUTPUT/'failure.png'),full_page=True);raise
         finally:browser.close()
@@ -146,7 +141,8 @@ if __name__=='__main__':
     processes=[]
     try:
         processes.append(subprocess.Popen([sys.executable,'manage.py','runserver','127.0.0.1:8000','--noreload'],cwd=ROOT/'backend',stdout=open(OUTPUT/'django.log','w'),stderr=subprocess.STDOUT))
-        processes.append(subprocess.Popen(['node_modules/.bin/vite','--host','127.0.0.1'],cwd=ROOT/'frontend',stdout=open(OUTPUT/'vite.log','w'),stderr=subprocess.STDOUT))
+        vite=ROOT/'frontend'/'node_modules'/'vite'/'bin'/'vite.js'
+        processes.append(subprocess.Popen(['node',str(vite),'--host','127.0.0.1'],cwd=ROOT/'frontend',stdout=open(OUTPUT/'vite.log','w'),stderr=subprocess.STDOUT))
         for url in ['http://127.0.0.1:8000/api/auth/client-config','http://127.0.0.1:5173/login']:
             for _ in range(100):
                 try:urllib.request.urlopen(url,timeout=1).close();break

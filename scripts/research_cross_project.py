@@ -50,7 +50,7 @@ def main():
     server_log=(out/'receiver.log').open('w')
     proc=subprocess.Popen([str(Path(args.study_binary).resolve())],env={**os.environ,'STUDY_ADDR':f'127.0.0.1:{port}','STUDY_DB':str(data/'receiver.db')},stdout=server_log,stderr=server_log)
     def read():
-        with urllib.request.urlopen(base+'/api/v2/studies/gpt6-components',timeout=15) as res:return json.load(res)
+        with urllib.request.urlopen(base+'/api/studies/gpt6-components',timeout=15) as res:return json.load(res)
     packets=[]
     actual_send=transport.send
     def observed_send(endpoint,path,body,signature):
@@ -98,17 +98,14 @@ def main():
         assert due()=='sent';result=read()
         assert result['totals']['requests']==3 and result['totals']['batches']==2
         count=ResearchRequestComponents.objects.count()
-        # Closing never withdraws; explicit confirmation is a different action.
         setting=ResearchSettings.load();setting.enabled=False;setting.save()
         assert due()=='disabled' and read()['totals']['requests']==3
-        assert service.withdraw()=='withdrawn'
-        assert read()['totals']['batches']==0
         assert ResearchRequestComponents.objects.count()==count
         assert ResearchEvidenceBatch.objects.count()==2
         result={'passed':True,'synthetic_only':True,'method_digest':method_digest(),'packets':packets,
             'checks':['default-off','one mixed FAST-long request accepted','same-batch incremental replacement',
                 'single-source inference without contributor gate','no estimate inputs','running estimates cannot change report',
-                '400-day original history retained','disable does not withdraw','explicit withdrawal preserves local facts']}
+                '400-day original history retained','disable preserves submitted facts and local data']}
         (out/'cross-project-results.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
         print(json.dumps(result,ensure_ascii=False,indent=2))
     finally:
