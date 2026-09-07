@@ -1,0 +1,60 @@
+name: Apply verified raw-only research source
+on:
+  push:
+    branches: [feat/pooled-research-v2]
+    paths: [.github/workflows/apply-raw-only-v2.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.repository == 'LingyeNBird/Sub2Pool'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify and apply real tracked source files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, subprocess
+          blobs = ['2ffcb3e9441e9febcb9250e923861ba7f7dc3d7a','2492b08c63b18e616bb6421727bc4dc17f3a9009','f85f4e7d036d263ca203266ff755fe1ed7296086','4fde850b97d9a511b60dd673f3abfd92d68a808c','7d2eae4ce6ef7336b8e657663d66a7746c25b48a','340340a4b7d5381bdd07c69318cf6a6833229afe','b723ba0d8ee7e6069f1f436434221a59e39ecb7d']
+          chunks = []
+          for sha in blobs:
+              response = json.loads(subprocess.check_output(['gh','api','repos/LingyeNBird/Sub2Pool/git/blobs/'+sha]))
+              raw = base64.b64decode(response['content'])
+              assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest() == sha
+              chunks.append(raw)
+          packed = base64.b64decode(b''.join(chunks), validate=True)
+          assert hashlib.sha256(packed).hexdigest() == '19d11f6d79b70b01a362f1082a7ba376ebb66bdd356b4b74f54c9a2c0c39fc64'
+          payload = json.loads(lzma.decompress(packed))
+          assert payload['repository'] == 'Sub2Pool' and len(payload['hashes']) == 25
+          for name in payload['hashes']:
+              path = pathlib.PurePosixPath(name)
+              assert not path.is_absolute() and '..' not in path.parts
+              assert name == 'README.md' or path.parts[0] in ('backend','frontend','docs','scripts')
+              assert not any(p in ('.git','.env','.venv','node_modules') for p in path.parts)
+          patch = pathlib.Path('/tmp/raw-only.patch')
+          patch.write_text(payload['patch'])
+          subprocess.run(['git','apply','--check',str(patch)],check=True)
+          subprocess.run(['git','apply','--index',str(patch)],check=True)
+          assert set(subprocess.check_output(['git','diff','--cached','--name-only']).decode().splitlines()) == set(payload['hashes'])
+          for name, expected in payload['hashes'].items():
+              assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest() == expected, name
+          assert payload['delete'] == ['.github/workflows/research-v2-source-snapshot.yml']
+          subprocess.run(['git','rm',*payload['delete'],'.github/workflows/apply-raw-only-v2.yml'],check=True)
+          subprocess.run(['git','diff','--cached','--check'],check=True)
+          print('Verified 25 real source files; no transport archives or bootstraps remain in tree.')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: pool raw GPT-6 evidence without capacity estimates or contribution gates'
+          git push origin HEAD:refs/heads/feat/pooled-research-v2
+          mkdir /tmp/raw-source
+          git rev-parse HEAD > /tmp/raw-source/commit.txt
+          git ls-tree -r HEAD > /tmp/raw-source/manifest.txt
+          git archive --format=tar.gz HEAD > /tmp/raw-source/source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-raw-only-source
+          path: /tmp/raw-source
+          retention-days: 3
