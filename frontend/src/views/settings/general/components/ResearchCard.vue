@@ -9,7 +9,7 @@ const state = ref<ResearchState | null>(null);
 const form = reactive({
   enabled: false,
   projects: [] as string[],
-  endpoint: "https://study.example.invalid",
+  endpoint: "https://codex.nightunderfly.online",
   interval_hours: 6,
   gateway_only: false,
 });
@@ -31,6 +31,7 @@ const summary = computed(() =>
 );
 const statusNames: Record<string, string> = {
   disabled: "未开启",
+  no_data: "等待第一份本地记录",
   scheduled: "等待科研进程",
   analyzing: "分析中",
   analyzed: "已完成本地分析",
@@ -156,7 +157,7 @@ async function withdraw() {
       method: "POST",
       body: JSON.stringify({ confirm: true }),
     });
-    notice.value = "已停止分享并撤回本安装的当前统计。";
+    notice.value = "已停止分享并撤回本安装在该网站的全部历史贡献。";
     withdrawal.value?.close();
   } catch (cause) {
     error.value =
@@ -194,8 +195,8 @@ onBeforeUnmount(() => {
         <span class="badge badge-ghost badge-sm">默认关闭 · 自愿参与</span>
       </div>
       <p class="text-sm opacity-70">
-        用本地原始用量与额度快照，比较 GPT-6
-        不同计费解释。不采集请求内容，不改变你的额度测算或计费规则。
+        用本地原始用量与额度快照，向共研中心贡献 GPT-6
+        分项证据。不采集请求内容，不改变你的额度测算或计费规则。
       </p>
       <p v-if="demo" class="alert text-sm alert-info">
         演示站不启用科研、不保存授权，也不发送任何数据。
@@ -240,11 +241,11 @@ onBeforeUnmount(() => {
               type="url"
               class="input w-full min-w-0 font-mono text-sm"
               maxlength="512"
-              placeholder="https://study.example.invalid"
+              placeholder="https://codex.nightunderfly.online"
           /></label>
           <p class="text-xs break-words opacity-65">
-            当前为占位地址时不建立网络连接，只做本地分析。上线后由管理员配置
-            HTTPS 网站根地址。更换网站需重新确认授权，建议先撤回旧网站的贡献。
+            默认接收网站已配置。也可填写你信任的 HTTPS
+            根地址；更换网站须重新授权，不会自动撤回旧贡献。留空时仅本地分析。
           </p>
           <label class="flex flex-wrap items-center gap-2 text-sm"
             ><span>分析间隔（小时）</span
@@ -262,7 +263,7 @@ onBeforeUnmount(() => {
               class="checkbox mt-1 shrink-0 checkbox-sm"
             /><span
               >我确认研究涉及的账号在研究期间只经此 Sub2API 使用，没有 ChatGPT
-              网页端、其他网关或未采集调用消耗同一额度池。无法确认时仍可统计，但不参与原因排名。</span
+              网页端、其他网关或未采集调用消耗同一额度池。无法确认也可贡献，会标记覆盖不确定性，而不是拒绝参与。</span
             ></label
           >
           <div class="flex flex-wrap gap-2">
@@ -297,46 +298,37 @@ onBeforeUnmount(() => {
           }}<br />上次确认发送：{{ dateTime(state.last_sent_at) }}
         </div>
         <div v-if="summary" class="space-y-3">
-          <h3 class="font-semibold">
-            本安装 · 滚动 {{ summary.window_days }} 天
-          </h3>
+          <h3 class="font-semibold">本安装 · 持久科研批次</h3>
           <p class="text-sm">
-            {{ summary.requests.toLocaleString() }} 次合格请求（GPT-6
+            {{ summary.requests.toLocaleString() }} 次请求（GPT-6
             {{ summary.gpt6_requests.toLocaleString() }} 次） · ${{
               summary.raw_usd.toLocaleString()
             }}
             标准成本 · {{ summary.quota_points }} 额度百分点 ·
-            {{ summary.cycles }} 个账号周期 / {{ summary.blocks }} 个区间
+            {{ summary.batches }} 个批次 / {{ summary.intervals }} 个可对齐区间
           </p>
-          <p class="text-sm font-medium">
-            {{ statusNames[summary.status] ?? summary.status }}
-          </p>
-          <div v-if="summary.eligible" class="space-y-2">
-            <div
-              v-for="(label, index) in state.method.labels"
-              :key="label"
-              class="flex items-center justify-between gap-2 text-sm"
-            >
-              <span>{{ label }}</span
-              ><span class="font-mono"
-                >{{ ((summary.support[index] ?? 0) * 100).toFixed(1) }}%</span
-              >
-            </div>
-          </div>
           <p class="text-xs opacity-65">
-            支持度是按账号周期重抽样后的预测胜率，不是真实计费机制的概率。仅研究用量覆盖完整、普通档位、非长上下文且只含
-            GPT-5.6/GPT-6 的区间。至少 2 个周期、24 个区间、200
-            次请求才尝试归因，数据相似或波动干扰大时不强行给答案。
+            无请求数、周期数、区间数或本地置信度门槛，一条请求也能贡献。中心联合各份证据，不要求你独立研究成功。
+            FAST 固定 2 倍，GPT-5.6/6
+            长上下文不额外翻倍，其他模型按既有正确计费；只研究 GPT-6 四分项。
+            不采集、不上传、不使用粒子滤波或平均恒定估值，也没有估值辅助分析。
+          </p>
+          <p v-if="summary.archived_batches" class="text-xs text-warning">
+            {{ summary.archived_batches }}
+            个批次的原始历史有缺口，已保留原有证据，不以残缺数据覆盖或自动删除贡献。
+          </p>
+          <p v-if="summary.intervals === 0" class="text-xs opacity-65">
+            当前记录仍可贡献规模；尚无可对齐的原始额度区间，不伪造原因支持度。
           </p>
           <details class="rounded-box bg-base-100 p-3">
             <summary class="cursor-pointer text-sm font-medium">
               查看待分享的统计内容
             </summary>
             <p class="mt-2 text-xs opacity-65">
-              此外仅附协议/方法版本、随机公钥标识、递增版本和签名；原始请求与时间序列留在本地。此预览不是逐请求数据。
+              预览一个批次的全部统计字段，此外只附协议/方法版本、随机公钥与批次标识、递增版本和签名。不同批次分别提交，原始请求与时间线留在本地。
             </p>
             <pre class="mt-2 max-h-72 overflow-auto text-xs">{{
-              JSON.stringify(summary, null, 2)
+              JSON.stringify(summary.preview, null, 2)
             }}</pre>
           </details>
         </div>
@@ -377,7 +369,7 @@ onBeforeUnmount(() => {
         </h2>
         <p class="mt-3 text-sm">
           接收网站：<strong class="break-all">{{
-            form.endpoint || "https://study.example.invalid"
+            form.endpoint || "https://codex.nightunderfly.online"
           }}</strong>
         </p>
         <p class="mt-2 text-sm">
@@ -434,7 +426,7 @@ onBeforeUnmount(() => {
         <p class="mt-3 text-sm break-words">
           会向上次发送或尝试发送的网站
           {{ state?.last_sent_endpoint }}
-          发送签名撤回请求，并停止后续分享。网站会删除本安装的当前统计，保留无统计内容的版本墓碑防止旧请求恢复数据。外部缓存或部署备份不保证立即消失。
+          发送签名撤回请求，并停止后续分享。网站会删除本安装的历史批次及当前统计，保留无统计内容的版本墓碑防止旧请求恢复数据。外部缓存或部署备份不保证立即消失。
         </p>
         <p v-if="error" class="mt-3 text-error" role="alert">{{ error }}</p>
         <div class="modal-action">

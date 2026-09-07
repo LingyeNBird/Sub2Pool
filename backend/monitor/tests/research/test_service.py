@@ -7,11 +7,18 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from django.contrib.auth import get_user_model
 from django.test import Client, override_settings
 from django.utils import timezone
-from monitor.models import ResearchSettings
+from monitor.models import ResearchSettings, ResearchEvidenceBatch
 from monitor.research import service, transport
-from monitor.research.protocol import STUDY, POLICY, consent_digest
+from monitor.research.pooled_protocol import STUDY, POLICY, consent_digest, DEFAULT_ENDPOINT
 from monitor.tests.helpers import jwt_login
-from .synthetic import simulate
+from monitor.research.pooled import Interval, summarize
+
+
+def sample_batches():
+    from datetime import datetime, timezone as utc
+    summary = summarize([Interval(0, 1, 1, 2, (1, 1, 3, 1))], requests=1, gpt6_requests=1, raw_usd=8, gpt6_raw_usd=6, gateway_only=True)
+    batch, _ = ResearchEvidenceBatch.objects.get_or_create(account_id=7, resets_at=datetime(2026, 1, 8, tzinfo=utc.utc), defaults={"summary": summary})
+    return [batch]
 
 pytestmark = pytest.mark.django_db
 
@@ -39,12 +46,12 @@ def enable(endpoint='https://research.example.org'):
 
 def test_defaults_off_and_admin_read_never_sends(admin, monkeypatch):
     send=Mock(side_effect=AssertionError('network not expected'));monkeypatch.setattr(transport,'send',send)
-    collect=Mock(side_effect=AssertionError('analysis not expected'));monkeypatch.setattr(service,'collect_cycles',collect)
+    collect=Mock(side_effect=AssertionError('analysis not expected'));monkeypatch.setattr(service,'collect_batches',collect)
     client,headers=admin
     response=client.get('/api/settings/research',**headers)
     data=response.json()['data']
-    assert not data['enabled'] and not data['consent_current'] and not data['destination_ready']
-    assert data['endpoint']=='https://study.example.invalid'
+    assert not data['enabled'] and not data['consent_current'] and data['destination_ready']
+    assert data['endpoint']==DEFAULT_ENDPOINT
     assert 'identity_encrypted' not in data and 'consent_hash' not in data
     assert service.run_due()=='disabled'
     assert not collect.called and not send.called
@@ -86,21 +93,21 @@ def test_normal_user_cannot_read_or_write_research(admin):
 
 def test_placeholder_analyzes_without_dns_and_saves_no_new_billing_data(monkeypatch):
     enable('https://study.example.invalid')
-    monkeypatch.setattr(service,'collect_cycles',lambda now:(simulate(),{}))
+    monkeypatch.setattr(service,'collect_batches',lambda now, **kwargs:sample_batches())
     monkeypatch.setattr(transport.socket,'getaddrinfo',Mock(side_effect=AssertionError('no DNS')))
     assert service.run_due()=='destination_unconfigured'
     settings=ResearchSettings.load()
-    assert settings.summary['eligible'] and settings.last_sent_at is None and settings.identity_encrypted==''
+    assert settings.summary['requests'] == 1 and settings.last_sent_at is None and settings.identity_encrypted==''
     assert service.run_due()=='not_due'
 
 
 def test_local_report_signature_dedupe_and_revisions(monkeypatch):
-    enable();monkeypatch.setattr(service,'collect_cycles',lambda now:(simulate(),{}))
+    enable();monkeypatch.setattr(service,'collect_batches',lambda now, **kwargs:sample_batches())
     packets=[]
     def send(endpoint,path,body,signature):
         data=json.loads(body);packets.append(data)
-        Ed25519PublicKey.from_public_bytes(base64.b64decode(data['public_key'])).verify(base64.b64decode(signature),b'CodexSubscribeStudy/1\nPOST\n'+path.encode()+b'\n'+body)
-        assert set(data)=={'protocol','study_id','method','method_digest','public_key','revision'} | ({'summary'} if path.endswith('reports') else set())
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(data['public_key'])).verify(base64.b64decode(signature),b'CodexSubscribeStudy/2\nPOST\n'+path.encode()+b'\n'+body)
+        assert set(data)=={'protocol','study_id','method','method_digest','public_key','revision'} | ({'summary','batch_id'} if path.endswith('reports') else set())
         assert all(x not in body for x in [b'account_id',b'user_id',b'created_at',b'prompt',b'api_key'])
         return {'accepted':True,'revision':data['revision']}
     monkeypatch.setattr(transport,'send',send)
@@ -115,10 +122,10 @@ def test_local_report_signature_dedupe_and_revisions(monkeypatch):
 
 def test_consent_revocation_during_computation_prevents_transmission(monkeypatch):
     enable()
-    def collect(now):
+    def collect(now, **kwargs):
         ResearchSettings.objects.update(enabled=False,config_revision=1)
-        return simulate(),{}
-    monkeypatch.setattr(service,'collect_cycles',collect)
+        return sample_batches()
+    monkeypatch.setattr(service,'collect_batches',collect)
     send=Mock();monkeypatch.setattr(transport,'send',send)
     assert service.run_due()=='consent_changed'
     assert not send.called
@@ -126,12 +133,12 @@ def test_consent_revocation_during_computation_prevents_transmission(monkeypatch
 
 def test_failed_analysis_and_uncertain_delivery_are_safe_and_withdrawable(monkeypatch):
     enable()
-    def broken(now): raise RuntimeError('sensitive-account-name-and-IP')
-    monkeypatch.setattr(service,'collect_cycles',broken)
+    def broken(now, **kwargs): raise RuntimeError('sensitive-account-name-and-IP')
+    monkeypatch.setattr(service,'collect_batches',broken)
     assert service.run_due()=='analysis_failed'
     assert 'sensitive' not in ResearchSettings.load().last_error
     ResearchSettings.objects.update(next_run_at=None)
-    monkeypatch.setattr(service,'collect_cycles',lambda now:(simulate(),{}))
+    monkeypatch.setattr(service,'collect_batches',lambda now, **kwargs:sample_batches())
     monkeypatch.setattr(transport,'send',Mock(side_effect=transport.DeliveryError('科研统计发送失败')))
     assert service.run_due()=='delivery_failed'
     settings=ResearchSettings.load()
@@ -144,7 +151,7 @@ def test_failed_analysis_and_uncertain_delivery_are_safe_and_withdrawable(monkey
 
 def test_method_or_scope_change_invalidates_old_consent(monkeypatch):
     settings=enable();settings.gateway_only=False;settings.save()
-    collect=Mock();monkeypatch.setattr(service,'collect_cycles',collect)
+    collect=Mock();monkeypatch.setattr(service,'collect_batches',collect)
     assert service.run_due()=='disabled' and not collect.called
 
 

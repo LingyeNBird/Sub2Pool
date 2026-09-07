@@ -4,7 +4,7 @@ from decimal import Decimal as D
 import pytest
 from django.utils import timezone
 from monitor.models import AppSettings, Observation, ResearchSettings, ResearchRequestComponents
-from monitor.research.protocol import consent_digest, STUDY
+from monitor.research.pooled_protocol import consent_digest, STUDY
 from monitor.research.data import _block, Ineligible, quota_time, collect_cycles
 from monitor.billing_correction.persistence import persist_capture
 from monitor.fast_correction.domain import aggregate_fast_logs

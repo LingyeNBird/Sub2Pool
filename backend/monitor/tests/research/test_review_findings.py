@@ -23,7 +23,7 @@ from monitor.research.estimator import analyze
 from monitor.secrets import encrypt_secret
 from monitor.views.research import state
 from .synthetic import simulate
-from .test_service import admin, enable, patch  # Reuse the existing authenticated fixture.
+from .test_service import admin, enable, patch, sample_batches  # Reuse the existing authenticated fixture.
 
 pytestmark = pytest.mark.django_db
 
@@ -96,7 +96,7 @@ def assert_consent_revoked(row):
 def verify_packet(path, body, signature):
     packet = json.loads(body)
     Ed25519PublicKey.from_public_bytes(base64.b64decode(packet['public_key'])).verify(
-        base64.b64decode(signature), b'CodexSubscribeStudy/1\nPOST\n' + path.encode() + b'\n' + body,
+        base64.b64decode(signature), b'CodexSubscribeStudy/2\nPOST\n' + path.encode() + b'\n' + body,
     )
     return packet
 
@@ -115,7 +115,7 @@ def test_import_same_key_preserves_identity_revision_and_explicit_withdrawal(mon
     calls = []
     def send(endpoint, path, body, signature):
         packet = verify_packet(path, body, signature)
-        assert endpoint == original.endpoint and path == '/api/v1/withdraw'
+        assert endpoint == original.endpoint and path == '/api/v2/withdraw'
         assert packet['public_key'] == public and packet['revision'] == 18
         calls.append(packet)
         return {'accepted': True, 'revision': packet['revision']}
@@ -161,7 +161,7 @@ def test_reconsent_after_cross_key_import_can_sign_and_send_again(admin, monkeyp
         install_settings(import_guard(source))
     assert patch(admin, endpoint=original.endpoint, accept_consent=False).status_code == 400
     assert patch(admin, endpoint=original.endpoint).status_code == 200
-    monkeypatch.setattr(service, 'collect_cycles', lambda now: (simulate(), {}))
+    monkeypatch.setattr(service, 'collect_batches', lambda now, **kwargs: sample_batches())
     calls = []
     def send(endpoint, path, body, signature):
         packet = verify_packet(path, body, signature)
@@ -198,7 +198,7 @@ def test_worker_classifies_lost_key_without_silent_identity_rotation(monkeypatch
     config.identity_encrypted = 'unreadable-ciphertext'
     config.lease_token, config.lease_until, config.next_run_at = '', None, None
     config.save()
-    monkeypatch.setattr(service, 'collect_cycles', lambda now: (simulate(), {}))
+    monkeypatch.setattr(service, 'collect_batches', lambda now, **kwargs: sample_batches())
     send = Mock(); monkeypatch.setattr(transport, 'send', send)
     assert service.run_due() == 'delivery_failed'
     config.refresh_from_db()

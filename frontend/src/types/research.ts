@@ -1,23 +1,17 @@
 export interface ResearchSummary {
-  window_days: number;
   requests: number;
-  baseline_requests: number;
   gpt6_requests: number;
+  other_requests: number;
   raw_usd: number;
   gpt6_raw_usd: number;
   quota_points: number;
-  cycles: number;
-  blocks: number;
-  eligible: boolean;
-  status: string;
-  gateway_only: boolean;
-  design_rank: number;
-  identifiable: boolean[];
-  exclusions: Record<string, number>;
-  support: number[];
-  score_mean: number[];
-  score_cov: number[][];
-  factor_estimates: number[][];
+  intervals: number;
+  groups: number;
+  contrasts: number;
+  batches: number;
+  archived_batches: number;
+  quality: Record<string, number>;
+  preview: Record<string, unknown> | null;
 }
 export interface ResearchState {
   enabled: boolean;

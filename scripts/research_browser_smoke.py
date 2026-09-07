@@ -34,10 +34,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from monitor.models import AppSettings,ResearchSettings,Observation,ResearchRequestComponents,AnnouncementRead
 from monitor.announcements import ANNOUNCEMENTS
 from monitor.tests.helpers import create_monitored_account
-from monitor.tests.research.synthetic import simulate
-from monitor.tests.research.test_data import request
 from monitor.research.service import run_due
-from monitor.research.protocol import STUDY,method_digest
+from monitor.research.pooled_protocol import STUDY,method_digest
 from monitor.fast_correction.domain import aggregate_fast_logs
 from monitor.fast_correction.rules import FastCorrectionRuleSet
 from monitor.billing_correction.persistence import persist_capture
@@ -46,12 +44,12 @@ from playwright.sync_api import sync_playwright,expect
 PACKETS=[]
 class Receiver(BaseHTTPRequestHandler):
     def do_POST(self):
-        length=int(self.headers['Content-Length']);assert length<=32768
+        length=int(self.headers['Content-Length']);assert length<=262144
         body=self.rfile.read(length);data=json.loads(body)
-        Ed25519PublicKey.from_public_bytes(base64.b64decode(data['public_key'])).verify(base64.b64decode(self.headers['X-Study-Signature']),b'CodexSubscribeStudy/1\nPOST\n'+self.path.encode()+b'\n'+body)
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(data['public_key'])).verify(base64.b64decode(self.headers['X-Study-Signature']),b'CodexSubscribeStudy/2\nPOST\n'+self.path.encode()+b'\n'+body)
         assert data['method_digest']==method_digest()
-        assert not any(key in body for key in (b'account_id',b'prompt',b'api_key',b'created_at'))
-        PACKETS.append({'path':self.path,'revision':data['revision'],'has_summary':'summary' in data})
+        assert not any(key in body for key in (b'account_id',b'prompt',b'api_key',b'created_at',b'capacity',b'auxiliary',b'particle',b'constant'))
+        PACKETS.append({'path':self.path,'revision':data['revision'],'has_summary':'summary' in data,'requests':data.get('summary',{}).get('requests')})
         self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers()
         self.wfile.write(json.dumps({'accepted':True,'revision':data['revision']}).encode())
     def log_message(self,*args): pass
@@ -73,27 +71,11 @@ def seed():
 
 def seed_raw_facts():
     assert ResearchSettings.load().enabled
+    from monitor.tests.research.test_pooled_raw import raw_cycle
     Observation.objects.all().delete()
-    counter=0
-    for cycle_index,cycle in enumerate(simulate()):
-        start=timezone.now().replace(microsecond=0)-timedelta(days=40-cycle_index*8)
-        reset=start+timedelta(days=7);pct=0;total=D(0)
-        def row(at):
-            return Observation.objects.create(account_id=7,observed_at=at,window_seconds=604800,upstream_resets_at=reset,
-                upstream_used_percent=pct,total_actual_cost=total,total_standard_cost=total,raw_selected_total_cost=total,selected_total_cost=total,
-                effective_usd_per_percent=20,raw_window={'query_mode':'direct'})
-        row(start)
-        for i,block in enumerate(cycle):
-            at=start+timedelta(hours=i+1);counter+=2
-            base=D(str(block.baseline));target=tuple(D(str(v)) for v in block.target)
-            logs=[request(at-timedelta(minutes=3),id=counter-1,model='gpt-5.6'),request(at-timedelta(minutes=1),id=counter)]
-            from dataclasses import replace
-            logs=[replace(logs[0],total_cost=base,actual_cost=base,component_costs=(base,D(0),D(0),D(0))),replace(logs[1],total_cost=sum(target),actual_cost=sum(target),component_costs=target)]
-            pct+=block.quota;total+=base+sum(target)
-            observation=row(at)
-            interval=aggregate_fast_logs(logs,started_at=at-timedelta(hours=1),ended_at=at,rules=FastCorrectionRuleSet(AppSettings().fast_correction_rules))
-            persist_capture(observation,interval)
-    assert ResearchRequestComponents.objects.count()==200
+    raw_cycle(1, modes=[{'service_tier':'priority','long_context_billing_applied':True}])
+    assert ResearchRequestComponents.objects.count()==1
+
 
 def smoke(endpoint):
     errors=[]
@@ -114,10 +96,13 @@ def smoke(endpoint):
             card.get_by_role('button',name='保存科研设置',exact=True).click()
             dialog=page.locator('dialog[open]')
             expect(dialog.get_by_role('heading',name='确认科研共创授权')).to_be_visible()
-            expect(dialog.get_by_text('https://study.example.invalid',exact=True)).to_be_visible()
+            expect(dialog.get_by_text('https://codex.nightunderfly.online',exact=True)).to_be_visible()
+            page.screenshot(path=str(OUTPUT/'research-official-consent.png'),full_page=True)
             expect(dialog.get_by_role('button',name='同意并开启')).to_be_disabled()
             dialog.get_by_role('button',name='取消',exact=True).click()
             assert not sync(lambda:ResearchSettings.load().enabled)
+            # Explicit local-only test destination; NEVER exercise real site.
+            card.get_by_label('科研接收网站',exact=True).fill('')
             card.get_by_role('button',name='保存科研设置',exact=True).click()
             page.screenshot(path=str(OUTPUT/'research-consent-desktop.png'),full_page=True)
             dialog.get_by_role('checkbox').check();dialog.get_by_role('button',name='同意并开启').click()
@@ -125,7 +110,7 @@ def smoke(endpoint):
             sync(seed_raw_facts)
             assert sync(run_due)=='destination_unconfigured' and PACKETS==[]
             page.reload();expect(card.get_by_text('仅本地分析 · 接收网站待配置',exact=True)).to_be_visible()
-            expect(card.get_by_text('本安装 · 滚动 90 天',exact=True)).to_be_visible()
+            expect(card.get_by_text('本安装 · 持久科研批次',exact=True)).to_be_visible()
             card.screenshot(path=str(OUTPUT/'research-local-results.png'))
             # Changing the destination requires a NEW explicit consent. The
             # generated test settings alone allow a local non-TLS mock receiver.
@@ -138,7 +123,7 @@ def smoke(endpoint):
             dialog.get_by_role('checkbox').check();dialog.get_by_role('button',name='同意并开启').click()
             expect(page.locator('dialog[open]')).to_have_count(0)
             assert sync(run_due)=='sent'
-            assert len(PACKETS)==1 and PACKETS[0]['has_summary']
+            assert len(PACKETS)==1 and PACKETS[0]['has_summary'] and PACKETS[0]['requests']==1
             page.reload();expect(card.get_by_text('统计已发送',exact=True)).to_be_visible()
             card.get_by_role('button',name='立即停止分享',exact=True).click()
             expect(card.get_by_text('未开启',exact=True)).to_be_visible()
@@ -147,11 +132,11 @@ def smoke(endpoint):
             dialog.get_by_role('button',name='确认撤回',exact=True).click()
             expect(page.locator('dialog[open]')).to_have_count(0)
             expect(card.get_by_text('统计已撤回',exact=True)).to_be_visible()
-            assert len(PACKETS)==2 and PACKETS[1]['path']=='/api/v1/withdraw' and not PACKETS[1]['has_summary']
+            assert len(PACKETS)==2 and PACKETS[1]['path']=='/api/v2/withdraw' and not PACKETS[1]['has_summary']
             assert PACKETS[1]['revision']>PACKETS[0]['revision']
             assert not errors,errors
             (OUTPUT/'browser-results.json').write_text(json.dumps({'synthetic_only':True,'passed':True,'page_errors':errors,'packets':PACKETS,
-                'checks':['off by default','cancel is not consent','privacy destination notice','placeholder sends nothing','real original components','independent worker computation','new origin reconsent','signed HTTP aggregate only','mobile consent','immediate stop','signed withdrawal']},indent=2)+'\n')
+                'checks':['off by default','cancel is not consent','privacy destination notice','blank local-only destination sends nothing','one FAST long request accepted','no PF constant or auxiliary inputs','real original components','independent worker computation','new origin reconsent','signed HTTP aggregate only','mobile consent','immediate stop','signed withdrawal']},indent=2)+'\n')
         except Exception:
             (OUTPUT/'failure.txt').write_text(traceback.format_exc());page.screenshot(path=str(OUTPUT/'failure.png'),full_page=True);raise
         finally:browser.close()

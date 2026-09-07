@@ -1,7 +1,7 @@
 """Opt-in sidecar capture. Costs remain upstream facts, never corrected outputs."""
 from decimal import Decimal, InvalidOperation
 from ..models.research import ResearchRequestComponents, ResearchSettings
-from .protocol import STUDY, consent_digest
+from .pooled_protocol import STUDY, consent_digest
 
 
 def capture_components(capture, logs):
