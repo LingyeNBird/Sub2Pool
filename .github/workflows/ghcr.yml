@@ -2,13 +2,10 @@ name: CI 与 GHCR 镜像
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - "v*"
+    branches: [main]
+    tags: ["v*"]
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -18,6 +15,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash
+
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
@@ -25,73 +26,105 @@ jobs:
   verify:
     name: 测试与前端构建
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DJANGO_DEBUG: "true"
+      OPENBLAS_NUM_THREADS: "1"
+      BILLING_REVIEW_OUTPUT: ${{ runner.temp }}/ci-results/billing
+      RESEARCH_REVIEW_OUTPUT: ${{ runner.temp }}/ci-results/research
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
-
+        with:
+          persist-credentials: false
+      - name: 记录测试版本
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-results"
+          git rev-parse HEAD > "$RUNNER_TEMP/ci-results/tested-commit.txt"
+          git ls-tree -r HEAD > "$RUNNER_TEMP/ci-results/source-manifest.txt"
+          git diff --check
       - name: 配置 Python
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-
       - name: 配置 uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
           working-directory: backend
-
-      - name: 运行后端测试
+      - name: 运行全部后端测试与迁移检查
         working-directory: backend
-        env:
-          DJANGO_DEBUG: "true"
-        run: uv run --frozen pytest
-
+        run: |
+          uv run --frozen pytest --junitxml="$RUNNER_TEMP/ci-results/backend-tests.xml"
+          uv run --frozen python manage.py makemigrations --check --dry-run
+          uv run --frozen python manage.py check
       - name: 配置 Node.js
         uses: actions/setup-node@v7
         with:
           node-version: "22"
           package-manager-cache: false
-
       - name: 启用 pnpm
         run: corepack enable
-
       - name: 安装前端依赖
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-
-      - name: 检查前端
+      - name: 检查并构建正式版和演示版
         working-directory: frontend
-        run: pnpm check
-
-      - name: 构建前端
-        working-directory: frontend
-        run: pnpm build
+        run: |
+          pnpm check
+          pnpm build
+          pnpm build:demo
+      - name: 安装浏览器测试依赖
+        working-directory: backend
+        run: uv run --frozen --with playwright==1.57.0 python -m playwright install --with-deps chromium
+      - name: 计费设置与补算浏览器回归
+        working-directory: backend
+        run: uv run --frozen --with playwright==1.57.0 python ../scripts/billing_browser_smoke.py
+      - name: 科研授权与发送浏览器回归
+        working-directory: backend
+        run: uv run --frozen --with playwright==1.57.0 python ../scripts/research_browser_smoke.py
+      - name: 保存测试结果（不含数据库与凭据）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-results
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/ci-results/*.txt
+            ${{ runner.temp }}/ci-results/*.xml
+            ${{ runner.temp }}/ci-results/billing/*.png
+            ${{ runner.temp }}/ci-results/billing/*.json
+            ${{ runner.temp }}/ci-results/billing/*.txt
+            ${{ runner.temp }}/ci-results/billing/*.log
+            ${{ runner.temp }}/ci-results/research/*.png
+            ${{ runner.temp }}/ci-results/research/*.json
+            ${{ runner.temp }}/ci-results/research/*.txt
+            ${{ runner.temp }}/ci-results/research/*.log
 
   container:
     name: 构建并发布多架构镜像
     needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
-
+        with:
+          persist-credentials: false
       - name: 配置 QEMU
         uses: docker/setup-qemu-action@v4
-
       - name: 配置 Docker Buildx
         uses: docker/setup-buildx-action@v4
-
       - name: 登录 GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: 生成镜像标签
         id: meta
         uses: docker/metadata-action@v6
@@ -107,13 +140,12 @@ jobs:
             org.opencontainers.image.title=Sub2Pool
             org.opencontainers.image.description=Sub2API 拼车周限测算与人工额度建议服务
             org.opencontainers.image.licenses=AGPL-3.0-only
-
       - name: 构建并发布镜像
         uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
