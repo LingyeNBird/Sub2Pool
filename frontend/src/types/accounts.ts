@@ -109,6 +109,7 @@ export interface AccountCycleUsage {
   is_current: boolean;
 }
 export interface AccountStatusAccount {
+  cpa_quota?: CPAQuotaDetail;
   id: number;
   provider: AccountProvider;
   source_account_id: string;
@@ -135,4 +136,53 @@ export interface OpenAIAccountOption {
   type: string;
   status: string;
   schedulable: boolean;
+}
+
+export interface CPAQuotaMetrics {
+  request_count: number;
+  token_count: number;
+  usage_usd: number;
+  success_rate?: number | null;
+  unpriced_request_count?: number;
+}
+export interface CPAQuotaPeriod {
+  started_at: string;
+  ended_at: string;
+  metrics: CPAQuotaMetrics;
+  coverage_complete: boolean;
+  notice?: string;
+}
+export interface CPAQuotaDetail {
+  totals: CPAQuotaPeriod;
+  windows: {
+    id: string;
+    label: string;
+    used_percent: number | null;
+    reset_at: string | null;
+    updated_at: string | null;
+    source: string;
+    boundary: "unknown" | "provider";
+    current: CPAQuotaPeriod | null;
+    previous: CPAQuotaPeriod | null;
+    prediction: CPAQuotaMetrics | null;
+    notice: string | null;
+  }[];
+  reset: {
+    available_count: number | null;
+    can_reset: boolean;
+    history: {
+      id: string;
+      status: string;
+      created_at: string;
+      finished_at: string | null;
+    }[];
+  };
+}
+export interface CPAResetPreview {
+  id: string;
+  account_id: number;
+  account_name: string;
+  available_count: number;
+  status: string;
+  expires_at: string;
 }

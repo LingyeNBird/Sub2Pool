@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .common import _nullable
+from .cpa_status import cpa_status_schema
 
 
 def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
@@ -230,6 +231,7 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "warnings",
             ],
             "properties": {
+                "cpa_quota": cpa_status_schema(),
                 "id": {"type": "integer"},
                 "provider": {
                     "type": "string",

@@ -4,11 +4,13 @@ import { BarChart } from "echarts/charts";
 import type {
   BrushComponentOption,
   GridComponentOption,
+  ToolboxComponentOption,
   TooltipComponentOption,
 } from "echarts/components";
 import {
   BrushComponent,
   GridComponent,
+  ToolboxComponent,
   TooltipComponent,
 } from "echarts/components";
 import type { ComposeOption } from "echarts/core";
@@ -29,12 +31,20 @@ import { useThemeStore } from "@/stores/theme";
 import type { AccountCycleUsage } from "@/types/accounts";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
 
-use([SVGRenderer, BarChart, BrushComponent, GridComponent, TooltipComponent]);
+use([
+  SVGRenderer,
+  BarChart,
+  BrushComponent,
+  GridComponent,
+  ToolboxComponent,
+  TooltipComponent,
+]);
 
 type ChartOption = ComposeOption<
   | BarSeriesOption
   | BrushComponentOption
   | GridComponentOption
+  | ToolboxComponentOption
   | TooltipComponentOption
 >;
 
@@ -409,6 +419,7 @@ onBeforeUnmount(() => {
 
 const option = computed<ChartOption>(() => ({
   animationDuration: 250,
+  toolbox: { show: false },
   grid: {
     top: 12,
     right: 12,

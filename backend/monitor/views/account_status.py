@@ -11,6 +11,7 @@ from ..access import visible_accounts_for
 from ..billing_correction.domain import BillingCorrectionRules, CorrectionAmounts
 from ..billing_correction.observations import interval_corrections
 from ..api_auth import APIKeyAuthentication
+from ..cpa.quota_status import quota_detail
 from ..cpa.usage import cpa_events_cost
 from ..integrations.cpa import CPAClient, CPAError
 from ..integrations.sub2api import Sub2APIClient, Sub2APIError, WeeklyWindow
@@ -174,6 +175,8 @@ def _cpa_status_rows(
                     "temp_unschedulable_reason": None,
                     "error_message": upstream["status_message"] or None,
                 }
+            window = None
+            client.last_usage_body = None
             try:
                 window = client.query_weekly_window(account.cpa_auth_index or "")
                 reset_at = datetime.fromtimestamp(
@@ -210,6 +213,9 @@ def _cpa_status_rows(
             except CPAError as exc:
                 row["warnings"].append(f"额度状态：{exc}")
 
+            row["cpa_quota"] = quota_detail(
+                account, config, sampled_at, client.last_usage_body, window
+            )
             started_at = sampled_at - timedelta(days=STATS_DAYS)
             events = CPAUsageEvent.objects.filter(
                 account=account,
@@ -383,6 +389,26 @@ class AccountStatusView(PageAccessAPIView):
             rows_by_id,
             sampled_at,
         )
+        from .cpa_quota_reset import can_reset_quota
+
+        for account in cpa_accounts:
+            row = rows_by_id[account.pk]
+            detail = row.get("cpa_quota")
+            if detail is None:
+                detail = row["cpa_quota"] = quota_detail(account, config, sampled_at)
+            detail["reset"]["can_reset"] = can_reset_quota(request.user, account)
+            detail["reset"]["history"] = [
+                {
+                    "id": str(record.pk),
+                    "status": record.status,
+                    "created_at": record.created_at.isoformat(),
+                    "finished_at": record.finished_at.isoformat()
+                    if record.finished_at else None,
+                }
+                for record in account.cpa_reset_requests.exclude(
+                    status__in=["pending", "cancelled"]
+                ).order_by("-created_at")[:10]
+            ]
         if cpa_error:
             errors.append(cpa_error)
         data["connection_error"] = "；".join(dict.fromkeys(errors)) or None

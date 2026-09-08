@@ -119,7 +119,9 @@ class CPAClient:
             accounts.append(
                 {
                     "auth_index": auth_index,
-                    "name": str(item.get("label") or item.get("name") or email or auth_index),
+                    "name": str(
+                        item.get("label") or item.get("name") or email or auth_index
+                    ),
                     "email": email,
                     "chatgpt_account_id": str(
                         claims.get("chatgpt_account_id")
@@ -146,7 +148,7 @@ class CPAClient:
                 return account
         raise CPAError("CPA 中未找到该 Codex 账号")
 
-    def query_weekly_window(self, auth_index: str) -> WeeklyWindow:
+    def query_usage_payload(self, auth_index: str) -> tuple[dict, dict]:
         account = self.get_codex_account(auth_index)
         chatgpt_account_id = account["chatgpt_account_id"]
         if not chatgpt_account_id:
@@ -177,6 +179,12 @@ class CPAClient:
                 raise CPAError("CPA 上游额度接口返回的不是 JSON") from exc
         if not isinstance(body, dict):
             raise CPAError("CPA 上游额度响应结构错误")
+        return account, body
+
+    def query_weekly_window(self, auth_index: str) -> WeeklyWindow:
+        self.last_usage_body = None
+        account, body = self.query_usage_payload(auth_index)
+        self.last_usage_body = body
         rate_limit = body.get("rate_limit")
         if not isinstance(rate_limit, dict):
             raise CPAError("CPA Codex 账号没有可用的 rate_limit 数据")
@@ -188,7 +196,9 @@ class CPAClient:
             seconds = int(item.get("limit_window_seconds") or 0)
             candidates.append(
                 WeeklyWindow(
-                    used_percent=_decimal(item.get("used_percent"), f"{slot}.used_percent"),
+                    used_percent=_decimal(
+                        item.get("used_percent"), f"{slot}.used_percent"
+                    ),
                     window_seconds=seconds,
                     reset_after_seconds=int(item.get("reset_after_seconds") or 0),
                     reset_at=int(item.get("reset_at") or 0),
@@ -206,6 +216,32 @@ class CPAClient:
             raise CPAError("CPA 七天窗口缺少 reset_at")
         return weekly
 
+    def consume_reset_credit(self, auth_index: str, request_id: str) -> None:
+        account = self.get_codex_account(auth_index)
+        if not account["chatgpt_account_id"]:
+            raise CPAError("CPA Codex 账号缺少 ChatGPT Account ID")
+        result = self._request(
+            "POST",
+            "api-call",
+            json_body={
+                "auth_index": auth_index,
+                "method": "POST",
+                "url": "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume",
+                "header": {
+                    "Authorization": "Bearer $TOKEN$",
+                    "Chatgpt-Account-Id": account["chatgpt_account_id"],
+                    "Content-Type": "application/json",
+                },
+                "data": json.dumps({"redeem_request_id": request_id}),
+            },
+        )
+        status = result.get("status_code", 0) if isinstance(result, dict) else 0
+        if not isinstance(status, int) or not 200 <= status < 300:
+            error = CPAError(
+                "上游未确认重置成功，请刷新额度核对；重试将复用同一重置标识"
+            )
+            error.definitive_rejection = status in (400, 401, 403, 404, 405, 422)
+            raise error
 
     def test_connection(self) -> dict[str, Any]:
         accounts = self.list_codex_accounts()

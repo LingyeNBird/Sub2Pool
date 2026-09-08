@@ -1,3 +1,4 @@
+import type { CPAQuotaDetail, CPAResetPreview } from "@/types/accounts";
 import type { CPAPricingInventory, CPAPricingSync } from "@/types/cpaPricing";
 import type {
   CPAKeys,
@@ -11,6 +12,8 @@ import type { CPAAPIKeyUsageSeries } from "@/types/statistics";
 import { demoIdentity, saveDemoState } from "./state";
 
 export interface DemoCPAState {
+  quotaStatuses?: Record<number, CPAQuotaDetail>;
+  resetPlans?: CPAResetPreview[];
   keys: CPAKeys;
   events: (CPARequest & {
     participant_id: number | null;

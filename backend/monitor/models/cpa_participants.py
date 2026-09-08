@@ -133,3 +133,21 @@ class CPAAccountOwnerBinding(models.Model):
                 name="cpa_owner_positive_interval",
             ),
         ]
+
+
+class CPAQuotaResetRequest(models.Model):
+    """One confirmed upstream redemption, retried with the same idempotency key."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account = models.ForeignKey(
+        "MonitoredAccount", on_delete=models.PROTECT, related_name="cpa_reset_requests"
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL
+    )
+    source_account_id = models.CharField(max_length=255)
+    available_count = models.PositiveIntegerField()
+    status = models.CharField(max_length=16, default="pending")
+    created_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True)

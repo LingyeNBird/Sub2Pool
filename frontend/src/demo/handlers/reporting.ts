@@ -1,3 +1,4 @@
+import { demoCPAStatus } from "../cpaStatus";
 import { demoCPAKeySeries, demoCPASummary } from "../cpa";
 import type { AccountStatusData } from "@/types/accounts";
 import type { Observation } from "@/types/observations";
@@ -433,6 +434,7 @@ function accountStatusData(state: DemoState): AccountStatusData {
         enabled: account.enabled,
         quota_query_mode: account.quota_query_mode,
         cycles,
+        cpa_quota: isCPA ? demoCPAStatus(state, account.id) : undefined,
         runtime: {
           name: account.name,
           account_type: isCPA ? "pro" : "oauth",

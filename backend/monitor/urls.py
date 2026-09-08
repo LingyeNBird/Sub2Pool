@@ -9,6 +9,7 @@ from .views.auth import (
     PasswordView,
     RefreshView,
 )
+from .views.cpa_quota_reset import CPAQuotaResetPreviewView, CPAQuotaResetConfirmView
 from .views.account_status import AccountStatusView, ReadOnlyAccountStatusView
 from .views.dashboard import (
     APIApplyParticipantRecommendationView,
@@ -104,6 +105,8 @@ urlpatterns = [
     path("ip-blocks", BlockedIPAddressListView.as_view()),
     path("ip-blocks/<int:block_id>", BlockedIPAddressDetailView.as_view()),
     path("dashboard", DashboardView.as_view()),
+    path("account-status/cpa/<int:account_id>/reset-preview", CPAQuotaResetPreviewView.as_view()),
+    path("account-status/cpa/<int:account_id>/resets/<uuid:plan_id>/confirm", CPAQuotaResetConfirmView.as_view()),
     path("account-status", AccountStatusView.as_view()),
     path(
         "dashboard/participants/<int:participant_id>/apply-recommendation",
