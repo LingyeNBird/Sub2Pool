@@ -16,6 +16,7 @@ class UserCorrection:
     fast_request_count: int = 0
     raw_cost: Decimal = ZERO
     fast_raw_cost: Decimal = ZERO
+    actual_cost: Decimal = ZERO
     amounts: CorrectionAmounts = field(default_factory=CorrectionAmounts)
     unknown_long_context_request_count: int = 0
 
@@ -30,6 +31,7 @@ class IntervalCorrection:
     unknown_long_context_request_count: int = 0
     missing_model_request_count: int = 0
     raw_cost: Decimal | None = None
+    actual_cost: Decimal | None = None
     request_count: int | None = None
     model_details: list[dict] = field(default_factory=list)
 
@@ -68,6 +70,7 @@ def interval_corrections(observation, config, *, rules=None, include_models=Fals
     rules = rules or BillingCorrectionRules(config)
     result.calculated = result.facts_complete = True
     result.raw_cost = ZERO
+    result.actual_cost = ZERO
     result.request_count = capture.request_count
     model_rows = {}
     facts = list(capture.facts.all())
@@ -80,11 +83,17 @@ def interval_corrections(observation, config, *, rules=None, include_models=Fals
         calculated = rules.calculate(fact, config.cost_basis)
         result.amounts += calculated.amounts
         result.raw_cost += calculated.raw_cost
+        actual_cost = Decimal(fact.actual_cost)
+        result.actual_cost += actual_cost
         result.unknown_long_context_request_count += int(calculated.long_context_unknown)
         result.missing_model_request_count += int(not fact.model)
-        user = result.users.setdefault(fact.user_id, UserCorrection(user_id=fact.user_id))
+        user = result.users.setdefault(
+            fact.user_id,
+            UserCorrection(user_id=fact.user_id),
+        )
         user.request_count += 1
         user.raw_cost += calculated.raw_cost
+        user.actual_cost += actual_cost
         user.amounts += calculated.amounts
         user.unknown_long_context_request_count += int(calculated.long_context_unknown)
         if fact.service_tier.strip().casefold() in {"priority", "fast"}:

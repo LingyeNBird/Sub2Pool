@@ -55,7 +55,7 @@ def test_startup_replay_command_skips_current_algorithm_records():
 
 
 @pytest.mark.django_db
-def test_startup_replay_command_upgrades_v6_zero_plateau():
+def test_startup_replay_command_upgrades_previous_algorithm_zero_plateau():
     config = AppSettings.load()
     create_monitored_account(7)
     config.save()
@@ -81,7 +81,7 @@ def test_startup_replay_command_upgrades_v6_zero_plateau():
                 total_actual_cost=Decimal(cost),
                 effective_usd_per_percent=Decimal("16"),
                 raw_window={
-                    "rate_method": "particle_filter_v6",
+                    "rate_method": "particle_filter_v9",
                     "replay_decision": (
                         "included"
                         if index == 2

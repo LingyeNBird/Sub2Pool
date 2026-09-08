@@ -11,6 +11,17 @@ import { demoIdentity, saveDemoState, type DemoState } from "../state";
 const DEMO_ANNOUNCEMENTS: Array<Omit<AnnouncementRecord, "read" | "read_at">> =
   [
     {
+      code: "sub2api-wallet-conversion-2026-09-08",
+      title: "建议优先在 Sub2API 中统一计费倍率",
+      published_at: "2026-09-08T00:00:00Z",
+      severity: "info",
+      paragraphs: [
+        "为使额度测算与用户余额扣费保持一致，建议优先在 Sub2API 中配置适合您部署的 FAST、长上下文及模型计费倍率，并在 Sub2Pool 中使用实际扣费口径。确认某项倍率已在上游生效后，再关闭本地对应修正，避免重复计算；无法调整上游时，可继续使用本地修正。",
+        "使用本地修正时，建议余额现在会按参与者在对应账号、当前测算区间的历史消费结构，换算为预计需要的 Sub2API 实际余额；本人没有消费样本时使用账号样本。模型、FAST 或其他用法改变后，换算估计会随新增采样更新，不保证未来消费绝对精确。",
+        "上游倍率调整不代表旧请求成本也会改变；本地修正规则变更又会重算已有历史。请以调整后的观测建立新的测算起点，避免一个测算区间混用新旧扣费规则。本次更新不会替您关闭修正或改写原始请求成本。",
+      ],
+    },
+    {
       code: "auto-apply-recommendations-default-2026-09-08",
       title: "自动应用建议额度默认开启",
       published_at: "2026-09-08T00:00:00Z",

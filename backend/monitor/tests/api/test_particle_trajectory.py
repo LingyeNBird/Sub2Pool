@@ -15,7 +15,7 @@ from monitor.models import (
     ParticipantSnapshot,
     SystemUserPageAccess,
 )
-from monitor.replay import rebuild_account, rebuild_observation_suffix
+from monitor.replay import RATE_METHOD, rebuild_account, rebuild_observation_suffix
 from monitor.particle_trajectory import _trajectory_periods
 from monitor.tests.helpers import create_monitored_account, jwt_login
 
@@ -108,7 +108,7 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["available"] is True
-    assert data["algorithm"] == "particle_filter_v9"
+    assert data["algorithm"] == RATE_METHOD
     assert data["particle_count"] == 480
     assert data["representative_particle_count"] == 96
     assert data["segment"]["observation_count"] == 2

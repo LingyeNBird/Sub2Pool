@@ -79,6 +79,11 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
         },
         "ParticipantSnapshot": {
             "type": "object",
+            "description": (
+                "selected_cost 保持修正后的测算成本口径；建议余额、余额范围与差额"
+                "已按当前区间历史消费结构换算为预计 Sub2API 实际扣费金额。"
+                "余额范围以该估计倍率为条件，不保证未来请求构成不变。"
+            ),
             "required": [
                 "participant_id",
                 "participant_name",
@@ -191,6 +196,11 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
             },
         },
         "AggregateRecommendationSource": {
+            "description": (
+                "net_position 与 contribution 金额为已换算的 Sub2API 钱包口径，"
+                "各来源带符号换算后再汇总；capacity 和 entitlement 指标仍为"
+                "修正后的测算权益口径。"
+            ),
             "type": "object",
             "required": [
                 "account_id",
@@ -244,6 +254,10 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
         },
         "AggregateRecommendation": {
             "type": "object",
+            "description": (
+                "recommended_balance 及其范围、差额是预计应设置的 Sub2API 全局余额，"
+                "不是追加充值金额；展示、通知及写入方不得再次应用计费修正倍率。"
+            ),
             "required": [
                 "participant_id",
                 "participant_name",

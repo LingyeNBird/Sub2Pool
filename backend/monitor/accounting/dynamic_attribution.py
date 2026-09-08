@@ -14,6 +14,7 @@ from .model_inputs import (
     stable_segment_seed,
 )
 from .particle_filter import QUANTIZER_NAMES, ParticleFilterConfig
+from ..billing_correction.settlement import balance_conversion_factor
 from ..fast_correction.prefix import FastCorrectionPrefix
 from ..models import AppSettings, Observation, ParticipantSnapshot
 from ..quota_profiles import CapacityRangeProfile
@@ -446,6 +447,27 @@ def replay_dynamic_segment(
 
             probability_min = min(probability_min, point_balance)
             probability_max = max(probability_max, point_balance)
+            conversion_factor = balance_conversion_factor(
+                snapshot,
+                config,
+                correction_prefix=correction_prefix,
+                selected_cost=selected_cost,
+            )
+            point_balance *= conversion_factor
+            probability_min *= conversion_factor
+            probability_max *= conversion_factor
+            deterministic_min = (
+                deterministic_min * conversion_factor
+            ).quantize(
+                MONEY_PRECISION,
+                rounding=ROUND_HALF_UP,
+            )
+            deterministic_max = (
+                deterministic_max * conversion_factor
+            ).quantize(
+                MONEY_PRECISION,
+                rounding=ROUND_HALF_UP,
+            )
             recommendation_factor = (
                 ONE
                 if snapshot.participant_id == sole_remaining_participant_id
