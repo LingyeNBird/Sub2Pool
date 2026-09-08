@@ -652,7 +652,13 @@ export function handleCPA({
     );
     return ok({
       account_id: accountId,
-      items: events.slice((page - 1) * size, page * size),
+      items: events.slice((page - 1) * size, page * size).map((event) => ({
+        ...event,
+        api_key_alias:
+          event.api_key_alias ||
+          cpa.keys.keys.find((key) => key.id === event.key_id)?.name ||
+          "",
+      })),
       total: events.length,
       summary,
       started_at: startedAt,

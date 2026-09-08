@@ -270,6 +270,7 @@ class CPARequestsView(CPAReadView):
         key_options = [
             {"id": key.id, "name": key.name, "hint": key.hint} for key in keys
         ]
+        key_names = {key.key_hash: key.name for key in keys}
         model_options = list(
             events.order_by("model").values_list("model", flat=True).distinct()
         )
@@ -297,6 +298,7 @@ class CPARequestsView(CPAReadView):
                     "occurred_at": event.occurred_at.isoformat(),
                     "request_id": event.request_id,
                     "api_key_hint": event.api_key_hint,
+                    "api_key_alias": event.alias.strip() or key_names.get(event.api_key_hash, ""),
                     "model": event.model,
                     "endpoint": event.endpoint,
                     "input_tokens": event.input_tokens,

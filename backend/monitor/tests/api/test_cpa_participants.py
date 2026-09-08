@@ -678,3 +678,31 @@ def test_no_observation_explains_unknown_without_hiding_collected_usage(setup):
         "缺少历史份额依据或对应额度观测"
         in member["account_breakdowns"][0]["quota_unavailable_reasons"]
     )
+
+
+@pytest.mark.parametrize("readonly", [False, True])
+def test_request_key_alias_and_local_note_fallback_are_scoped(setup, readonly):
+    config, admin, account, alice, bob, keys, start = setup
+    first = event(account, keys[0], start + timedelta(minutes=1))
+    first.alias = 'Le'
+    first.save(update_fields=['alias'])
+    second = event(account, keys[0], start + timedelta(minutes=2))
+    keys[0].name = 'Laptop'
+    keys[0].save(update_fields=['name'])
+    private = event(account, keys[1], start + timedelta(minutes=3))
+    private.alias = 'Other private alias'
+    private.save(update_fields=['alias'])
+    user, client, headers = member_client(account, alice)
+    path = 'cpa/requests'
+    if readonly:
+        SystemUserAPIKey.objects.create(user=user, key_hash=hash_api_key('alias-read-key'), hint='-key')
+        headers = {'HTTP_AUTHORIZATION': 'Bearer alias-read-key'}
+        path = 'v1/cpa/requests'
+    response = client.get(f'/api/{path}?account_id={account.id}', **headers)
+    assert response.status_code == 200
+    rows = {row['id']: row for row in response.json()['data']['items']}
+    assert rows[first.id]['api_key_alias'] == 'Le'
+    assert rows[second.id]['api_key_alias'] == 'Laptop'
+    assert private.id not in rows
+    assert 'Other private alias' not in response.content.decode()
+    assert keys[0].key_hash not in response.content.decode()

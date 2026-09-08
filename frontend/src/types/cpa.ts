@@ -172,6 +172,7 @@ export interface CPARequest {
   occurred_at: string;
   request_id: string;
   api_key_hint: string;
+  api_key_alias?: string;
   model: string;
   endpoint: string;
   input_tokens: number;

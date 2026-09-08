@@ -211,6 +211,7 @@ def cpa_schemas():
                 "occurred_at": time,
                 "request_id": text,
                 "api_key_hint": text,
+                "api_key_alias": {"type": "string", "description": "请求携带的 CPA Key alias；缺失时使用已绑定 Key 的本地备注，无别名则为空。仅随授权请求返回。"},
                 "model": text,
                 "endpoint": text,
                 "input_tokens": integer,

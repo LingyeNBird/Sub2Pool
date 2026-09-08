@@ -53,6 +53,14 @@ const duration = (ms: number | null | undefined) =>
   ms && ms > 0 ? `${(ms / 1000).toFixed(1)} s` : "—";
 const service = (item: CPARequest) =>
   item.response_service_tier || item.requested_service_tier || "标准";
+const keyLabel = (item: CPARequest) => {
+  const alias = item.api_key_alias?.trim();
+  const hint = item.api_key_hint;
+  if (!alias) return `Key ····${hint || "未知"}`;
+  if (!hint || (alias.endsWith(hint) && /(?:\.\.\.|…|····)/.test(alias)))
+    return alias;
+  return `${alias}…${hint}`;
+};
 const speed = (item: CPARequest) =>
   item.latency_ms > item.ttft_ms && item.ttft_ms > 0 && item.output_tokens > 0
     ? (item.output_tokens / ((item.latency_ms - item.ttft_ms) / 1000)).toFixed(
@@ -496,9 +504,7 @@ onMounted(async () => {
                     {{ item.model }}
                   </div>
                   <div class="mt-1 text-xs text-base-content/60">
-                    {{ service(item) }} · Key ····{{
-                      item.api_key_hint || "未知"
-                    }}
+                    {{ service(item) }} · {{ keyLabel(item) }}
                   </div>
                 </td>
                 <td>
@@ -580,7 +586,7 @@ onMounted(async () => {
                 <div class="min-w-0">
                   <h3 class="truncate font-medium">{{ item.model }}</h3>
                   <p class="mt-1 text-xs text-base-content/60">
-                    Key ····{{ item.api_key_hint || "未知" }} ·
+                    {{ keyLabel(item) }} ·
                     {{ service(item) }}
                   </p>
                 </div>
@@ -716,9 +722,7 @@ onMounted(async () => {
           >
         </div>
         <p class="mt-2 text-sm text-base-content/60">
-          {{ formatTime(selection.occurred_at) }} · Key ····{{
-            selection.api_key_hint || "未知"
-          }}
+          {{ formatTime(selection.occurred_at) }} · {{ keyLabel(selection) }}
         </p>
         <dl class="mt-6 grid grid-cols-2 gap-5 text-sm">
           <div
