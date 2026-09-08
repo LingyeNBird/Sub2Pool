@@ -105,11 +105,15 @@ const members = computed(() =>
           >绑定 CPA Key</RouterLink
         >
       </div>
-      <p
-        v-if="members.some((member) => !member.quota_available)"
-        class="text-xs text-base-content/60"
-      >
-        容量与份额预算可参考模型估计；个人剩余权益仍需完整历史用量，原因见下方账号状态。
+      <p v-if="members.length" class="text-xs text-base-content/60">
+        金额均为估算：周预算按当前份额分配，剩余＝预算或预计权益－已采集消耗，漏采和缺价尚未扣除；账期剩余仅供跨周协调。
+        <span
+          v-if="
+            data.billing_summary?.configured &&
+            data.billing_summary.members.some((m) => m.entitlement_usd == null)
+          "
+          >账期预算依据尚不完整，暂只展示累计已用。</span
+        >
       </p>
       <div
         v-if="data.unattributed.request_count"

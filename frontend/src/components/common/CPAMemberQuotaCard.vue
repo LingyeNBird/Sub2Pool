@@ -16,7 +16,6 @@ const props = defineProps<{
   selectedAccountId: number;
   weeklyDistributions?: CPAWeeklyDistribution[];
 }>();
-
 const selected = ref(props.selectedAccountId);
 watch(
   () => props.selectedAccountId,
@@ -30,54 +29,39 @@ const breakdown = computed(
       (a) => a.account_id === selected.value,
     ) ?? props.member.account_breakdowns[0],
 );
-const account = computed(() =>
-  props.accounts.find((a) => a.account_id === breakdown.value?.account_id),
-);
-const percent = (value: number | null | undefined) =>
-  value == null ? "—" : `${value.toFixed(2)}%`;
-const trueProgress = computed(() =>
-  props.member.share_percent
-    ? ((breakdown.value?.charged_percent ?? 0) / props.member.share_percent) *
-      100
-    : null,
-);
-const progressValue = computed(() => {
-  if (!breakdown.value?.quota_available) return 0;
-  if (!props.member.share_percent)
-    return (breakdown.value.charged_percent ?? 0) > 0 ? 100 : 0;
-  return Math.min(
-    100,
-    Math.max(
-      0,
-      ((breakdown.value.charged_percent ?? 0) / props.member.share_percent) *
-        100,
-    ),
-  );
-});
-const weekEstimate = computed(() =>
+const week = computed(() =>
   props.weeklyDistributions?.find(
     (w) => w.account_id === (breakdown.value?.account_id ?? selected.value),
   ),
 );
-const estimatedBudget = computed(() =>
-  weekEstimate.value?.capacity_usd != null && props.member.share_percent != null
-    ? (weekEstimate.value.capacity_usd * props.member.share_percent) / 100
+const budget = computed(() =>
+  week.value?.capacity_usd != null && props.member.share_percent != null
+    ? (week.value.capacity_usd * props.member.share_percent) / 100
+    : (breakdown.value?.expected_entitlement_usd ?? null),
+);
+const used = computed(
+  () =>
+    week.value?.members.find(
+      (m) => m.participant_id === props.member.participant_id,
+    )?.usage_usd ??
+    breakdown.value?.usage_usd ??
+    props.member.usage_usd,
+);
+const remaining = computed(() =>
+  budget.value == null ? null : budget.value - used.value,
+);
+const progress = computed(() =>
+  budget.value != null && budget.value > 0
+    ? (used.value / budget.value) * 100
     : null,
 );
-const collectedProgress = computed(() =>
-  estimatedBudget.value && weekEstimate.value
-    ? ((weekEstimate.value.members.find(
-        (m) => m.participant_id === props.member.participant_id,
-      )?.usage_usd ?? 0) /
-        estimatedBudget.value) *
-      100
-    : null,
+const billingRemaining = computed(() =>
+  props.billing?.entitlement_usd != null
+    ? props.billing.entitlement_usd - props.billing.usage_usd
+    : (props.billing?.remaining_usd ?? null),
 );
-const reasons = computed(() =>
-  (breakdown.value?.quota_unavailable_reasons ?? []).filter(
-    (reason) => !account.value?.quota_unavailable_reasons?.includes(reason),
-  ),
-);
+const money = (value: number | null) =>
+  value == null ? "待估算" : formatCurrency(value);
 const compactTokens = computed(() =>
   new Intl.NumberFormat("en-US", {
     notation: "compact",
@@ -106,47 +90,13 @@ const compactTokens = computed(() =>
           <span v-if="member.is_owner" class="badge badge-sm badge-neutral"
             >车主</span
           >
-          <span v-if="member.is_overused" class="badge badge-sm badge-warning"
-            >已超额</span
+          <span
+            v-if="remaining != null && remaining < 0"
+            class="badge badge-sm badge-warning"
+            >本周超预算</span
           >
         </div>
       </header>
-      <div>
-        <p class="text-xs text-base-content/60">本周已采集 · 估算</p>
-        <p class="mt-1 text-3xl font-semibold tabular-nums">
-          {{ formatCurrency(member.usage_usd) }}
-        </p>
-        <p class="mt-2 text-xs text-base-content/60">
-          {{ member.request_count.toLocaleString() }} 次请求 ·
-          <span :title="`${member.token_count.toLocaleString()} Token`"
-            >{{ compactTokens }} Token</span
-          >
-        </p>
-      </div>
-      <dl class="grid grid-cols-2 gap-3 border-t border-base-300 pt-4">
-        <div>
-          <dt class="text-xs text-base-content/60">分配份额</dt>
-          <dd class="mt-1 font-semibold tabular-nums">
-            {{ percent(member.share_percent) }}
-          </dd>
-        </div>
-        <div>
-          <dt class="text-xs text-base-content/60">
-            {{ accounts.length > 1 ? "池内剩余 · 估算" : "剩余额度 · 估算" }}
-          </dt>
-          <dd class="mt-1 font-semibold tabular-nums">
-            {{
-              member.quota_available
-                ? formatCurrency(member.remaining_entitlement_usd)
-                : "待估算"
-            }}
-          </dd>
-        </div>
-      </dl>
-      <p v-if="member.quota_available" class="text-xs text-base-content/60">
-        已用权益 {{ formatCurrency(member.consumed_entitlement_usd) }} / 总额
-        {{ formatCurrency(member.expected_entitlement_usd) }}
-      </p>
       <select
         v-if="member.account_breakdowns.length > 1"
         v-model.number="selected"
@@ -157,79 +107,84 @@ const compactTokens = computed(() =>
           {{ a.account_name }}
         </option>
       </select>
-      <template v-if="breakdown?.quota_available">
-        <div class="flex flex-wrap justify-between gap-2 text-xs">
-          <span>已用 {{ percent(breakdown.charged_percent) }}</span>
-          <span>剩余份额 {{ percent(breakdown.remaining_share_percent) }}</span>
+      <div>
+        <p class="text-xs text-base-content/60">本周已用</p>
+        <p class="mt-1 text-3xl font-semibold tabular-nums">
+          {{ formatCurrency(used) }}
+        </p>
+        <p class="mt-2 text-xs text-base-content/60">
+          <span v-if="accounts.length > 1">池内合计 · </span
+          >{{ member.request_count.toLocaleString() }} 次请求 ·
+          <span :title="`${member.token_count.toLocaleString()} Token`"
+            >{{ compactTokens }} Token</span
+          >
+        </p>
+      </div>
+      <dl class="grid grid-cols-2 gap-3">
+        <div>
+          <dt class="text-xs text-base-content/60">
+            本周预算<span v-if="member.share_percent != null">
+              · {{ member.share_percent.toFixed(2) }}%</span
+            >
+          </dt>
+          <dd class="mt-1 font-semibold tabular-nums">{{ money(budget) }}</dd>
         </div>
+        <div>
+          <dt class="text-xs text-base-content/60">估算剩余</dt>
+          <dd
+            class="mt-1 font-semibold tabular-nums"
+            :class="remaining != null && remaining < 0 ? 'text-warning' : ''"
+          >
+            {{ money(remaining) }}
+          </dd>
+        </div>
+      </dl>
+      <div v-if="progress != null" class="space-y-2">
         <progress
-          class="progress progress-primary"
-          :value="progressValue"
+          class="progress"
+          :style="{ color: cpaColor(member.participant_id) }"
+          :value="Math.min(100, Math.max(0, progress))"
           max="100"
-          :aria-label="`${member.participant_name}已使用其合同份额的 ${trueProgress?.toFixed(1) ?? '未知'}%`"
-        ></progress>
-        <p class="text-xs text-base-content/60">
-          进度以个人份额为 100%，实际已用
-          {{ trueProgress == null ? "未知" : `${trueProgress.toFixed(1)}%` }}。
-        </p>
-      </template>
-      <div
-        v-if="!breakdown?.quota_available && estimatedBudget != null"
-        class="space-y-2 rounded-box bg-base-200 p-3 text-sm"
-      >
-        <p>
-          本周份额预算 · 估算
-          <strong>{{ formatCurrency(estimatedBudget) }}</strong>
-        </p>
-        <p v-if="collectedProgress != null">
-          已采集消耗占个人份额 {{ collectedProgress.toFixed(1) }}%
-        </p>
-        <progress
-          v-if="collectedProgress != null"
-          class="progress progress-primary"
-          :value="Math.min(100, Math.max(0, collectedProgress))"
-          max="100"
-          :aria-label="`已采集消耗占个人份额 ${collectedProgress.toFixed(1)}%`"
+          :aria-label="`${member.participant_name}已用个人预算 ${progress.toFixed(1)}%`"
         />
         <p class="text-xs text-base-content/60">
-          按整车模型容量和当前份额估算，不补造漏采的个人用量。
+          已用个人预算 {{ progress.toFixed(1) }}%
         </p>
       </div>
       <section v-if="billing" class="space-y-3 border-t border-base-300 pt-4">
-        <div class="flex items-center justify-between gap-2">
-          <h4 class="text-sm font-semibold">账期累计 · 估算</h4>
-          <span class="text-xs text-base-content/60"
-            >占整车
-            {{
-              billing.usage_percent == null
-                ? "未知"
-                : `${billing.usage_percent.toFixed(1)}%`
-            }}</span
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h4 class="text-sm font-semibold">账期累计</h4>
+          <span
+            v-if="billing.usage_percent != null"
+            class="text-xs text-base-content/60"
+            >占整车 {{ billing.usage_percent.toFixed(1) }}%</span
           >
         </div>
-        <div class="flex flex-wrap justify-between gap-2">
-          <strong class="text-xl">{{
-            formatCurrency(billing.usage_usd)
-          }}</strong
-          ><span class="text-sm"
-            >预计剩余权益
-            {{
-              billing.remaining_usd == null
-                ? "未知"
-                : formatCurrency(billing.remaining_usd)
-            }}</span
-          >
-        </div>
-        <p class="text-xs text-base-content/60">
-          账期预计权益
-          {{
-            billing.entitlement_usd == null
-              ? "未知"
-              : formatCurrency(billing.entitlement_usd)
-          }}
-        </p>
+        <strong class="text-xl tabular-nums">{{
+          formatCurrency(billing.usage_usd)
+        }}</strong>
+        <dl
+          v-if="billing.entitlement_usd != null || billingRemaining != null"
+          class="grid grid-cols-2 gap-3"
+        >
+          <div v-if="billing.entitlement_usd != null">
+            <dt class="text-xs text-base-content/60">预计权益</dt>
+            <dd class="mt-1 font-semibold tabular-nums">
+              {{ formatCurrency(billing.entitlement_usd) }}
+            </dd>
+          </div>
+          <div v-if="billingRemaining != null">
+            <dt class="text-xs text-base-content/60">估算剩余</dt>
+            <dd
+              class="mt-1 font-semibold tabular-nums"
+              :class="billingRemaining < 0 ? 'text-warning' : ''"
+            >
+              {{ formatCurrency(billingRemaining) }}
+            </dd>
+          </div>
+        </dl>
         <span
-          v-if="billing.projected_overuse"
+          v-if="billingRemaining != null && billingRemaining < 0"
           class="badge badge-sm badge-error"
           >整个账期预计超额</span
         >
@@ -239,32 +194,21 @@ const compactTokens = computed(() =>
           >已结束周期累计多用
           {{ formatCurrency(billing.completed_overuse_usd) }}</span
         >
-        <p class="rounded-box bg-base-200 p-3 text-sm">
-          后续建议总量
-          {{
-            billing.recommended_usd == null
-              ? "数据不足"
-              : formatCurrency(billing.recommended_usd)
-          }}<span v-if="billing.recommended_percent != null"
-            >，约占后续可用额度的
-            {{ billing.recommended_percent.toFixed(1) }}%</span
-          >。<span
-            v-if="billing.completed_overuse_usd && !billing.projected_overuse"
-            >后续少用一些，可在账期内平衡。</span
+        <p
+          v-if="billing.recommended_usd != null"
+          class="text-xs text-base-content/60"
+        >
+          后续建议 {{ formatCurrency(billing.recommended_usd)
+          }}<span v-if="billing.recommended_percent != null">
+            · 占后续可用额度 {{ billing.recommended_percent.toFixed(1) }}%</span
           >
         </p>
       </section>
-      <p v-if="reasons.length" class="text-xs leading-5 text-base-content/70">
-        {{ reasons.join("；") }}
-      </p>
       <p
         v-if="member.unpriced_request_count"
         class="text-xs text-base-content/70"
       >
-        另有 {{ member.unpriced_request_count }} 次请求缺价，未计入消耗。
-      </p>
-      <p v-if="member.is_overused" class="text-sm">
-        本周超份额，当前仍可调用；不直接判定账期超额。
+        另有 {{ member.unpriced_request_count }} 次请求缺价，未计入已用。
       </p>
     </div>
   </article>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { CPAPoolSummary } from "@/types/cpa";
+import type { CPAPoolSummary, CPAWeeklyDistribution } from "@/types/cpa";
 import { api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import { useDateTime } from "@/composables/useDateTime";
@@ -32,6 +32,11 @@ const error = ref("");
 const saving = ref(false);
 const money = (n: number | null | undefined) =>
   n == null ? "未知" : formatCurrency(n);
+const weeklyRemaining = (week: CPAWeeklyDistribution) =>
+  week.remaining_usd ??
+  (week.capacity_usd == null
+    ? null
+    : Math.max(0, week.capacity_usd - week.usage_usd));
 const memberName = (id: number) =>
   props.data.members.find((m) => m.participant_id === id)?.participant_name ??
   "其他历史成员";
@@ -133,10 +138,10 @@ const monthlySegments = computed(() => [
           v-if="week.capacity_usd != null && week.coverage_complete === false"
           class="text-xs text-base-content/60"
         >
-          容量与占比可供参考；条内只列已采集费用，未采集消耗未计入成员，留白不代表可用余额。上游剩余比例见下方。
+          估算剩余＝整车估算容量－已采集费用。漏采或未定价请求尚未扣除，实际上游剩余比例见下方。
         </p>
         <CPADistributionBar
-          label="成员已采集消耗 / 已知剩余"
+          label="成员已采集消耗 / 估算剩余"
           percent-basis="本周额度"
           :capacity="week.capacity_usd"
           :segments="[
@@ -151,7 +156,11 @@ const monthlySegments = computed(() => [
               value: week.other_members_usd,
               color: '#a16207',
             },
-            { label: '剩余', value: week.remaining_usd, color: '#94a3b8' },
+            {
+              label: '估算剩余',
+              value: weeklyRemaining(week),
+              color: '#94a3b8',
+            },
           ]"
         />
         <p class="text-xs text-base-content/60">
