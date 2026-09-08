@@ -72,7 +72,10 @@ const members = computed(() =>
           >
         </div>
       </div>
-      <div v-if="members.length" class="grid gap-4 xl:grid-cols-2">
+      <div
+        v-if="members.length"
+        class="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+      >
         <CPAMemberQuotaCard
           v-for="member in members"
           :key="member.participant_id"
@@ -92,6 +95,12 @@ const members = computed(() =>
           >绑定 CPA Key</RouterLink
         >
       </div>
+      <p
+        v-if="members.some((member) => !member.quota_available)"
+        class="text-xs text-base-content/60"
+      >
+        已采集消耗正常展示；剩余额度待估算，原因见下方账号状态。
+      </p>
       <div
         v-if="data.unattributed.request_count"
         class="rounded-box border border-base-300 bg-base-100 p-4"
@@ -113,17 +122,26 @@ const members = computed(() =>
         </div>
         <p class="mt-2 text-xs leading-5 text-base-content/60">
           单独保留，不分摊给其他成员。绑定 Key
-          默认从绑定时刻生效；已有请求需由管理员预览并认领。车主可在下方账号卡片认领历史未归属请求；认领不会补回断线期间未采集的数据。
+          默认从绑定时刻生效；已有请求需由管理员预览并认领。管理员可在下方账号状态中认领历史未归属请求；认领不会补回断线期间未采集的数据。
         </p>
       </div>
-      <div class="grid gap-3 md:grid-cols-2">
+      <div
+        class="grid gap-3"
+        :class="data.accounts.length > 1 ? 'lg:grid-cols-2' : ''"
+      >
         <div
           v-for="account in data.accounts"
           :key="account.account_id"
           class="card bg-base-100"
         >
           <div class="card-body gap-1 p-4">
-            <h3 class="font-semibold">{{ account.account_name }}</h3>
+            <h3 class="font-semibold">
+              {{
+                data.accounts.length > 1
+                  ? account.account_name
+                  : "账号状态与归属"
+              }}
+            </h3>
             <p v-if="account.owner.status === 'active'" class="text-sm">
               车主：{{ account.owner.participant_name }}。{{
                 formatDateTime(account.owner.started_at)
@@ -155,10 +173,8 @@ const members = computed(() =>
                 "额度数据不足：等待有效观测、完整采集区间及模型价格。"
               }}
             </p>
-            <p v-if="!account.coverage.complete" class="text-sm">
-              采集缺口 {{ account.coverage.gaps.length }} 段{{
-                account.coverage.uncertain_end ? "，存在未确认的断线截止点" : ""
-              }}
+            <p v-if="account.coverage.uncertain_end" class="text-xs opacity-60">
+              存在未确认的断线截止点。
             </p>
             <p v-if="!account.coverage.complete" class="text-xs opacity-60">
               历史认领和补价无法恢复漏采请求；后续完整采集周期具备有效观测和份额依据后，才能估算剩余。
