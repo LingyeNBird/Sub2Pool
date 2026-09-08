@@ -94,6 +94,7 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "needs_manual_update_count",
             ],
             "properties": {
+                "cpa_summary": {"oneOf": [{"$ref": "#/components/schemas/CPAPoolSummary"}, {"type": "null"}]},
                 "configured": {"type": "boolean"},
                 "monitoring_enabled": {"type": "boolean"},
                 "accounts": {

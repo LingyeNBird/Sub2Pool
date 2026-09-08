@@ -51,11 +51,11 @@ class QuotaPool(models.Model):
 
 
 class Participant(models.Model):
-    """一个 Sub2API 用户；余额与身份属于整个 Sub2API 渠道。"""
+    """一个拼车参与者，可绑定 Sub2API 用户和多个 CPA Key。"""
 
     name = models.CharField(max_length=80)
     email = models.EmailField(blank=True)
-    sub2api_user_id = models.BigIntegerField(unique=True)
+    sub2api_user_id = models.BigIntegerField(unique=True, null=True, blank=True)
     # Sub2API 用户名随参与者关系一起缓存，避免首页为了显示名称额外访问 Admin API。
     sub2api_username = models.CharField(max_length=150, blank=True)
     # 邮箱与用户名来自同一次 Admin 用户列表读取；用户名为空时用邮箱展示账号身份。

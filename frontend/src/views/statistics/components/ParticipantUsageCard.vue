@@ -65,7 +65,7 @@ const usageIntervalLabel = computed(
 </script>
 
 <template>
-  <section class="card col-span-12 bg-base-200 shadow-xs">
+  <section class="card col-span-12 min-w-0 bg-base-200 shadow-xs">
     <div class="card-body gap-5">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -141,7 +141,7 @@ const usageIntervalLabel = computed(
         v-else-if="
           data?.account.provider === 'sub2api' && participantCharts.length
         "
-        class="grid gap-4 xl:grid-cols-2"
+        class="grid grid-cols-1 gap-4 xl:grid-cols-2"
       >
         <article
           v-for="series in participantCharts"
@@ -211,7 +211,7 @@ const usageIntervalLabel = computed(
       </div>
       <div
         v-else-if="data?.account.provider === 'cpa' && cpaApiKeyCharts.length"
-        class="grid gap-4 xl:grid-cols-2"
+        class="grid grid-cols-1 gap-4 xl:grid-cols-2"
       >
         <article
           v-for="series in cpaApiKeyCharts"

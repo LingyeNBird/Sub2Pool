@@ -148,7 +148,8 @@ function addSelectedAccount() {
         <p class="mt-2 text-sm leading-6 opacity-70">
           从连接后的 CPA 用量事件估算成本并采样 Codex
           七天额度。停用账号只停止额度采样和页面监控， 已纳管账号的原始 usage
-          事实仍会继续采集；CPA 账号不参与拼车成员、余额或额度建议。
+          事实仍会继续采集。可在参与者管理中绑定 CPA Key，并在额度分配中配置 CPA
+          拼车份额。
         </p>
       </div>
 

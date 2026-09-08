@@ -1,3 +1,4 @@
+import type { CPAPoolSummary } from "./cpa";
 import type { CorrectionBreakdown } from "./common";
 import type { MonitoredAccount } from "./accounts";
 import type { CostBreakdown } from "./common";
@@ -140,6 +141,7 @@ export interface APIUsageBreakdown extends CorrectionBreakdown {
   api_keys: APIKeyUsageItem[];
 }
 export interface StatisticsData {
+  cpa_summary?: CPAPoolSummary | null;
   account: Pick<
     MonitoredAccount,
     "id" | "provider" | "source_account_id" | "external_account_id" | "name"

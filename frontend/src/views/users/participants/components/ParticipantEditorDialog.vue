@@ -24,7 +24,7 @@ const editingParticipant = ref<Participant | null>(null);
 const form = reactive<ParticipantFormData>({
   name: "",
   email: "",
-  sub2api_user_id: 0,
+  sub2api_user_id: null,
   sub2api_username: "",
   sub2api_email: "",
   is_owner: false,
@@ -41,12 +41,12 @@ function userRoleLabel(role: string) {
 function participantIdentity(user: {
   sub2api_username: string;
   sub2api_email: string;
-  sub2api_user_id: number;
+  sub2api_user_id: number | null;
 }) {
   return (
     user.sub2api_username ||
     user.sub2api_email ||
-    `账号 ${user.sub2api_user_id}`
+    (user.sub2api_user_id == null ? "仅 CPA" : `账号 ${user.sub2api_user_id}`)
   );
 }
 
@@ -56,7 +56,11 @@ function hasUserOption(userId: number) {
 
 function applySelectedUser() {
   const user = props.users.find((item) => item.id === form.sub2api_user_id);
-  if (!user) return;
+  if (!user) {
+    form.sub2api_username = "";
+    form.sub2api_email = "";
+    return;
+  }
   form.sub2api_username = user.username;
   form.sub2api_email = user.email;
   if (editingParticipant.value) return;
@@ -69,7 +73,7 @@ function open(participant: Participant | null) {
   Object.assign(form, {
     name: participant?.name ?? "",
     email: participant?.email ?? "",
-    sub2api_user_id: participant?.sub2api_user_id ?? 0,
+    sub2api_user_id: participant?.sub2api_user_id ?? null,
     sub2api_username: participant?.sub2api_username ?? "",
     sub2api_email: participant?.sub2api_email ?? "",
     is_owner: participant?.is_owner ?? false,
@@ -118,10 +122,9 @@ defineExpose({ open, close });
             <select
               v-model.number="form.sub2api_user_id"
               class="select w-full max-w-full min-w-0 truncate"
-              required
               @change="applySelectedUser"
             >
-              <option :value="0" disabled>请选择 Sub2API 用户</option>
+              <option :value="null">仅使用 CPA（不绑定 Sub2API）</option>
               <option
                 v-if="
                   form.sub2api_user_id && !hasUserOption(form.sub2api_user_id)
@@ -164,8 +167,8 @@ defineExpose({ open, close });
             <div class="min-w-0 grow">
               <h3 class="font-semibold">参与者身份</h3>
               <p class="mt-1 text-xs leading-relaxed opacity-60">
-                各额度池的百分比分配统一在“额度分配”页面维护。这里仅管理 Sub2API
-                用户身份和全局车主标记。
+                各额度池的百分比分配统一在“额度分配”页面维护。CPA Key
+                在参与者页面单独绑定，Sub2API 用户身份可选。
               </p>
               <label class="label mt-3 w-fit gap-2">
                 <input
@@ -184,7 +187,7 @@ defineExpose({ open, close });
           <textarea v-model="form.notes" class="textarea w-full"></textarea>
         </fieldset>
         <label class="label justify-between">
-          启用这个 Sub2API 用户
+          启用这个参与者
           <input
             v-model="form.enabled"
             type="checkbox"

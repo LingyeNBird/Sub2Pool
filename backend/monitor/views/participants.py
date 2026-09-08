@@ -31,9 +31,9 @@ class _ParticipantHasSnapshots(RuntimeError):
     pass
 
 
-def quota_allocation_data(user) -> dict:
+def quota_allocation_data(user, provider="sub2api") -> dict:
     accounts = list(
-        MonitoredAccount.objects.filter(provider="sub2api")
+        MonitoredAccount.objects.filter(provider=provider)
         .select_related("pool")
         .order_by(
             "pool__name",
@@ -42,8 +42,12 @@ def quota_allocation_data(user) -> dict:
             "external_account_id",
         )
     )
+    if provider == "cpa" and not user.is_staff:
+        from ..access import visible_accounts_for
+        allowed = set(visible_accounts_for(user).values_list("id", flat=True))
+        accounts = [account for account in accounts if account.id in allowed]
     pools = list(
-        QuotaPool.objects.filter(accounts__provider="sub2api")
+        QuotaPool.objects.filter(accounts__id__in=[account.id for account in accounts])
         .prefetch_related(
             "accounts",
             "allocations__participant",
@@ -57,20 +61,25 @@ def quota_allocation_data(user) -> dict:
             Participant.objects.order_by("-is_owner", "id"),
         )
     )
+    if provider == "sub2api":
+        participants = [p for p in participants if p.sub2api_user_id is not None]
+    if provider == "cpa" and not user.is_staff:
+        participants = list(Participant.objects.filter(pool_allocations__pool__in=pools).distinct())
     visible_participant_ids = {
         participant.id for participant in participants
     }
     return {
+        "provider": provider,
         "accounts": MonitoredAccountSerializer(accounts, many=True).data,
         "participants": [
             {
                 "id": participant.id,
                 "name": participant.name,
-                "sub2api_user_id": participant.sub2api_user_id,
-                "sub2api_username": participant.sub2api_username,
-                "sub2api_email": participant.sub2api_email,
+                "sub2api_user_id": participant.sub2api_user_id if provider == "sub2api" else None,
+                "sub2api_username": participant.sub2api_username if provider == "sub2api" else "",
+                "sub2api_email": participant.sub2api_email if provider == "sub2api" else "",
                 "sub2api_identity": (
-                    participant.sub2api_username
+                    "CPA" if provider == "cpa" else participant.sub2api_username
                     or participant.sub2api_email
                     or f"账号 {participant.sub2api_user_id}"
                 ),
@@ -90,7 +99,7 @@ def quota_allocation_data(user) -> dict:
                         [
                             item
                             for item in pool.accounts.all()
-                            if item.provider == "sub2api"
+                            if item.provider == provider and item.id in {account.id for account in accounts}
                         ],
                         key=lambda item: (
                             item.name,
@@ -127,7 +136,10 @@ class QuotaAllocationView(PageAccessAPIView):
     required_page_permissions = (PagePermission.PARTICIPANTS,)
 
     def get(self, request):
-        return ok(quota_allocation_data(request.user))
+        provider = request.query_params.get("provider", "sub2api")
+        if provider not in {"sub2api", "cpa"}:
+            return error("渠道参数无效")
+        return ok(quota_allocation_data(request.user, provider))
 
     def put(self, request):
         serializer = QuotaAllocationWriteSerializer(data=request.data)
@@ -136,7 +148,7 @@ class QuotaAllocationView(PageAccessAPIView):
         external_account_ids = [
             account.fact_key
             for account in MonitoredAccount.objects.filter(
-                provider="sub2api"
+                provider=serializer.validated_data["provider"]
             ).order_by("external_account_id")
         ]
         settings_id = AppSettings.load().pk
@@ -146,7 +158,7 @@ class QuotaAllocationView(PageAccessAPIView):
                 serializer.apply()
         except serializers.ValidationError as exc:
             return error("分配方案已过期", details=exc.detail)
-        return ok(quota_allocation_data(request.user))
+        return ok(quota_allocation_data(request.user, serializer.validated_data["provider"]))
 
 
 class Sub2APIUserListView(AdminAPIView):
@@ -262,7 +274,8 @@ class ParticipantDetailView(AdminAPIView):
                 participant = Participant.objects.select_for_update().get(
                     pk=participant_id
                 )
-                if participant.snapshots.exists():
+                from ..cpa.participants import has_cpa_contract_history
+                if participant.snapshots.exists() or participant.cpa_bindings.exists() or participant.cpa_claim_plans.exists() or has_cpa_contract_history(participant.id):
                     raise _ParticipantHasSnapshots
                 pool_ids = list(
                     participant.pool_allocations.order_by().values_list(

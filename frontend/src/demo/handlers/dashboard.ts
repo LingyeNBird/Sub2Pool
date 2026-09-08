@@ -1,3 +1,4 @@
+import { demoCPASummary } from "../cpa";
 import type {
   QuotaAllocationData,
   QuotaAllocationWritePool,
@@ -13,9 +14,12 @@ import {
 } from "../state";
 import { participantBreakdowns } from "./participants";
 
-function quotaAllocationData(state: DemoState): QuotaAllocationData {
+function quotaAllocationData(
+  state: DemoState,
+  provider = "sub2api",
+): QuotaAllocationData {
   return {
-    accounts: state.monitoredAccounts,
+    accounts: state.monitoredAccounts.filter((a) => a.provider === provider),
     participants: state.participants.map((participant) => ({
       id: participant.id,
       name: participant.name,
@@ -26,7 +30,13 @@ function quotaAllocationData(state: DemoState): QuotaAllocationData {
       is_owner: participant.is_owner,
       enabled: participant.enabled,
     })),
-    pools: state.quotaPools,
+    pools: state.quotaPools.filter((p) =>
+      p.account_ids.some((id) =>
+        state.monitoredAccounts.some(
+          (a) => a.id === id && a.provider === provider,
+        ),
+      ),
+    ),
   };
 }
 
@@ -42,13 +52,23 @@ function quotaPoolSignature(pool: {
   return JSON.stringify([pool.name, accountIds, allocations]);
 }
 
-function applyQuotaAllocation(state: DemoState, value: unknown): string | null {
+function applyQuotaAllocation(
+  state: DemoState,
+  value: unknown,
+  provider = "sub2api",
+): string | null {
   if (!Array.isArray(value)) return "额度池列表格式无效";
 
-  const accountIds = new Set(state.monitoredAccounts.map((item) => item.id));
+  const accountIds = new Set(
+    state.monitoredAccounts
+      .filter((a) => a.provider === provider)
+      .map((item) => item.id),
+  );
   const participantIds = new Set(state.participants.map((item) => item.id));
   const existingPools = new Map(
-    state.quotaPools.map((pool) => [pool.id, pool]),
+    state.quotaPools
+      .filter((p) => p.account_ids.some((id) => accountIds.has(id)))
+      .map((pool) => [pool.id, pool]),
   );
   const seenAccountIds = new Set<number>();
   const seenPoolIds = new Set<number>();
@@ -174,7 +194,12 @@ function applyQuotaAllocation(state: DemoState, value: unknown): string | null {
     };
   });
 
-  state.quotaPools = nextPools;
+  state.quotaPools = [
+    ...state.quotaPools.filter(
+      (p) => !p.account_ids.some((id) => accountIds.has(id)),
+    ),
+    ...nextPools,
+  ];
   for (const pool of nextPools) {
     for (const accountId of pool.account_ids) {
       const account = state.monitoredAccounts.find(
@@ -184,22 +209,30 @@ function applyQuotaAllocation(state: DemoState, value: unknown): string | null {
     }
   }
   for (const participant of state.participants) {
-    participant.pool_allocations = nextPools.flatMap((pool) => {
-      const allocation = pool.allocations.find(
-        (item) => item.participant_id === participant.id,
-      );
-      return allocation
-        ? [
-            {
-              pool_id: pool.id,
-              pool_name: pool.name,
-              share_percent: allocation.share_percent,
-              account_ids: [...pool.account_ids],
-              account_count: pool.account_ids.length,
-            },
-          ]
-        : [];
-    });
+    participant.pool_allocations = state.quotaPools
+      .filter((pool) =>
+        pool.account_ids.some((id) =>
+          state.monitoredAccounts.some(
+            (a) => a.id === id && a.provider === "sub2api",
+          ),
+        ),
+      )
+      .flatMap((pool) => {
+        const allocation = pool.allocations.find(
+          (item) => item.participant_id === participant.id,
+        );
+        return allocation
+          ? [
+              {
+                pool_id: pool.id,
+                pool_name: pool.name,
+                share_percent: allocation.share_percent,
+                account_ids: [...pool.account_ids],
+                account_count: pool.account_ids.length,
+              },
+            ]
+          : [];
+      });
     participant.account_breakdowns = participantBreakdowns(
       state,
       participant.id,
@@ -221,7 +254,10 @@ export function handleDashboard({
 }: DemoRequestContext): Response | null {
   if (method === "GET" && pathname === "dashboard") {
     const accountId = Number(url.searchParams.get("account_id"));
-    return ok(dashboardData(state, accountId));
+    return ok({
+      ...dashboardData(state, accountId),
+      cpa_summary: demoCPASummary(state, accountId),
+    });
   }
   if (pathname === "monitor/run" && method === "GET") {
     const enabledAccounts = state.monitoredAccounts.filter(
@@ -293,13 +329,21 @@ export function handleDashboard({
     return ok({ applied: true });
   }
   if (method === "GET" && pathname === "quota-allocation") {
-    return ok(quotaAllocationData(state));
+    return ok(
+      quotaAllocationData(state, url.searchParams.get("provider") ?? "sub2api"),
+    );
   }
   if (method === "PUT" && pathname === "quota-allocation") {
-    const validationError = applyQuotaAllocation(state, payload.pools);
+    const validationError = applyQuotaAllocation(
+      state,
+      payload.pools,
+      String(payload.provider ?? "sub2api"),
+    );
     if (validationError) return fail(validationError);
     saveDemoState(state);
-    return ok(quotaAllocationData(state));
+    return ok(
+      quotaAllocationData(state, String(payload.provider ?? "sub2api")),
+    );
   }
   return null;
 }

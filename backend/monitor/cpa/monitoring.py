@@ -64,6 +64,8 @@ def _persist_cpa_capture(
         interval_started_at = cost_started_at
         interval_cost = total_cost
 
+    from .participants import record_contract
+    record_contract(account, timezone.now())
     point = UsageSamplePoint.objects.create(
         account_id=account.fact_key,
         observed_at=observed_at,

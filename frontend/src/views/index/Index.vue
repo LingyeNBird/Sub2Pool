@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 
+import CPAPoolCard from "@/components/common/CPAPoolCard.vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
@@ -212,6 +213,7 @@ onMounted(load);
     :read-only="!auth.isStaff"
     @select="actionDialog?.open($event)"
   />
+  <CPAPoolCard v-if="data?.cpa_summary" :data="data.cpa_summary" />
   <CollectionStatusCard v-if="data" :data="data" />
   <AccountExplanationCard v-if="data" :data="data" />
 

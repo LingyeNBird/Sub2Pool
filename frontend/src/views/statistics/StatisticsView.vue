@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from "vue";
 
+import CPARequestsCard from "./components/CPARequestsCard.vue";
+import CPAPoolCard from "@/components/common/CPAPoolCard.vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api } from "@/services/api";
 import type { MonitoredAccount } from "@/types/accounts";
@@ -136,6 +138,11 @@ onMounted(initialize);
     :loading="loading"
     @show-basis="basisDialog?.open($event)"
     @show-closing-basis="showClosingBasis"
+  />
+  <CPAPoolCard v-if="data?.cpa_summary" :data="data.cpa_summary" />
+  <CPARequestsCard
+    v-if="data?.account.provider === 'cpa'"
+    :account-id="data.account.id"
   />
   <ParticipantUsageCard
     v-model:days="usageDays"

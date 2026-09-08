@@ -1,0 +1,516 @@
+import type {
+  CPAKeys,
+  CPARequest,
+  CPAPoolSummary,
+  CPAClaim,
+} from "@/types/cpa";
+import type { DemoRequestContext } from "./backend";
+import type { DemoState } from "./state";
+import type { CPAAPIKeyUsageSeries } from "@/types/statistics";
+import { demoIdentity, saveDemoState } from "./state";
+
+export interface DemoCPAState {
+  keys: CPAKeys;
+  events: (CPARequest & {
+    participant_id: number | null;
+    key_id: number;
+    account_id: number;
+  })[];
+  claims: (CPAClaim & { revision: number })[];
+}
+
+export function initializeCPADemo(state: DemoState) {
+  if (state.cpa) return;
+  const account = {
+    ...state.monitoredAccounts[0]!,
+    id: 3,
+    provider: "cpa" as const,
+    pool_id: 2,
+    external_account_id: null,
+    cpa_auth_index: "demo-codex",
+    source_account_id: "demo-codex",
+    name: "CPA 拼车账号",
+    quota_query_mode: "direct" as const,
+  };
+  state.monitoredAccounts.push(account);
+  state.quotaPools.push({
+    id: 2,
+    name: "CPA 演示池",
+    contract_revision: 1,
+    account_ids: [3],
+    total_share_percent: 100,
+    allocations: state.participants.map((p, i) => ({
+      participant_id: p.id,
+      share_percent: [40, 35, 25][i] ?? 0,
+    })),
+  });
+  state.nextPoolId = Math.max(3, state.nextPoolId);
+  for (const user of state.systemUsers) {
+    user.account_ids.push(3);
+    user.account_names.push(account.name);
+  }
+  const anchor = Date.parse(state.clock);
+  const start = new Date(anchor - 3 * 86400000).toISOString();
+  const keys: CPAKeys = {
+    keys: state.participants.map((p, i) => ({
+      id: i + 1,
+      name: ["工作电脑", "笔记本", "开发测试"][i] ?? "演示 Key",
+      hint: String(1001 + i),
+      observed_hash: String(i + 1).padStart(64, "0"),
+      bindings: [
+        {
+          id: i + 1,
+          key_id: i + 1,
+          name: ["工作电脑", "笔记本", "开发测试"][i] ?? "演示 Key",
+          hint: String(1001 + i),
+          participant_id: p.id,
+          participant_name: p.name,
+          started_at: start,
+          ended_at: null,
+        },
+      ],
+    })),
+    unregistered: [{ observed_hash: "4".padStart(64, "0"), hint: "1004" }],
+  };
+  const events: DemoCPAState["events"] = Array.from({ length: 84 }, (_, i) => {
+    const owner = i % 4;
+    return {
+      id: i + 1,
+      account_id: 3,
+      participant_id: state.participants[owner]?.id ?? null,
+      key_id: owner + 1,
+      occurred_at: new Date(anchor - (84 - i) * 1800000).toISOString(),
+      request_id: `demo-cpa-request-${i + 1}`,
+      api_key_hint: String(1001 + owner),
+      model: "gpt-5.4",
+      endpoint: "/v1/responses",
+      input_tokens: 9000 + i * 70,
+      cached_input_tokens: 3000,
+      output_tokens: 1100 + i * 13,
+      reasoning_tokens: 350,
+      total_tokens: 10100 + i * 83,
+      failed: i % 17 === 0,
+      latency_ms: 1800 + i * 15,
+      ttft_ms: 210 + i,
+      usage_usd: Number((0.14 + i * 0.004).toFixed(4)),
+      unpriced: false,
+      requested_service_tier: "",
+      response_service_tier: "default",
+    };
+  });
+  state.cpa = { keys, events, claims: [] };
+}
+
+function ownIds(state: DemoState) {
+  const identity = demoIdentity();
+  if (identity?.is_staff) return null;
+  return (
+    state.systemUsers.find((user) => user.username === identity?.username)
+      ?.participant_ids ?? []
+  );
+}
+
+function canRead(state: DemoState, accountId: number) {
+  const identity = demoIdentity();
+  if (identity?.is_staff) return true;
+  const user = state.systemUsers.find((u) => u.username === identity?.username);
+  const account = state.monitoredAccounts.find((a) => a.id === accountId);
+  const pool = state.quotaPools.find((p) => p.id === account?.pool_id);
+  return Boolean(
+    user?.account_ids.includes(accountId) &&
+    pool?.allocations.some((a) =>
+      user.participant_ids.includes(a.participant_id),
+    ),
+  );
+}
+
+export function demoCPASummary(
+  state: DemoState,
+  accountId: number,
+): CPAPoolSummary | null {
+  const account = state.monitoredAccounts.find(
+    (a) => a.id === accountId && a.provider === "cpa",
+  );
+  const pool = state.quotaPools.find((p) => p.id === account?.pool_id);
+  if (!account || !pool || !canRead(state, accountId)) return null;
+  const own = ownIds(state);
+  const sum = (events: DemoCPAState["events"]) => ({
+    usage_usd: events.reduce((total, e) => total + e.usage_usd, 0),
+    request_count: events.length,
+    token_count: events.reduce((total, e) => total + e.total_tokens, 0),
+    unpriced_request_count: events.filter((e) => e.unpriced).length,
+  });
+  const events = state.cpa!.events.filter((e) => e.account_id === accountId);
+  const members = pool.allocations.flatMap((allocation) => {
+    const person = state.participants.find(
+      (p) => p.id === allocation.participant_id,
+    );
+    if (!person) return [];
+    const totals = sum(events.filter((e) => e.participant_id === person.id));
+    const expected = allocation.share_percent * 20;
+    const remaining = expected - totals.usage_usd;
+    return [
+      {
+        ...totals,
+        participant_id: person.id,
+        participant_name: person.name,
+        is_self: own != null && own.includes(person.id),
+        share_percent: allocation.share_percent,
+        quota_available: true,
+        is_overused: remaining < 0,
+        expected_entitlement_usd: expected,
+        consumed_entitlement_usd: totals.usage_usd,
+        remaining_entitlement_usd: remaining,
+        account_breakdowns: [
+          {
+            account_id: accountId,
+            quota_available: true,
+            quota_as_of: state.clock,
+            charged_percent: totals.usage_usd / 20,
+            remaining_share_percent: Math.max(0, remaining / 20),
+            usage_usd: totals.usage_usd,
+            estimated_capacity_usd: 2000,
+            expected_entitlement_usd: expected,
+            consumed_entitlement_usd: totals.usage_usd,
+            remaining_entitlement_usd: remaining,
+          },
+        ],
+      },
+    ];
+  });
+  return {
+    pool_id: pool.id,
+    pool_name: pool.name,
+    selected_account_id: accountId,
+    partial_scope: false,
+    members,
+    accounts: [
+      {
+        ...sum(events),
+        account_id: accountId,
+        account_name: account.name,
+        selected: true,
+        quota_as_of: state.clock,
+        requests_as_of: events.at(-1)?.occurred_at ?? null,
+        cycle_started_at: new Date(
+          Date.parse(state.clock) - 3 * 86400000,
+        ).toISOString(),
+        resets_at: new Date(
+          Date.parse(state.clock) + 4 * 86400000,
+        ).toISOString(),
+        coverage: { complete: true, uncertain_end: false, gaps: [] },
+        quota_available: true,
+      },
+    ],
+    unattributed: sum(events.filter((e) => e.participant_id == null)),
+    cost_estimate: true,
+    enforcement_enabled: false,
+    generated_at: state.clock,
+    collector: {
+      state: "connected",
+      connected: true,
+      stale: false,
+      connected_at: state.clock,
+      heartbeat_at: state.clock,
+      last_message_at: state.clock,
+      last_persisted_at: state.clock,
+      pending_count: 0,
+      last_error: "",
+      last_error_at: null,
+    },
+  };
+}
+
+export function demoCPAKeySeries(
+  state: DemoState,
+  accountId: number,
+  days: number,
+  precision: "raw" | "hour" | "day",
+): CPAAPIKeyUsageSeries[] {
+  if (!canRead(state, accountId)) return [];
+  const own = ownIds(state);
+  const cutoff = Date.parse(state.clock) - days * 86400000;
+  const groups = new Map<number, CPAAPIKeyUsageSeries>();
+  const buckets = new Map<string, CPAAPIKeyUsageSeries["points"][number]>();
+  const format = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: String(state.settings.timezone),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  for (const event of state.cpa!.events) {
+    if (
+      event.account_id !== accountId ||
+      Date.parse(event.occurred_at) < cutoff ||
+      (own &&
+        (event.participant_id == null || !own.includes(event.participant_id)))
+    )
+      continue;
+    let series = groups.get(event.key_id);
+    if (!series) {
+      const key = state.cpa!.keys.keys.find((k) => k.id === event.key_id);
+      series = {
+        api_key_id: `demo-key-${event.key_id}`,
+        api_key_name: `${key?.name || "API Key"} ····${event.api_key_hint}`,
+        total_usage_usd: 0,
+        request_count: 0,
+        token_count: 0,
+        unpriced_request_count: 0,
+        points: [],
+      };
+      groups.set(event.key_id, series);
+    }
+    series.total_usage_usd += event.usage_usd;
+    series.request_count++;
+    series.token_count += event.total_tokens;
+    series.unpriced_request_count += Number(event.unpriced);
+    const local = format.format(new Date(event.occurred_at));
+    const label =
+      precision === "day"
+        ? local.slice(0, 10)
+        : precision === "hour"
+          ? `${local.slice(0, 13)}:00`
+          : local;
+    const bucketId = `${event.key_id}:${precision === "raw" ? event.id : label}`;
+    let point = buckets.get(bucketId);
+    if (!point) {
+      point = {
+        observed_at: event.occurred_at,
+        label,
+        usage_usd: 0,
+        request_count: 0,
+        token_count: 0,
+      };
+      buckets.set(bucketId, point);
+      series.points.push(point);
+    }
+    point.usage_usd += event.usage_usd;
+    point.request_count++;
+    point.token_count += event.total_tokens;
+  }
+  return [...groups.values()];
+}
+
+export function handleCPA({
+  state,
+  pathname,
+  method,
+  payload,
+  url,
+  ok,
+  fail,
+}: DemoRequestContext): Response | null {
+  if (!pathname.startsWith("cpa/")) return null;
+  const cpa = state.cpa!;
+  const admin = demoIdentity()?.is_staff;
+  const own = ownIds(state);
+  if (pathname === "cpa/summary" || pathname === "cpa/requests") {
+    const accountId = Number(url.searchParams.get("account_id"));
+    if (!canRead(state, accountId)) return fail("CPA 账号未授权", 403);
+    if (pathname === "cpa/summary") return ok(demoCPASummary(state, accountId));
+    let events = cpa.events.filter(
+      (e) =>
+        e.account_id === accountId &&
+        (own == null ||
+          (e.participant_id != null && own.includes(e.participant_id))),
+    );
+    const hashes = new Set(events.map((e) => e.key_id));
+    const keys = cpa.keys.keys
+      .filter((k) => hashes.has(k.id))
+      .map((k) => ({ id: k.id, name: k.name, hint: k.hint }));
+    const models = [...new Set(events.map((e) => e.model))];
+    const params = url.searchParams;
+    if (params.get("key_id"))
+      events = events.filter((e) => e.key_id === Number(params.get("key_id")));
+    if (params.get("model"))
+      events = events.filter((e) => e.model === params.get("model"));
+    if (params.has("failed"))
+      events = events.filter(
+        (e) => e.failed === (params.get("failed") === "true"),
+      );
+    if (params.get("started_at"))
+      events = events.filter(
+        (e) =>
+          Date.parse(e.occurred_at) >= Date.parse(params.get("started_at")!),
+      );
+    if (params.get("ended_at"))
+      events = events.filter(
+        (e) => Date.parse(e.occurred_at) < Date.parse(params.get("ended_at")!),
+      );
+    events.sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
+    const page = Math.max(1, Number(params.get("page") ?? 1));
+    const size = Math.min(
+      100,
+      Math.max(1, Number(params.get("page_size") ?? 50)),
+    );
+    return ok({
+      account_id: accountId,
+      items: events.slice((page - 1) * size, page * size),
+      total: events.length,
+      page,
+      page_size: size,
+      keys,
+      models,
+      generated_at: state.clock,
+      cost_estimate: true,
+    });
+  }
+  if (!admin) return fail("仅管理员可管理 CPA Key", 403);
+  if (pathname === "cpa/keys" && method === "GET") return ok(cpa.keys);
+  if (pathname === "cpa/keys" && method === "POST") {
+    const person = state.participants.find(
+      (p) => p.id === Number(payload.participant_id),
+    );
+    if (!person) return fail("请选择参与者");
+    const hash = String(payload.observed_hash ?? "");
+    let key = cpa.keys.keys.find((k) => k.observed_hash === hash);
+    if (key?.bindings.some((b) => !b.ended_at)) return fail("该 Key 已绑定");
+    if (!key) {
+      const observed = cpa.keys.unregistered.find(
+        (k) => k.observed_hash === hash,
+      );
+      const id = Math.max(0, ...cpa.keys.keys.map((k) => k.id)) + 1;
+      key = {
+        id,
+        name: String(payload.name ?? ""),
+        hint: observed?.hint ?? String(payload.raw_key ?? "").slice(-4),
+        observed_hash: hash || String(id).padStart(64, "0"),
+        bindings: [],
+      };
+      cpa.keys.keys.push(key);
+      cpa.keys.unregistered = cpa.keys.unregistered.filter(
+        (k) => k.observed_hash !== hash,
+      );
+    }
+    const binding = {
+      id:
+        Math.max(
+          0,
+          ...cpa.keys.keys.flatMap((k) => k.bindings.map((b) => b.id)),
+        ) + 1,
+      key_id: key.id,
+      hint: key.hint,
+      name: key.name,
+      participant_id: person.id,
+      participant_name: person.name,
+      started_at: state.clock,
+      ended_at: null,
+    };
+    key.bindings.push(binding);
+    state.revision++;
+    saveDemoState(state);
+    return ok(binding, 201);
+  }
+  const bindingMatch = /^cpa\/bindings\/(\d+)$/.exec(pathname);
+  if (bindingMatch && method === "PATCH") {
+    const key = cpa.keys.keys.find((k) =>
+      k.bindings.some((b) => b.id === Number(bindingMatch[1])),
+    );
+    if (!key) return fail("绑定不存在", 404);
+    key.name = String(payload.name ?? "");
+    for (const binding of key.bindings) binding.name = key.name;
+    saveDemoState(state);
+    return ok(key.bindings.find((b) => b.id === Number(bindingMatch[1])));
+  }
+  if (bindingMatch && method === "DELETE") {
+    const binding = cpa.keys.keys
+      .flatMap((k) => k.bindings)
+      .find((b) => b.id === Number(bindingMatch[1]));
+    if (!binding) return fail("绑定不存在", 404);
+    binding.ended_at ??= state.clock;
+    state.revision++;
+    saveDemoState(state);
+    return ok(binding);
+  }
+  if (pathname === "cpa/claims/preview" && method === "POST") {
+    const start = String(payload.started_at);
+    const end = String(payload.ended_at);
+    const key = cpa.keys.keys.find((k) => k.id === Number(payload.key_id));
+    if (!key || !(Date.parse(start) < Date.parse(end)))
+      return fail("请选择有效时间范围");
+    if (
+      key.bindings.some(
+        (b) =>
+          Date.parse(b.started_at) < Date.parse(end) &&
+          (!b.ended_at || Date.parse(b.ended_at) > Date.parse(start)),
+      )
+    )
+      return fail("此范围已有归属");
+    const events = cpa.events.filter(
+      (e) =>
+        e.key_id === key.id &&
+        Date.parse(e.occurred_at) >= Date.parse(start) &&
+        Date.parse(e.occurred_at) < Date.parse(end),
+    );
+    if (!events.length) return fail("此范围没有已采集请求");
+    const plan = {
+      id: `demo-${cpa.claims.length + 1}`,
+      key_id: key.id,
+      participant_id: Number(payload.participant_id),
+      started_at: start,
+      ended_at: end,
+      expires_at: new Date(Date.now() + 900000).toISOString(),
+      applied_at: null,
+      revision: state.revision,
+      historical_contract_policy: "演示：缺少历史份额时不补造历史权益。",
+      accounts: [
+        {
+          account_id: 3,
+          account_name: "CPA 拼车账号",
+          usage_usd: events.reduce((v, e) => v + e.usage_usd, 0),
+          request_count: events.length,
+          token_count: events.reduce((v, e) => v + e.total_tokens, 0),
+          unpriced_request_count: 0,
+          coverage: { complete: true, uncertain_end: false, gaps: [] },
+        },
+      ],
+    };
+    cpa.claims.push(plan);
+    saveDemoState(state);
+    return ok(plan, 201);
+  }
+  const claimMatch = /^cpa\/claims\/([^/]+)\/apply$/.exec(pathname);
+  if (claimMatch && method === "POST") {
+    const plan = cpa.claims.find((p) => p.id === claimMatch[1]);
+    if (!plan) return fail("预览不存在", 404);
+    if (plan.applied_at) return ok(plan);
+    if (
+      plan.revision !== state.revision ||
+      Date.parse(plan.expires_at) <= Date.now()
+    )
+      return fail("预览已变化，请重新预览");
+    for (const item of cpa.events)
+      if (
+        item.key_id === plan.key_id &&
+        Date.parse(item.occurred_at) >= Date.parse(plan.started_at) &&
+        Date.parse(item.occurred_at) < Date.parse(plan.ended_at)
+      )
+        item.participant_id = plan.participant_id;
+    const key = cpa.keys.keys.find((k) => k.id === plan.key_id)!;
+    key.bindings.push({
+      id:
+        Math.max(
+          0,
+          ...cpa.keys.keys.flatMap((k) => k.bindings.map((b) => b.id)),
+        ) + 1,
+      key_id: key.id,
+      hint: key.hint,
+      name: key.name,
+      participant_id: plan.participant_id,
+      participant_name:
+        state.participants.find((p) => p.id === plan.participant_id)?.name ??
+        "",
+      started_at: plan.started_at,
+      ended_at: plan.ended_at,
+    });
+    plan.applied_at = state.clock;
+    state.revision++;
+    saveDemoState(state);
+    return ok(plan);
+  }
+  return fail("CPA 演示接口不存在", 404);
+}

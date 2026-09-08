@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable
 
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from rest_framework.permissions import BasePermission
 
 from .models import (
@@ -86,13 +86,15 @@ def visible_accounts_for(user, queryset: QuerySet | None = None) -> QuerySet:
     accounts = queryset if queryset is not None else MonitoredAccount.objects.all()
     if user.is_staff:
         return accounts
-    return accounts.filter(authorized_users=user)
+    return accounts.filter(authorized_users=user).filter(
+        Q(provider="sub2api") | Q(pool__allocations__participant__authorized_users=user)
+    ).distinct()
 
 
 def visible_account_ids(user) -> set[int] | None:
     if user.is_staff:
         return None
-    return set(user.visible_monitored_accounts.values_list("id", flat=True))
+    return set(visible_accounts_for(user).values_list("id", flat=True))
 
 
 def scope_participant_data(

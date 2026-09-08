@@ -208,7 +208,7 @@ def refresh_due_api_usage_snapshots(config: AppSettings) -> dict[str, int]:
         observation = latest_cycle_observation(account)
         if observation is None:
             continue
-        participants = Participant.objects.filter(enabled=True)
+        participants = Participant.objects.filter(enabled=True, sub2api_user_id__isnull=False)
         for participant in participants:
             if fresh_snapshot(
                 participant=participant,

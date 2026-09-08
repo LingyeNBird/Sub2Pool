@@ -84,7 +84,11 @@ def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
         charged_lower=snapshot.charged_percent_lower,
         charged_upper=snapshot.charged_percent_upper,
     )
+    cpa_unknown = snapshot.observation.account_id < 0 and not snapshot.cpa_contract_known
+    if cpa_unknown:
+        overuse = {"is_overused": False, "overused_percent": ZERO, "overused_percent_min": ZERO, "overused_percent_max": ZERO}
     return {
+        "cpa_contract_known": snapshot.cpa_contract_known,
         "participant_id": snapshot.participant_id,
         "participant_name": (
             snapshot.participant.name if hasattr(snapshot, "participant") else ""
@@ -99,7 +103,7 @@ def snapshot_data(snapshot: ParticipantSnapshot) -> dict:
         ),
         "charged_delta_percent": float(snapshot.charged_delta_percent),
         "charged_cycle_percent": float(snapshot.charged_cycle_percent),
-        "remaining_share_percent": float(snapshot.remaining_share_percent),
+        "remaining_share_percent": None if cpa_unknown else float(snapshot.remaining_share_percent),
         "current_balance_usd": (
             float(snapshot.current_balance_usd)
             if snapshot.current_balance_usd is not None
@@ -166,11 +170,11 @@ def latest_snapshot(
         "participant",
     ).filter(
         observation__excluded_at__isnull=True,
-        source_sub2api_user_id=participant.sub2api_user_id,
+        **({} if account is not None and account.provider == "cpa" else {"source_sub2api_user_id": participant.sub2api_user_id, "observation__account_id__gt": 0}),
     )
     if account is not None:
         snapshots = snapshots.filter(
-            observation__account_id=account.external_account_id
+            observation__account_id=account.fact_key
         )
     return snapshots.order_by("-observation__observed_at", "-id").first()
 
@@ -357,11 +361,12 @@ def _display_snapshot_data(
     snapshot: ParticipantSnapshot,
     config: AppSettings,
 ) -> dict:
-    if config.weekly_quota_model != "constant_average":
+    if snapshot.observation.account_id < 0 or config.weekly_quota_model != "constant_average":
         return snapshot_data(snapshot)
 
     values = _constant_average_values(snapshot, config)
     return {
+        "cpa_contract_known": snapshot.cpa_contract_known,
         "participant_id": snapshot.participant_id,
         "participant_name": snapshot.participant.name,
         "selected_cost": float(values["selected_cost"]),
@@ -570,6 +575,7 @@ def _pooled_safety_factor(
             enabled=True,
             pool_allocations__share_percent__gt=ZERO,
             pool_allocations__pool__accounts__enabled=True,
+            pool_allocations__pool__accounts__provider="sub2api",
         )
         .distinct()
         .order_by("id")
@@ -582,13 +588,14 @@ def _pooled_safety_factor(
             candidate.pool_allocations.filter(
                 share_percent__gt=ZERO,
                 pool__accounts__enabled=True,
+                pool__accounts__provider="sub2api",
             )
             .distinct()
             .values_list("pool_id", "share_percent")
         )
         candidate_accounts = list(
             MonitoredAccount.objects.select_related("pool")
-            .filter(enabled=True, pool_id__in=candidate_allocations)
+            .filter(enabled=True, provider="sub2api", pool_id__in=candidate_allocations)
             .order_by("id")
         )
         net = ZERO
@@ -702,12 +709,15 @@ def aggregate_recommendation(
     config: AppSettings,
 ) -> tuple[dict | None, list[ParticipantSnapshot]]:
     """Sum the participant's current pool contracts into one global balance."""
+    if participant.sub2api_user_id is None:
+        return None, []
     allocations = list(
         PoolParticipant.objects.select_related("pool")
         .filter(
             participant=participant,
             share_percent__gt=ZERO,
             pool__accounts__enabled=True,
+            pool__accounts__provider="sub2api",
         )
         .distinct()
         .order_by("pool__name", "pool_id")
@@ -720,6 +730,7 @@ def aggregate_recommendation(
         .filter(
             enabled=True,
             pool_id__in=allocation_by_pool_id,
+            provider="sub2api",
         )
         .order_by("pool__name", "pool_id", "name", "external_account_id")
     )
@@ -995,7 +1006,7 @@ def participant_data(
         allocation.pool_id: allocation for allocation in allocations
     }
     accounts = list(
-        MonitoredAccount.objects.select_related("pool").order_by(
+        MonitoredAccount.objects.filter(provider="sub2api").select_related("pool").order_by(
             "pool__name",
             "pool_id",
             "name",
@@ -1022,7 +1033,7 @@ def participant_data(
         "sub2api_identity": (
             participant.sub2api_username
             or participant.sub2api_email
-            or f"账号 {participant.sub2api_user_id}"
+            or (f"账号 {participant.sub2api_user_id}" if participant.sub2api_user_id is not None else "仅 CPA")
         ),
         "pool_allocations": [
             {

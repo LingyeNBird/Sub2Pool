@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
+import CPAKeyManager from "./components/CPAKeyManager.vue";
+import CPAPoolCard from "@/components/common/CPAPoolCard.vue";
+import type { CPAPoolSummary } from "@/types/cpa";
+import type { MonitoredAccount } from "@/types/accounts";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
@@ -19,6 +23,28 @@ import type {
 } from "./types";
 
 const auth = useAuthStore();
+const provider = ref<"sub2api" | "cpa">("sub2api");
+const cpaAccounts = ref<MonitoredAccount[]>([]);
+const cpaAccountId = ref<number | null>(null);
+const cpaSummary = ref<CPAPoolSummary | null>(null);
+let cpaGeneration = 0;
+async function loadCPA() {
+  const current = ++cpaGeneration;
+  cpaSummary.value = null;
+  if (cpaAccountId.value == null) return;
+  try {
+    const result = await api<CPAPoolSummary>(
+      `cpa/summary?account_id=${cpaAccountId.value}`,
+    );
+    if (current === cpaGeneration) cpaSummary.value = result;
+  } catch (error) {
+    if (current === cpaGeneration)
+      message.value =
+        error instanceof ApiError ? error.message : "加载 CPA 额度失败";
+  }
+}
+watch(cpaAccountId, loadCPA);
+
 const participants = ref<Participant[]>([]);
 const sub2apiUsers = ref<Sub2APIUserOption[]>([]);
 const loading = ref(true);
@@ -52,6 +78,16 @@ async function load() {
   loading.value = true;
   try {
     participants.value = await api<Participant[]>("participants");
+    cpaAccounts.value = (
+      await api<MonitoredAccount[]>("settings/monitored-accounts")
+    ).filter((a) => a.provider === "cpa" && a.enabled);
+    if (cpaAccountId.value == null)
+      cpaAccountId.value = cpaAccounts.value[0]?.id ?? null;
+    if (
+      !participants.value.some((p) => p.sub2api_user_id != null) &&
+      cpaAccounts.value.length
+    )
+      provider.value = "cpa";
   } catch (error) {
     message.value =
       error instanceof ApiError ? error.message : "加载参与者失败";
@@ -92,7 +128,8 @@ function setViewMode(mode: ParticipantViewMode) {
 function prepareEditor() {
   userListMessage.value = "";
   userListError.value = "";
-  if (!sub2apiUsers.value.length) void loadSub2APIUsers();
+  if (provider.value === "sub2api" && !sub2apiUsers.value.length)
+    void loadSub2APIUsers();
 }
 
 function openNew() {
@@ -161,6 +198,14 @@ onMounted(() => {
 
 <template>
   <PageShellHeader>
+    <select
+      v-model="provider"
+      class="select select-sm"
+      aria-label="选择参与者渠道"
+    >
+      <option value="sub2api">Sub2API</option>
+      <option value="cpa">CPA</option>
+    </select>
     <div class="grow">
       <div class="breadcrumbs text-sm">
         <ul>
@@ -185,7 +230,7 @@ onMounted(() => {
   </div>
 
   <section
-    v-if="auth.isStaff"
+    v-if="auth.isStaff && provider === 'sub2api'"
     class="stats col-span-12 stats-vertical bg-base-200 shadow-xs xl:stats-horizontal"
   >
     <div class="stat">
@@ -226,7 +271,7 @@ onMounted(() => {
     </div>
   </section>
 
-  <section class="col-span-12">
+  <section v-if="provider === 'sub2api'" class="col-span-12">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h2 class="flex items-center gap-2 text-lg font-semibold">
         <AppIcon name="user-group" class="size-5" />权益与用量
@@ -266,6 +311,75 @@ onMounted(() => {
     </div>
   </section>
 
+  <template v-if="provider === 'cpa'">
+    <CPAKeyManager v-if="auth.isStaff" :participants="participants" />
+    <div class="col-span-12 flex flex-wrap gap-2">
+      <select
+        v-if="cpaAccounts.length"
+        v-model="cpaAccountId"
+        class="select"
+        aria-label="选择 CPA 账号"
+      >
+        <option
+          v-for="account in cpaAccounts"
+          :key="account.id"
+          :value="account.id"
+        >
+          {{ account.name }}
+        </option>
+      </select>
+      <button class="btn" @click="loadCPA">刷新 CPA 额度</button>
+    </div>
+    <CPAPoolCard v-if="cpaSummary" :data="cpaSummary" />
+    <p v-else class="col-span-12">
+      {{
+        cpaAccounts.length
+          ? "等待 CPA 额度数据"
+          : "尚无可查看的 CPA 账号，请配置账号、额度池和成员授权。"
+      }}
+    </p>
+    <section
+      v-if="auth.isStaff && participants.length"
+      class="card col-span-12 bg-base-200"
+    >
+      <div class="card-body">
+        <h2 class="card-title">参与者身份与状态</h2>
+        <p class="text-sm opacity-60">
+          在系统用户页面为登录账号授权参与者及 CPA 账号。
+        </p>
+        <div class="overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>参与者</th>
+                <th>渠道身份</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="participant in participants" :key="participant.id">
+                <td>{{ participant.name }}</td>
+                <td>
+                  {{
+                    participant.sub2api_user_id == null
+                      ? "可绑定 CPA Key"
+                      : `同时绑定 Sub2API 用户 ${participant.sub2api_user_id}`
+                  }}
+                </td>
+                <td>{{ participant.enabled ? "启用" : "停用" }}</td>
+                <td>
+                  <button class="btn btn-sm" @click="openEdit(participant)">
+                    编辑
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </template>
   <ParticipantEditorDialog
     v-if="auth.isStaff"
     ref="editor"

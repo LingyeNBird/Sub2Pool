@@ -217,7 +217,7 @@ export function apiUsageData(
   return {
     participant_id: participant.id,
     participant_name: participant.name,
-    sub2api_user_id: participant.sub2api_user_id,
+    sub2api_user_id: participant.sub2api_user_id!,
     starts_at: period.startedAt,
     observed_to: latest.observed_at,
     cost_basis: "actual",

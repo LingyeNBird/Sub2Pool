@@ -66,7 +66,10 @@ export function handleParticipants({
       id,
       name: String(payload.name ?? `演示参与者 ${id}`),
       email: String(payload.email ?? `participant-${id}@example.test`),
-      sub2api_user_id: Number(payload.sub2api_user_id ?? 100 + id),
+      sub2api_user_id:
+        payload.sub2api_user_id == null
+          ? null
+          : Number(payload.sub2api_user_id),
       sub2api_username: String(payload.sub2api_username ?? `demo-user-${id}`),
       sub2api_email: String(
         payload.sub2api_email ?? `participant-${id}@example.test`,
@@ -96,9 +99,10 @@ export function handleParticipants({
     Object.assign(participant, {
       name: String(payload.name ?? participant.name),
       email: String(payload.email ?? participant.email),
-      sub2api_user_id: Number(
-        payload.sub2api_user_id ?? participant.sub2api_user_id,
-      ),
+      sub2api_user_id:
+        payload.sub2api_user_id === null
+          ? null
+          : Number(payload.sub2api_user_id ?? participant.sub2api_user_id),
       sub2api_username: String(
         payload.sub2api_username ?? participant.sub2api_username,
       ),

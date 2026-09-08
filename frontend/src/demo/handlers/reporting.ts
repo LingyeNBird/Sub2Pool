@@ -1,3 +1,4 @@
+import { demoCPAKeySeries, demoCPASummary } from "../cpa";
 import type { AccountStatusData } from "@/types/accounts";
 import type { Observation } from "@/types/observations";
 import type { ParticleTrajectoryData } from "@/types/particleTrajectory";
@@ -87,7 +88,10 @@ function statisticsData(state: DemoState, url: URL): StatisticsData {
     state.monitoredAccounts.find((item) => item.enabled) ??
     state.monitoredAccounts[0]!;
   if (account.provider === "cpa") {
+    const summary = demoCPASummary(state, account.id);
+    const cycle = summary?.accounts[0];
     return {
+      cpa_summary: summary,
       account: {
         id: account.id,
         provider: account.provider,
@@ -99,7 +103,35 @@ function statisticsData(state: DemoState, url: URL): StatisticsData {
       capacity_series: [],
       fast_correction_enabled: false,
       capacity_summary: {
-        cycle: null,
+        cycle: cycle
+          ? {
+              estimate_usd: 2000,
+              raw_estimate_usd: 2000,
+              start_cost_usd: 0,
+              start_cost_breakdown: {
+                sub2api_cost_usd: 0,
+                fast_correction_usd: 0,
+                total_cost_usd: 0,
+              },
+              start_percent: 0,
+              end_cost_usd: cycle.usage_usd,
+              end_cost_breakdown: {
+                sub2api_cost_usd: cycle.usage_usd,
+                fast_correction_usd: 0,
+                total_cost_usd: cycle.usage_usd,
+              },
+              end_percent: cycle.usage_usd / 20,
+              cost_usd: cycle.usage_usd,
+              used_percent: cycle.usage_usd / 20,
+              effective_usd_per_percent: 20,
+              calculation_model: "endpoint_ratio",
+              rate_calculated: true,
+              confidence: "中",
+              observed_at: state.clock,
+              starts_at: cycle.cycle_started_at,
+              resets_at: cycle.resets_at!,
+            }
+          : null,
         today: {
           estimate_usd: null,
           minimum_usd: null,
@@ -117,14 +149,19 @@ function statisticsData(state: DemoState, url: URL): StatisticsData {
           observed_to: null,
           min_percent_span: 3,
           sufficient: false,
-          reason: "连接后尚无 CPA 观测记录",
+          reason: "演示数据的日内百分比跨度不足",
         },
       },
       usage_days: usageDays,
       usage_precision: usagePrecision,
       sample_interval_minutes: Number(state.settings.local_poll_minutes),
       participant_series: [],
-      cpa_api_key_series: [],
+      cpa_api_key_series: demoCPAKeySeries(
+        state,
+        account.id,
+        usageDays,
+        usagePrecision,
+      ),
     };
   }
   const now = Date.parse(state.clock);
@@ -307,13 +344,13 @@ function statisticsData(state: DemoState, url: URL): StatisticsData {
     participant_series:
       account.provider === "sub2api"
         ? state.participants
-            .filter((item) => item.enabled)
+            .filter((item) => item.enabled && item.sub2api_user_id != null)
             .map((participant) => ({
               participant_id: participant.id,
               participant_name: participant.name,
               account_id: account.id,
               external_account_id: account.external_account_id!,
-              sub2api_user_id: participant.sub2api_user_id,
+              sub2api_user_id: participant.sub2api_user_id!,
               points: participantUsagePoints(
                 state,
                 participant.id,

@@ -130,6 +130,7 @@ def statistics_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "cpa_api_key_series",
             ],
             "properties": {
+                "cpa_summary": {"oneOf": [{"$ref": "#/components/schemas/CPAPoolSummary"}, {"type": "null"}]},
                 "account": {
                     "$ref": "#/components/schemas/MonitoredAccountSummary"
                 },

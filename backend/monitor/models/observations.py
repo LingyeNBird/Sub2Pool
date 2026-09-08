@@ -202,6 +202,7 @@ class ParticipantSnapshot(models.Model):
 
     observation = models.ForeignKey(Observation, on_delete=models.CASCADE, related_name="participant_snapshots")
     participant = models.ForeignKey(Participant, on_delete=models.CASCADE, related_name="snapshots")
+    cpa_contract_known = models.BooleanField(default=True)
     # Identity at collection time; participant bindings may change later.
     source_sub2api_user_id = models.BigIntegerField(null=True, blank=True)
     share_percent = models.DecimalField(

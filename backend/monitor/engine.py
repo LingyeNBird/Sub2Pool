@@ -156,6 +156,7 @@ def _run_monitor_locked(
         .filter(
             pool_id=account.pool_id,
             participant__enabled=True,
+            participant__sub2api_user_id__isnull=False,
             share_percent__gt=ZERO,
         )
         .order_by("-participant__is_owner", "participant_id")

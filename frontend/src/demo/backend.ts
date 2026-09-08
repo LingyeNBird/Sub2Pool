@@ -1,3 +1,4 @@
+import { handleCPA } from "./cpa";
 import type { DemoState } from "./state";
 import { demoIdentity, loadDemoState } from "./state";
 import { handleProtectedAuth, handlePublicAuth } from "./handlers/auth";
@@ -40,6 +41,7 @@ export interface DemoRequestContext {
 type DemoRequestHandler = (context: DemoRequestContext) => Response | null;
 
 const protectedHandlers: DemoRequestHandler[] = [
+  handleCPA,
   handleProtectedAuth,
   handleSecurity,
   handleDashboard,

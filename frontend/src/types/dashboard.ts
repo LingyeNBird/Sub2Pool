@@ -1,3 +1,4 @@
+import type { CPAPoolSummary } from "./cpa";
 import type { MonitoredAccount } from "./accounts";
 import type { CostBreakdown } from "./common";
 import type { Participant } from "./participants";
@@ -35,6 +36,7 @@ export interface ModelDiagnostics {
   };
 }
 export interface DashboardData {
+  cpa_summary?: CPAPoolSummary | null;
   configured: boolean;
   monitoring_enabled: boolean;
   accounts: MonitoredAccount[];

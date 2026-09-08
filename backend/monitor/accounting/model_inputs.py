@@ -74,23 +74,25 @@ def build_dynamic_replay_input(
         user_ids.add(row.sub2api_user_id)
 
     participant_by_id = {}
+    source_by_participant = {}
     share_by_participant_id = {}
     snapshots_by_observation: list[dict[int, object]] = []
     for observation in observations:
         by_user = {}
         for snapshot in observation.participant_snapshots.all():
             participant = snapshot.participant
+            source_by_participant[participant.id] = participant.id if account_id < 0 else (participant.sub2api_user_id if participant.sub2api_user_id is not None else snapshot.source_sub2api_user_id)
             participant_by_id[participant.id] = participant
             share_by_participant_id[participant.id] = snapshot.share_percent
-            user_ids.add(participant.sub2api_user_id)
-            by_user[participant.sub2api_user_id] = snapshot
+            user_ids.add(source_by_participant[participant.id])
+            by_user[source_by_participant[participant.id]] = snapshot
         snapshots_by_observation.append(by_user)
 
     ordered_users = tuple(sorted(user_ids))
     subject_user_ids: tuple[int | None, ...] = (*ordered_users, RESIDUAL_SUBJECT)
     user_index = {user_id: index for index, user_id in enumerate(ordered_users)}
     participant_subject_indices = {
-        participant_id: user_index[participant.sub2api_user_id]
+        participant_id: user_index[source_by_participant[participant.id]]
         for participant_id, participant in participant_by_id.items()
     }
     rights = np.zeros(len(subject_user_ids), dtype=float)
@@ -114,7 +116,7 @@ def build_dynamic_replay_input(
             participant = participant_by_id.get(participant_id)
             if participant is not None:
                 baseline_by_user.setdefault(
-                    participant.sub2api_user_id,
+                    source_by_participant[participant.id],
                     baseline,
                 )
 

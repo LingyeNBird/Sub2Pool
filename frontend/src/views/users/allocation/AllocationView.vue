@@ -28,6 +28,7 @@ interface ContextMenuState {
 }
 
 const auth = useAuthStore();
+const provider = ref<"sub2api" | "cpa">("sub2api");
 const loading = ref(true);
 const saving = ref(false);
 const dirty = ref(false);
@@ -119,7 +120,11 @@ async function load() {
   loading.value = true;
   message.value = "";
   try {
-    hydrate(await api<QuotaAllocationData>("quota-allocation"));
+    hydrate(
+      await api<QuotaAllocationData>(
+        `quota-allocation?provider=${provider.value}`,
+      ),
+    );
   } catch (error) {
     messageTone.value = "error";
     message.value =
@@ -362,6 +367,7 @@ async function save() {
   saving.value = true;
   message.value = "";
   const payload: QuotaAllocationWrite = {
+    provider: provider.value,
     pools: draftPools.value.map((pool) => ({
       ...(pool.id === undefined ? {} : { id: pool.id }),
       name: pool.name,
@@ -383,7 +389,9 @@ async function save() {
     );
     messageTone.value = "success";
     message.value =
-      "额度池和参与者份额已保存。现有账号观测会按新分配方案立即重算余额建议。";
+      provider.value === "cpa"
+        ? "CPA 额度池已保存，新份额从现在生效，等待下次观测更新额度。"
+        : "额度池和参与者份额已保存。现有账号观测会按新分配方案立即重算余额建议。";
   } catch (error) {
     messageTone.value = "error";
     message.value =
@@ -409,6 +417,16 @@ onUnmounted(() => {
 
 <template>
   <PageShellHeader>
+    <select
+      v-model="provider"
+      class="select select-sm"
+      aria-label="选择额度分配渠道"
+      :disabled="loading || saving || dirty"
+      @change="load"
+    >
+      <option value="sub2api">Sub2API</option>
+      <option value="cpa">CPA</option>
+    </select>
     <div class="grow">
       <div class="breadcrumbs text-sm">
         <ul>

@@ -98,7 +98,8 @@ function buildPeriods(participants: Participant[]): {
 } {
   const observations: Observation[] = [];
   const periods: DemoPeriod[] = [];
-  const counts = [188, 216, 203, 224, 207];
+  // Leave room in sessionStorage for CPA requests and interactive demo edits.
+  const counts = [94, 108, 102, 112, 104];
   let observationId = 1;
 
   for (let periodIndex = 0; periodIndex < counts.length; periodIndex += 1) {

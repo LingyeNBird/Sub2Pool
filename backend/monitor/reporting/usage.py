@@ -26,7 +26,7 @@ def participant_usage_series(
     usage_precision: str,
 ) -> list[dict]:
     """按调用者可见范围和请求粒度生成参与者用量序列。"""
-    participants = Participant.objects.all()
+    participants = Participant.objects.filter(sub2api_user_id__isnull=False)
     if not user.is_staff:
         participants = participants.filter(authorized_users=user)
 
@@ -87,12 +87,16 @@ def cpa_api_key_usage_series(
     now: datetime,
     usage_days: int,
     usage_precision: str,
+    user=None,
 ) -> list[dict]:
     events = CPAUsageEvent.objects.filter(
         account=account,
         occurred_at__gte=now - timedelta(days=usage_days),
         occurred_at__lte=now,
     ).order_by("occurred_at", "id")
+    if user is not None and not user.is_staff:
+        from ..cpa.participants import ownership_filter
+        events = events.filter(ownership_filter(user.quota_participants.values_list("id", flat=True)))
     series: dict[str, dict] = {}
     for event in events:
         key = event.api_key_hash or "unattributed"

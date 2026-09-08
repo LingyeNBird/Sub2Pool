@@ -1,9 +1,10 @@
 import type { MonitoredAccount } from "./accounts";
 
 export interface Snapshot {
+  cpa_contract_known?: boolean;
   participant_id: number;
   participant_name: string;
-  source_sub2api_user_id?: number;
+  source_sub2api_user_id?: number | null;
   quota_pool_id?: number | null;
   quota_pool_name?: string;
   pool_contract_revision?: number | null;
@@ -14,7 +15,7 @@ export interface Snapshot {
   charged_cycle_percent: number;
   charged_percent_lower: number | null;
   charged_percent_upper: number | null;
-  remaining_share_percent: number;
+  remaining_share_percent: number | null;
   current_balance_usd: number | null;
   recommended_balance_usd: number | null;
   recommended_balance_min_usd: number | null;
@@ -102,7 +103,7 @@ export interface Participant {
   id: number;
   name: string;
   email: string;
-  sub2api_user_id: number;
+  sub2api_user_id: number | null;
   sub2api_username: string;
   sub2api_email: string;
   sub2api_identity: string;
@@ -118,7 +119,7 @@ export interface Participant {
 export interface QuotaAllocationParticipant {
   id: number;
   name: string;
-  sub2api_user_id: number;
+  sub2api_user_id: number | null;
   sub2api_username: string;
   sub2api_email: string;
   sub2api_identity: string;
@@ -138,6 +139,7 @@ export interface QuotaPoolAllocation {
   total_share_percent: number;
 }
 export interface QuotaAllocationData {
+  provider?: "sub2api" | "cpa";
   accounts: MonitoredAccount[];
   participants: QuotaAllocationParticipant[];
   pools: QuotaPoolAllocation[];
@@ -149,6 +151,7 @@ export interface QuotaAllocationWritePool {
   allocations: QuotaPoolAllocationEntry[];
 }
 export interface QuotaAllocationWrite {
+  provider?: "sub2api" | "cpa";
   pools: QuotaAllocationWritePool[];
 }
 export interface Sub2APIUserOption {

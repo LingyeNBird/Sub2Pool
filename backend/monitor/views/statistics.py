@@ -9,6 +9,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
 
+from ..cpa.reporting import pool_summary
 from .base import PageAccessAPIView, error, ok
 from .query_params import bounded_query_int, monitored_account_query
 from ..access import visible_participants_for
@@ -93,6 +94,7 @@ class StatisticsView(PageAccessAPIView):
                     now,
                     cost_breakdowns,
                 ),
+                "cpa_summary": pool_summary(request.user, account, config) if account.provider == "cpa" else None,
                 "usage_days": usage_days,
                 "usage_precision": usage_precision,
                 "sample_interval_minutes": config.local_poll_minutes,
@@ -110,6 +112,7 @@ class StatisticsView(PageAccessAPIView):
                 ),
                 "cpa_api_key_series": (
                     cpa_api_key_usage_series(
+                        user=request.user,
                         config=config,
                         account=account,
                         location=location,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .cpa import cpa_paths, cpa_schemas
 from .corrections import with_correction_schemas
 from .accounts import account_schemas
 from .common import _nullable, common_schemas, error_responses, security_schemes
@@ -18,7 +19,7 @@ def openapi_document(
 ) -> dict:
     nullable_number = _nullable("number")
     nullable_string = _nullable("string")
-    paths = openapi_paths()
+    paths = {**openapi_paths(), **cpa_paths()}
     if endpoint_paths is not None:
         visible_paths = {
             "/v1",
@@ -54,6 +55,7 @@ def openapi_document(
             "responses": error_responses(),
             "schemas": with_correction_schemas({
                 **common_schemas(),
+                **cpa_schemas(),
                 **account_schemas(nullable_number, nullable_string),
                 **participant_schemas(nullable_number, nullable_string),
                 **observation_schemas(nullable_number, nullable_string),

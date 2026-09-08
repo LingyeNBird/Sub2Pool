@@ -46,7 +46,7 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "id": {"type": "integer"},
                 "name": {"type": "string"},
                 "email": {"type": "string"},
-                "sub2api_user_id": {"type": "integer"},
+                "sub2api_user_id": {"type": ["integer", "null"]},
                 "sub2api_username": {"type": "string"},
                 "sub2api_email": {"type": "string"},
                 "sub2api_identity": {"type": "string"},
@@ -80,6 +80,7 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
         "ParticipantSnapshot": {
             "type": "object",
             "required": [
+                "cpa_contract_known",
                 "participant_id",
                 "participant_name",
                 "quota_pool_id",
@@ -110,6 +111,7 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "allocation_model",
             ],
             "properties": {
+                "cpa_contract_known": {"type": "boolean", "description": "CPA 观测是否存在当时生效的份额依据；无依据时剩余份额未知。"},
                 "participant_id": {"type": "integer"},
                 "participant_name": {"type": "string"},
                 "quota_pool_id": {
@@ -126,7 +128,7 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "charged_cycle_percent": {"type": "number"},
                 "charged_percent_lower": nullable_number,
                 "charged_percent_upper": nullable_number,
-                "remaining_share_percent": {"type": "number"},
+                "remaining_share_percent": nullable_number,
                 "current_balance_usd": nullable_number,
                 "recommended_balance_usd": nullable_number,
                 "recommended_balance_min_usd": nullable_number,
@@ -320,7 +322,7 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
             "properties": {
                 "operation_id": {"type": "string", "format": "uuid"},
                 "participant_id": {"type": "integer"},
-                "sub2api_user_id": {"type": "integer"},
+                "sub2api_user_id": {"type": ["integer", "null"]},
                 "applied_balance_usd": {"type": "number"},
                 "account_count": {"type": "integer"},
             },

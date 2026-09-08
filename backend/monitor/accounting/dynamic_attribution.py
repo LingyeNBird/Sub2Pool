@@ -543,6 +543,17 @@ def replay_dynamic_segment(
                 snapshot.recommendation_applied = False
             snapshot.needs_manual_update = needs_update
             snapshot.reason = reason
+            if account_id < 0:
+                snapshot.current_balance_usd = None
+                snapshot.recommended_balance_usd = None
+                snapshot.recommended_balance_min_usd = None
+                snapshot.recommended_balance_max_usd = None
+                snapshot.deterministic_balance_min_usd = None
+                snapshot.deterministic_balance_max_usd = None
+                snapshot.balance_difference_usd = None
+                snapshot.needs_manual_update = False
+                snapshot.recommendation_applied = False
+                snapshot.reason = "CPA 本地估算权益" if snapshot.cpa_contract_known else "缺少历史份额，剩余权益未知"
         if snapshots:
             ParticipantSnapshot.objects.bulk_update(
                 snapshots,

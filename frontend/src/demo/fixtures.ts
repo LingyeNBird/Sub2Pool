@@ -369,7 +369,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 15,
+    version: 16,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextPoolId: 2,
@@ -380,13 +380,20 @@ function initializeState(): DemoState {
     participants,
     monitoredAccounts,
     quotaPools,
-    sub2apiUsers: participants.map((participant) => ({
-      id: participant.sub2api_user_id,
-      email: participant.sub2api_email,
-      username: participant.sub2api_username,
-      status: "active",
-      role: participant.is_owner ? "admin" : "user",
-    })),
+    sub2apiUsers: participants
+      .filter(
+        (
+          participant,
+        ): participant is Participant & { sub2api_user_id: number } =>
+          participant.sub2api_user_id != null,
+      )
+      .map((participant) => ({
+        id: participant.sub2api_user_id,
+        email: participant.sub2api_email,
+        username: participant.sub2api_username,
+        status: "active",
+        role: participant.is_owner ? "admin" : "user",
+      })),
     systemUsers: [
       {
         id: 1,

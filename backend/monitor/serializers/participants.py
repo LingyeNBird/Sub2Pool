@@ -48,6 +48,8 @@ class ParticipantWriteSerializer(serializers.ModelSerializer):
         sub2api_user_id: int,
         instance_id: int | None,
     ) -> None:
+        if sub2api_user_id is None:
+            return
         duplicate = Participant.objects.select_for_update().filter(
             sub2api_user_id=sub2api_user_id,
         )
@@ -60,6 +62,8 @@ class ParticipantWriteSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _ensure_account_usage_rows(participant: Participant) -> None:
+        if participant.sub2api_user_id is None:
+            return
         existing = set(
             participant.account_memberships.values_list("account_id", flat=True)
         )
@@ -79,7 +83,7 @@ class ParticipantWriteSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         with fenced_fact_write(self._account_external_ids()):
             self._validate_user_identity(
-                sub2api_user_id=validated_data["sub2api_user_id"],
+                sub2api_user_id=validated_data.get("sub2api_user_id"),
                 instance_id=None,
             )
             participant = Participant.objects.create(**validated_data)
@@ -132,21 +136,23 @@ class QuotaPoolWriteSerializer(serializers.Serializer):
 class QuotaAllocationWriteSerializer(serializers.Serializer):
     """Atomically replace the complete account partition and pool contracts."""
 
+    provider = serializers.ChoiceField(choices=("sub2api", "cpa"), default="sub2api")
     pools = QuotaPoolWriteSerializer(many=True)
 
     def validate(self, attrs):
         pools = attrs["pools"]
         configured_account_ids = set(
-            MonitoredAccount.objects.filter(provider="sub2api").values_list(
+            MonitoredAccount.objects.filter(provider=attrs["provider"]).values_list(
                 "id",
                 flat=True,
             )
         )
-        configured_participant_ids = set(
-            Participant.objects.values_list("id", flat=True)
-        )
+        participants = Participant.objects.all()
+        if attrs["provider"] == "sub2api":
+            participants = participants.filter(sub2api_user_id__isnull=False)
+        configured_participant_ids = set(participants.values_list("id", flat=True))
         existing_pool_ids = set(
-            QuotaPool.objects.filter(accounts__provider="sub2api")
+            QuotaPool.objects.filter(accounts__provider=attrs["provider"])
             .distinct()
             .values_list("id", flat=True)
         )
@@ -254,7 +260,7 @@ class QuotaAllocationWriteSerializer(serializers.Serializer):
     def apply(self) -> list[QuotaPool]:
         accounts = list(
             MonitoredAccount.objects.select_for_update()
-            .filter(provider="sub2api")
+            .filter(provider=self.validated_data["provider"])
             .select_related("pool")
             .order_by("id")
         )
@@ -262,7 +268,7 @@ class QuotaAllocationWriteSerializer(serializers.Serializer):
         existing_pools = {
             pool.id: pool
             for pool in QuotaPool.objects.select_for_update()
-            .filter(accounts__provider="sub2api")
+            .filter(accounts__provider=self.validated_data["provider"])
             .prefetch_related("allocations")
             .distinct()
             .order_by("id")
@@ -368,4 +374,10 @@ class QuotaAllocationWriteSerializer(serializers.Serializer):
         QuotaPool.objects.exclude(id__in=retained_pool_ids).filter(
             accounts__isnull=True
         ).delete()
+        if self.validated_data["provider"] == "cpa":
+            from django.utils import timezone
+            from ..cpa.participants import record_contract
+            now = timezone.now()
+            for account in MonitoredAccount.objects.filter(pk__in=accounts_by_id).select_related("pool"):
+                record_contract(account, now)
         return [pool for pool, _spec, _changed in applied]

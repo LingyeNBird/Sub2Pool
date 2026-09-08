@@ -88,7 +88,9 @@ def _replay_usage_samples(
             observed_at__in=[sample.observed_at for sample in samples],
         )
     }
+    historical_sources = {row.participant_id: row.source_sub2api_user_id for row in ParticipantSnapshot.objects.filter(observation__account_id=account_id).order_by("observation__observed_at", "id")}
     for sample in samples:
+        source_id = sample.participant_id if account_id < 0 else (sample.participant.sub2api_user_id if sample.participant.sub2api_user_id is not None else historical_sources.get(sample.participant_id))
         segment = None
         for candidate in segments:
             if candidate.first_observed_at <= sample.observed_at:
@@ -101,7 +103,7 @@ def _replay_usage_samples(
             continue
         sample.attribution_started_at = segment.started_at
         raw_cost = normalized_by_key.get(
-            (sample.participant.sub2api_user_id, sample.observed_at),
+            (source_id, sample.observed_at),
             sample.raw_selected_cost,
         )
         baseline = segment.participant_baselines.get(
@@ -115,7 +117,7 @@ def _replay_usage_samples(
         }:
             baseline = normalized_by_key.get(
                 (
-                    sample.participant.sub2api_user_id,
+                    source_id,
                     segment.first_observed_at,
                 ),
                 baseline,
@@ -125,7 +127,7 @@ def _replay_usage_samples(
             raw_cost
             - baseline
             + correction_prefix.user_between(
-                sample.participant.sub2api_user_id,
+                source_id,
                 segment.started_at,
                 sample.observed_at,
             ),
@@ -151,7 +153,7 @@ def _update_participant_latest(account_id: int) -> None:
         return
     snapshots = list(latest.participant_snapshots.all())
     participant_ids = [snapshot.participant_id for snapshot in snapshots]
-    account = MonitoredAccount.objects.filter(external_account_id=account_id).first()
+    account = MonitoredAccount.for_fact_key(account_id)
     memberships = (
         {
             item.participant_id: item
@@ -177,10 +179,14 @@ def _update_participant_latest(account_id: int) -> None:
             ["latest_selected_cost", "last_checked_at"],
         )
 
+    if account_id < 0:
+        return
+
     latest_balance_sample = ParticipantBalanceSample.objects.filter(
         participant_id=OuterRef("pk"),
     ).order_by("-captured_at", "-id")
     latest_snapshot = ParticipantSnapshot.objects.filter(
+        observation__account_id__gt=0,
         participant_id=OuterRef("pk"),
         observation__excluded_at__isnull=True,
     ).order_by("-observation__observed_at", "-id")
@@ -343,6 +349,9 @@ def rebuild_account(
             CPAAccountCollectionInterval.objects.filter(account=monitored_account)
             .order_by("connected_at", "id")
         )
+    if monitored_account is not None and monitored_account.provider == "cpa":
+        from ..cpa.participants import materialize_participants
+        materialize_participants(monitored_account, config)
     all_observations = list(
         Observation.objects.select_for_update()
         .select_related("sample_point", "manual_start_end")

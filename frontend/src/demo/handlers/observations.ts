@@ -90,29 +90,31 @@ function fastCorrectionData(
       observation.legacy_fast_only ?? observation.fast_correction_calculated,
     corrected_fast_cost_usd: fastCost * 3,
     collection_error: "",
-    users: state.participants.map((participant, index) => {
-      const requestCount = Math.round(
-        totalRequests * [0.39, 0.35, 0.26][index],
-      );
-      const participantFast = Math.round(requestCount * 0.34);
-      const billed = fastCost * [0.39, 0.35, 0.26][index] * 2;
-      return {
-        sub2api_user_id: participant.sub2api_user_id,
-        username: participant.sub2api_username,
-        email: participant.sub2api_email,
-        display_name: participant.name,
-        request_count: requestCount,
-        fast_request_count: participantFast,
-        non_fast_request_count: requestCount - participantFast,
-        fast_billed_cost_usd: billed,
-        correction_usd: billed * 0.5,
-        fast_correction_usd: billed * 0.5,
-        correction_total_usd: billed * 0.5,
-        long_context_correction_usd: 0,
-        model_correction_usd: 0,
-        corrected_fast_cost_usd: billed * 1.5,
-      };
-    }),
+    users: state.participants
+      .filter((p) => p.sub2api_user_id != null)
+      .map((participant, index) => {
+        const requestCount = Math.round(
+          totalRequests * [0.39, 0.35, 0.26][index],
+        );
+        const participantFast = Math.round(requestCount * 0.34);
+        const billed = fastCost * [0.39, 0.35, 0.26][index] * 2;
+        return {
+          sub2api_user_id: participant.sub2api_user_id!,
+          username: participant.sub2api_username,
+          email: participant.sub2api_email,
+          display_name: participant.name,
+          request_count: requestCount,
+          fast_request_count: participantFast,
+          non_fast_request_count: requestCount - participantFast,
+          fast_billed_cost_usd: billed,
+          correction_usd: billed * 0.5,
+          fast_correction_usd: billed * 0.5,
+          correction_total_usd: billed * 0.5,
+          long_context_correction_usd: 0,
+          model_correction_usd: 0,
+          corrected_fast_cost_usd: billed * 1.5,
+        };
+      }),
   };
 }
 

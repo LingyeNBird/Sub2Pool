@@ -323,7 +323,7 @@ class MonitoredAccountListView(PageAccessAPIView):
                 AccountParticipant.objects.bulk_create(
                     [
                         AccountParticipant(account=account, participant=participant)
-                        for participant in Participant.objects.order_by("id")
+                        for participant in Participant.objects.filter(sub2api_user_id__isnull=False).order_by("id")
                     ]
                 )
         else:

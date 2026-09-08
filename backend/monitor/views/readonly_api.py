@@ -14,6 +14,8 @@ from .base import ok
 
 
 API_ENDPOINTS = [
+    {"method": "GET", "path": "/api/v1/cpa/summary", "description": "读取 CPA 同车成员汇总，按池成员与账号授权限制。", "page_permission": (PagePermission.DASHBOARD, PagePermission.PARTICIPANTS, PagePermission.STATISTICS)},
+    {"method": "GET", "path": "/api/v1/cpa/requests", "description": "分页读取本人授权参与者的 CPA 请求与 Key 分项。", "page_permission": PagePermission.STATISTICS},
     {
         "method": "GET",
         "path": "/api/v1/accounts",

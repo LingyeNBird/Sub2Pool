@@ -147,6 +147,8 @@ def test_api_key_lifecycle_and_scope():
     assert index_data["openapi"] == "/api/v1/openapi.json"
     assert index_data["authentication"]["scheme"] == "bearer"
     expected_endpoint_paths = {
+        "/api/v1/cpa/summary",
+        "/api/v1/cpa/requests",
         "/api/v1/accounts",
         "/api/v1/dashboard",
         "/api/v1/recommendations",
@@ -515,6 +517,7 @@ def test_system_user_api_key_follows_live_page_and_data_permissions():
     index_data = index.json()["data"]
     assert index_data["authentication"]["permissions"] == "page_scoped"
     expected_paths = {
+        "/api/v1/cpa/summary",
         "/api/v1/accounts",
         "/api/v1/account-status",
         "/api/v1/participants",

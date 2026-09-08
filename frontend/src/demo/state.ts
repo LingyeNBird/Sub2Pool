@@ -1,3 +1,4 @@
+import { initializeCPADemo, type DemoCPAState } from "./cpa";
 import type { PagePermission } from "@/config/pagePermissions";
 import type { MonitoredAccount } from "@/types/accounts";
 import type { Observation } from "@/types/observations";
@@ -53,7 +54,8 @@ export interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 15;
+  cpa?: DemoCPAState;
+  version: 16;
   clock: string;
   nextParticipantId: number;
   nextPoolId: number;
@@ -81,12 +83,16 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 15) return parsed;
+      if (parsed.version === 16) {
+        initializeCPADemo(parsed);
+        return parsed;
+      }
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }
   }
   const initial = initializeState();
+  initializeCPADemo(initial);
   saveDemoState(initial);
   return initial;
 }
@@ -98,6 +104,7 @@ export function saveDemoState(state: DemoState): void {
 export function resetDemoState(): DemoState {
   sessionStorage.removeItem(DEMO_STATE_KEY);
   const state = initializeState();
+  initializeCPADemo(state);
   saveDemoState(state);
   window.dispatchEvent(new CustomEvent("sub2pool:demo-reset"));
   return state;

@@ -9,6 +9,7 @@ from django.db import DatabaseError, transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
+from ..cpa.reporting import pool_summary
 from .base import AdminAPIView, PageAccessAPIView, error, ok
 from ..api_auth import APIKeyAuthentication
 from ..access import (
@@ -100,7 +101,7 @@ def _participant_rows(
 ) -> tuple[list[dict], list[dict]]:
     all_rows = [
         participant_data(item, config)
-        for item in Participant.objects.filter(enabled=True).prefetch_related(
+        for item in Participant.objects.filter(enabled=True, sub2api_user_id__isnull=False).prefetch_related(
             "account_memberships__account"
         )
     ]
@@ -229,6 +230,7 @@ class DashboardView(PageAccessAPIView):
             "accounts": [_account_data(item) for item in accounts],
             "selected_account_id": account.id if account else None,
             "selected_provider": account.provider if account else None,
+            "cpa_summary": pool_summary(request.user, account, config) if account is not None and account.provider == "cpa" else None,
             "last_local_check_at": iso(
                 account.last_local_check_at if account else config.last_local_check_at
             ),
@@ -592,6 +594,8 @@ class ApplyParticipantRecommendationView(AdminAPIView):
 
     def post(self, _request, participant_id: int):
         participant = get_object_or_404(Participant, pk=participant_id, enabled=True)
+        if participant.sub2api_user_id is None:
+            return error("CPA 参与者没有可写入的 Sub2API 余额", 400)
         pending = (
             ParticipantBalanceOperation.objects.exclude(state="committed")
             .filter(participant=participant)
@@ -602,6 +606,7 @@ class ApplyParticipantRecommendationView(AdminAPIView):
         account_ids = set(
             MonitoredAccount.objects.filter(
                 enabled=True,
+                provider="sub2api",
                 pool__allocations__participant=participant,
                 pool__allocations__share_percent__gt=0,
             )
