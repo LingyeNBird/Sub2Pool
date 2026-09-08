@@ -91,6 +91,7 @@ def claim_data(plan):
     return {
         "id": str(plan.id),
         "key_id": plan.key_id,
+        "account_id": plan.account_id,
         "participant_id": plan.participant_id,
         "started_at": plan.started_at.isoformat(),
         "ended_at": plan.ended_at.isoformat(),
@@ -190,6 +191,17 @@ class CPAClaimPreviewView(CPAAdminView):
             claim_data(preview_claim(user=request.user, **serializer.validated_data)),
             201,
         )
+
+
+class CPAUnassignedClaimPreviewView(CPAAdminView):
+    def post(self, request):
+        from ..cpa.account_owner import preview_unassigned_claim
+        account = cpa_account(request)
+        binding = account.cpa_owner_bindings.filter(ended_at__isnull=True).select_related("participant").first()
+        if binding is None:
+            raise serializers.ValidationError("请先在参与者管理中将池内唯一参与者设为车主")
+        # Owner is derived from the existing role; client cannot select a different recipient.
+        return ok(claim_data(preview_unassigned_claim(account=account, participant=binding.participant, user=request.user)), 201)
 
 
 class CPAClaimApplyView(CPAAdminView):

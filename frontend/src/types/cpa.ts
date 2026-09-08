@@ -15,6 +15,7 @@ export interface CPAMember extends CPATotals {
   participant_id: number;
   participant_name: string;
   is_self: boolean;
+  is_owner: boolean;
   share_percent: number | null;
   quota_available: boolean;
   is_overused: boolean;
@@ -24,6 +25,7 @@ export interface CPAMember extends CPATotals {
   account_breakdowns: {
     account_id: number;
     quota_available: boolean;
+    quota_unavailable_reasons: string[];
     quota_as_of: string | null;
     charged_percent: number | null;
     remaining_share_percent: number | null;
@@ -42,6 +44,12 @@ export interface CPAPoolSummary {
   accounts: (CPATotals & {
     account_id: number;
     account_name: string;
+    owner: {
+      participant_id: number | null;
+      participant_name: string | null;
+      started_at: string | null;
+      status: "active" | "missing" | "ambiguous";
+    };
     selected: boolean;
     quota_as_of: string | null;
     requests_as_of: string | null;
@@ -49,6 +57,7 @@ export interface CPAPoolSummary {
     resets_at: string | null;
     coverage: CPACoverage;
     quota_available: boolean;
+    quota_unavailable_reasons: string[];
   })[];
   members: CPAMember[];
   unattributed: CPATotals;
@@ -79,7 +88,8 @@ export interface CPAKeys {
 }
 export interface CPAClaim {
   id: string;
-  key_id: number;
+  key_id: number | null;
+  account_id?: number | null;
   participant_id: number;
   started_at: string;
   ended_at: string;

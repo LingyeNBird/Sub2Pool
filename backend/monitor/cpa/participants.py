@@ -15,6 +15,7 @@ from ..models import (
     AccountParticipant,
     AppSettings,
     CPAAPIKey,
+    CPAAccountOwnerBinding,
     CPAClaimPlan,
     CPAClaimEvent,
     CPAKeyBinding,
@@ -30,15 +31,12 @@ from .usage import _api_key_identity, cpa_event_cost
 ZERO = Decimal("0")
 
 
-def ownership_filter(participant_ids):
-    """Filter events by immutable ownership intervals, never by current owner."""
+def _key_ownership_filter(participant_ids=None):
     result = Q(pk__in=[])
-    for binding in CPAKeyBinding.objects.filter(
-        participant_id__in=participant_ids
-    ).select_related("key"):
-        if binding.claim_id is not None:
-            result |= Q(ownership_claim__plan_id=binding.claim_id)
-            continue
+    bindings = CPAKeyBinding.objects.filter(claim__isnull=True).select_related("key")
+    if participant_ids is not None:
+        bindings = bindings.filter(participant_id__in=participant_ids)
+    for binding in bindings:
         condition = Q(
             api_key_hash=binding.key.key_hash, occurred_at__gte=binding.started_at
         )
@@ -48,8 +46,34 @@ def ownership_filter(participant_ids):
     return result
 
 
+def ownership_filter(participant_ids):
+    """Claims and explicit keys precede account fallback, identically to event_owner."""
+    participant_ids = list(participant_ids)
+    claimed = Q(ownership_claim__plan__participant_id__in=participant_ids)
+    keyed = _key_ownership_filter(participant_ids)
+    fallback = Q(pk__in=[])
+    for binding in CPAAccountOwnerBinding.objects.filter(
+        participant_id__in=participant_ids
+    ):
+        condition = Q(
+            account_id=binding.account_id, occurred_at__gte=binding.started_at
+        )
+        if binding.ended_at is not None:
+            condition &= Q(occurred_at__lt=binding.ended_at)
+        fallback |= condition
+    return claimed | (
+        Q(ownership_claim__isnull=True)
+        & (keyed | (fallback & ~_key_ownership_filter()))
+    )
+
+
 def owner_index():
     result = defaultdict(list)
+    result["claims"] = dict(
+        CPAClaimEvent.objects.values_list("event_id", "plan__participant_id")
+    )
+    for binding in CPAAccountOwnerBinding.objects.order_by("started_at", "id"):
+        result[("account", binding.account_id)].append(binding)
     claimed = defaultdict(set)
     for plan_id, event_id in CPAClaimEvent.objects.values_list("plan_id", "event_id"):
         claimed[plan_id].add(event_id)
@@ -64,12 +88,19 @@ def owner_index():
 
 
 def event_owner(event, bindings):
+    if event.pk in bindings["claims"]:
+        return bindings["claims"][event.pk]
     for binding in reversed(bindings.get(event.api_key_hash, ())):
         if (
             binding.claimed_event_ids is not None
             and event.pk not in binding.claimed_event_ids
         ):
             continue
+        if binding.started_at <= event.occurred_at and (
+            binding.ended_at is None or event.occurred_at < binding.ended_at
+        ):
+            return binding.participant_id
+    for binding in reversed(bindings.get(("account", event.account_id), ())):
         if binding.started_at <= event.occurred_at and (
             binding.ended_at is None or event.occurred_at < binding.ended_at
         ):
@@ -176,12 +207,20 @@ def coverage_data(account, started_at, ended_at):
 
 
 def _claim_events(key, start, end):
-    return CPAUsageEvent.objects.filter(
-        api_key_hash=key.key_hash,
-        occurred_at__gte=start,
-        occurred_at__lt=end,
-        ownership_claim__isnull=True,
-    ).order_by("id")
+    return (
+        CPAUsageEvent.objects.filter(
+            api_key_hash=key.key_hash,
+            occurred_at__gte=start,
+            occurred_at__lt=end,
+            ownership_claim__isnull=True,
+        )
+        .exclude(
+            ownership_filter(
+                CPAAccountOwnerBinding.objects.values_list("participant_id", flat=True)
+            )
+        )
+        .order_by("id")
+    )
 
 
 def claim_digest(key, start, end, config):
@@ -190,6 +229,8 @@ def claim_digest(key, start, end, config):
         {
             "events": list(_claim_events(key, start, end).values()),
             "bindings": list(key.bindings.order_by("id").values()),
+            "owners": list(CPAAccountOwnerBinding.objects.order_by("id").values()),
+            "claims": list(CPAClaimEvent.objects.order_by("id").values()),
             "settings": AppSettings.objects.filter(pk=config.pk).values().get(),
             "accounts": [(a.id, a.pool_id, a.pool.contract_revision) for a in accounts],
             "contracts": list(CPAQuotaContract.objects.order_by("id").values()),
@@ -261,6 +302,11 @@ def preview_claim(*, key, participant, started_at, ended_at, user):
 
 
 def apply_claim(plan_id):
+    plan = CPAClaimPlan.objects.get(pk=plan_id)
+    if plan.account_id is not None:
+        from .account_owner import apply_unassigned_claim
+
+        return apply_unassigned_claim(plan_id)
     from ..replay import rebuild_account
 
     with fenced_fact_write([a.fact_key for a in cpa_accounts()]) as guards:
@@ -299,6 +345,9 @@ def apply_claim(plan_id):
 
 
 def record_contract(account, effective_at):
+    from .account_owner import sync_account_owner
+
+    sync_account_owner(account, effective_at)
     allocations = [
         {"participant_id": row.participant_id, "share_percent": str(row.share_percent)}
         for row in account.pool.allocations.order_by("participant_id")

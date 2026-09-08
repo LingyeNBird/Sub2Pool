@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import AppIcon from "@/components/common/AppIcon.vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
+import { useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import type { MonitoredAccount } from "@/types/accounts";
 import type {
@@ -28,7 +29,9 @@ interface ContextMenuState {
 }
 
 const auth = useAuthStore();
-const provider = ref<"sub2api" | "cpa">("sub2api");
+const provider = ref<"sub2api" | "cpa">(
+  useRoute().query.provider === "cpa" ? "cpa" : "sub2api",
+);
 const loading = ref(true);
 const saving = ref(false);
 const dirty = ref(false);

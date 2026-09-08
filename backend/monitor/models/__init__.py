@@ -45,6 +45,7 @@ __all__ = [
     "CPAUsageEvent",
     "CPAAccountCollectionInterval",
     "CPACollectorState",
+    "CPAAccountOwnerBinding",
     "CPAAPIKey",
     "CPAKeyBinding",
     "CPAClaimPlan",
@@ -82,4 +83,4 @@ __all__ = [
 
 from .research import ResearchSettings, ResearchRequestComponents, ResearchEvidenceBatch
 
-from .cpa_participants import CPAAPIKey, CPAKeyBinding, CPAClaimPlan, CPAClaimEvent, CPAQuotaContract
+from .cpa_participants import CPAAccountOwnerBinding, CPAAPIKey, CPAKeyBinding, CPAClaimPlan, CPAClaimEvent, CPAQuotaContract

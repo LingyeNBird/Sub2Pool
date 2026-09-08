@@ -196,7 +196,11 @@ onMounted(initialize);
     @show-basis="basisDialog?.open($event)"
     @show-closing-basis="showClosingBasis"
   />
-  <CPAPoolCard v-if="data?.cpa_summary" :data="data.cpa_summary" />
+  <CPAPoolCard
+    v-if="data?.cpa_summary"
+    :data="data.cpa_summary"
+    @refresh="load"
+  />
   <ParticipantUsageCard
     v-model:days="usageDays"
     v-model:precision="usagePrecision"

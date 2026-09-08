@@ -193,6 +193,7 @@ def smoke(account_id, sub_id, alice_id, start):
             expect(dialog).not_to_be_visible()
             expect(manager.get_by_text("历史请求已认领", exact=False)).to_be_visible()
             page.get_by_role("button", name="刷新 CPA 额度").click()
+            page.get_by_text("成员用量汇总表", exact=True).click()
             expect(
                 page.get_by_test_id("cpa-pool-summary")
                 .get_by_role("row")

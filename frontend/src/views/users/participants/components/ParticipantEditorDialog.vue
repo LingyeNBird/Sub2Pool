@@ -178,6 +178,10 @@ defineExpose({ open, close });
                 />
                 设为车主
               </label>
+              <p class="mt-2 text-xs leading-relaxed opacity-60">
+                CPA 池内唯一启用的车主接收未匹配成员 Key 的新请求，绑定 Key
+                的成员优先。身份变更从保存时刻生效，历史请求可单独认领。
+              </p>
             </div>
           </div>
         </section>

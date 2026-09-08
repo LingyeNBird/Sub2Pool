@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 
 import CPAPoolCard from "@/components/common/CPAPoolCard.vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
@@ -28,7 +29,12 @@ interface RecommendationDialogHandle {
 
 const auth = useAuthStore();
 const data = ref<DashboardData | null>(null);
-const selectedAccountId = ref<number | null>(null);
+const initialAccountId = Number(useRoute().query.account_id);
+const selectedAccountId = ref<number | null>(
+  Number.isSafeInteger(initialAccountId) && initialAccountId > 0
+    ? initialAccountId
+    : null,
+);
 const loading = ref(true);
 const running = ref(false);
 const message = ref("");
@@ -213,7 +219,11 @@ onMounted(load);
     :read-only="!auth.isStaff"
     @select="actionDialog?.open($event)"
   />
-  <CPAPoolCard v-if="data?.cpa_summary" :data="data.cpa_summary" />
+  <CPAPoolCard
+    v-if="data?.cpa_summary"
+    :data="data.cpa_summary"
+    @refresh="load"
+  />
   <CollectionStatusCard v-if="data" :data="data" />
   <AccountExplanationCard v-if="data" :data="data" />
 

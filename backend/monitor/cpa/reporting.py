@@ -15,6 +15,7 @@ from ..models import (
     PoolParticipant,
 )
 from ..reporting.recommendations import _capacity_values
+from .account_owner import account_owner_data
 from .collector_state import get_collector_status
 from .participants import coverage_data, event_owner, owner_index
 from .usage import cpa_event_cost
@@ -102,6 +103,7 @@ def pool_summary(user, account, config=None):
         pk: {
             "participant_id": pk,
             "participant_name": member.name,
+            "is_owner": member.is_owner,
             "is_self": mine is not None and pk in mine,
             "share_percent": float(shares[pk]) if pk in shares else None,
             **_totals(),
@@ -121,18 +123,32 @@ def pool_summary(user, account, config=None):
             account_summary(selected, config, now, bindings)
         )
         observed_at = observation.observed_at if observation else None
-        valid = bool(
-            observation
-            and observation.valid_sample
-            and observation.upstream_resets_at > now
-            and coverage["complete"]
-            and observation.interval_used_percent == observation.upstream_used_percent
-            and total["unpriced_request_count"] == 0
-        )
+        unavailable_reasons = []
+        if not observation:
+            unavailable_reasons.append("尚无额度观测")
+        else:
+            if not observation.valid_sample:
+                unavailable_reasons.append("额度观测尚不足以估算")
+            if observation.upstream_resets_at <= now:
+                unavailable_reasons.append("等待新周期的额度观测")
+            if observation.interval_used_percent != observation.upstream_used_percent:
+                unavailable_reasons.append("本周期用量覆盖不完整")
+        if not coverage["complete"]:
+            unavailable_reasons.append(
+                f"本周期有 {len(coverage['gaps'])} 段采集缺口"
+                if coverage["gaps"]
+                else "本周期采集覆盖不完整"
+            )
+        if total["unpriced_request_count"]:
+            unavailable_reasons.append(
+                f"{total['unpriced_request_count']} 次请求缺少模型价格"
+            )
+        valid = not unavailable_reasons
         by_account.append(
             {
                 "account_id": selected.id,
                 "account_name": selected.name,
+                "owner": account_owner_data(selected),
                 "selected": selected.id == account.id,
                 "quota_as_of": observed_at.isoformat() if observed_at else None,
                 "requests_as_of": latest_request_at.isoformat()
@@ -144,6 +160,7 @@ def pool_summary(user, account, config=None):
                 else None,
                 "coverage": coverage,
                 "quota_available": valid,
+                "quota_unavailable_reasons": unavailable_reasons,
                 **{
                     k: float(v) if isinstance(v, Decimal) else v
                     for k, v in total.items()
@@ -159,17 +176,21 @@ def pool_summary(user, account, config=None):
             for key in values:
                 row[key] += values[key]
             snapshot = snapshots.get(pk)
-            available = bool(
-                valid
-                and snapshot
-                and snapshot.cpa_contract_known
-                and pk in shares
-                and snapshot.quota_pool_id == selected.pool_id
-                and snapshot.pool_contract_revision == selected.pool.contract_revision
-            )
+            member_reasons = list(unavailable_reasons)
+            if pk not in shares:
+                member_reasons.append("尚未分配 CPA 份额")
+            if not snapshot or not snapshot.cpa_contract_known:
+                member_reasons.append("缺少历史份额依据或对应额度观测")
+            elif (
+                snapshot.quota_pool_id != selected.pool_id
+                or snapshot.pool_contract_revision != selected.pool.contract_revision
+            ):
+                member_reasons.append("份额调整后尚未生成匹配的额度结果")
+            available = valid and not member_reasons
             breakdown = {
                 "account_id": selected.id,
                 "quota_available": available,
+                "quota_unavailable_reasons": member_reasons,
                 "quota_as_of": observed_at.isoformat() if observed_at else None,
                 "charged_percent": None,
                 "remaining_share_percent": None,

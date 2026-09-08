@@ -202,6 +202,26 @@ export function demoCPASummary(
   const pool = state.quotaPools.find((p) => p.id === account?.pool_id);
   if (!account || !pool || !canRead(state, accountId)) return null;
   const own = ownIds(state);
+  const owners = state.participants.filter(
+    (p) =>
+      p.is_owner &&
+      p.enabled &&
+      pool.allocations.some((a) => a.participant_id === p.id),
+  );
+  const owner: CPAPoolSummary["accounts"][number]["owner"] =
+    owners.length === 1
+      ? {
+          participant_id: owners[0]!.id,
+          participant_name: owners[0]!.name,
+          started_at: state.clock,
+          status: "active",
+        }
+      : {
+          participant_id: null,
+          participant_name: null,
+          started_at: null,
+          status: owners.length > 1 ? "ambiguous" : "missing",
+        };
   const sum = (events: DemoCPAState["events"]) => ({
     usage_usd: events.reduce((total, e) => total + e.usage_usd, 0),
     request_count: events.length,
@@ -223,6 +243,7 @@ export function demoCPASummary(
         ...totals,
         participant_id: person.id,
         participant_name: person.name,
+        is_owner: person.is_owner,
         is_self: own != null && own.includes(person.id),
         share_percent: allocation.share_percent,
         quota_available: quotaAvailable,
@@ -234,6 +255,9 @@ export function demoCPASummary(
           {
             account_id: accountId,
             quota_available: quotaAvailable,
+            quota_unavailable_reasons: quotaAvailable
+              ? []
+              : ["本周期存在未定价请求"],
             quota_as_of: state.clock,
             charged_percent: quotaAvailable ? totals.usage_usd / 20 : null,
             remaining_share_percent: quotaAvailable
@@ -260,6 +284,7 @@ export function demoCPASummary(
         ...sum(events),
         account_id: accountId,
         account_name: account.name,
+        owner,
         selected: true,
         quota_as_of: state.clock,
         requests_as_of: events.at(-1)?.occurred_at ?? null,
@@ -271,6 +296,9 @@ export function demoCPASummary(
         ).toISOString(),
         coverage: { complete: true, uncertain_end: false, gaps: [] },
         quota_available: quotaAvailable,
+        quota_unavailable_reasons: quotaAvailable
+          ? []
+          : ["本周期存在未定价请求"],
       },
     ],
     unattributed: sum(events.filter((e) => e.participant_id == null)),
@@ -513,6 +541,44 @@ export function handleCPA({
     });
   }
   if (!admin) return fail("仅管理员可管理 CPA Key", 403);
+  if (pathname === "cpa/unassigned/preview" && method === "POST") {
+    const accountId = Number(url.searchParams.get("account_id"));
+    const summary = demoCPASummary(state, accountId);
+    const owner = summary?.accounts[0]?.owner;
+    if (owner?.status !== "active" || owner.participant_id == null)
+      return fail("请先在参与者管理中设置唯一车主");
+    const events = cpa.events.filter(
+      (e) => e.account_id === accountId && e.participant_id == null,
+    );
+    if (!events.length) return fail("此范围没有未归属的已采集请求");
+    const plan: DemoCPAState["claims"][number] = {
+      id: `demo-${cpa.claims.length + 1}`,
+      key_id: null,
+      account_id: accountId,
+      participant_id: owner.participant_id,
+      started_at: summary!.accounts[0]!.cycle_started_at,
+      ended_at: state.clock,
+      expires_at: new Date(Date.now() + 900000).toISOString(),
+      applied_at: null,
+      revision: state.revision,
+      historical_contract_policy:
+        "仅认领已采集且尚无归属的请求，不补造断线数据或历史份额",
+      accounts: [
+        {
+          account_id: accountId,
+          account_name: summary!.accounts[0]!.account_name,
+          request_count: events.length,
+          token_count: events.reduce((sum, e) => sum + e.total_tokens, 0),
+          usage_usd: events.reduce((sum, e) => sum + e.usage_usd, 0),
+          unpriced_request_count: events.filter((e) => e.unpriced).length,
+          coverage: summary!.accounts[0]!.coverage,
+        },
+      ],
+    };
+    cpa.claims.push(plan);
+    saveDemoState(state);
+    return ok(plan, 201);
+  }
   if (pathname === "cpa/keys" && method === "GET") return ok(cpa.keys);
   if (pathname === "cpa/keys" && method === "POST") {
     const person = state.participants.find(
@@ -636,6 +702,21 @@ export function handleCPA({
       Date.parse(plan.expires_at) <= Date.now()
     )
       return fail("预览已变化，请重新预览");
+    if (plan.account_id != null) {
+      for (const item of cpa.events) {
+        if (
+          item.account_id === plan.account_id &&
+          item.participant_id == null &&
+          item.occurred_at >= plan.started_at &&
+          item.occurred_at < plan.ended_at
+        )
+          item.participant_id = plan.participant_id;
+      }
+      plan.applied_at = state.clock;
+      state.revision++;
+      saveDemoState(state);
+      return ok(plan);
+    }
     for (const item of cpa.events)
       if (
         item.key_id === plan.key_id &&

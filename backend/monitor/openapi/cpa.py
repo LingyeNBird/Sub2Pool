@@ -36,6 +36,7 @@ def cpa_schemas():
         {
             "account_id": integer,
             "quota_available": boolean,
+            "quota_unavailable_reasons": _array(text),
             "quota_as_of": nullable_time,
             "charged_percent": nullable_number,
             "remaining_share_percent": nullable_number,
@@ -62,6 +63,17 @@ def cpa_schemas():
                             **totals,
                             "account_id": integer,
                             "account_name": text,
+                            "owner": _object(
+                                {
+                                    "participant_id": {"type": ["integer", "null"]},
+                                    "participant_name": {"type": ["string", "null"]},
+                                    "started_at": nullable_time,
+                                    "status": {
+                                        "type": "string",
+                                        "enum": ["active", "missing", "ambiguous"],
+                                    },
+                                }
+                            ),
                             "selected": boolean,
                             "quota_as_of": nullable_time,
                             "requests_as_of": nullable_time,
@@ -69,6 +81,7 @@ def cpa_schemas():
                             "resets_at": nullable_time,
                             "coverage": coverage,
                             "quota_available": boolean,
+                            "quota_unavailable_reasons": _array(text),
                         }
                     )
                 ),
@@ -79,6 +92,7 @@ def cpa_schemas():
                             "participant_id": integer,
                             "participant_name": text,
                             "is_self": boolean,
+                            "is_owner": boolean,
                             "share_percent": nullable_number,
                             "quota_available": boolean,
                             "is_overused": boolean,
@@ -125,14 +139,32 @@ def cpa_schemas():
                 "total": integer,
                 "started_at": time,
                 "ended_at": time,
-                "summary": {"oneOf": [
-                    _object({
-                        **{name: integer for name in ("request_count", "failed_count", "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens", "total_tokens", "unpriced_request_count")},
-                        "usage_usd": number,
-                        "average_latency_ms": {"type": ["number", "null"]},
-                        "average_ttft_ms": {"type": ["number", "null"]},
-                    }), {"type": "null"}
-                ], "description": "include_summary=true 时返回整个授权筛选范围的汇总，不受分页限制；缺失耗时不计入均值。"},
+                "summary": {
+                    "oneOf": [
+                        _object(
+                            {
+                                **{
+                                    name: integer
+                                    for name in (
+                                        "request_count",
+                                        "failed_count",
+                                        "input_tokens",
+                                        "cached_input_tokens",
+                                        "output_tokens",
+                                        "reasoning_tokens",
+                                        "total_tokens",
+                                        "unpriced_request_count",
+                                    )
+                                },
+                                "usage_usd": number,
+                                "average_latency_ms": {"type": ["number", "null"]},
+                                "average_ttft_ms": {"type": ["number", "null"]},
+                            }
+                        ),
+                        {"type": "null"},
+                    ],
+                    "description": "include_summary=true 时返回整个授权筛选范围的汇总，不受分页限制；缺失耗时不计入均值。",
+                },
                 "page": integer,
                 "page_size": integer,
                 "cost_estimate": boolean,
@@ -163,7 +195,10 @@ def cpa_paths():
                     ("key_id", {"type": "integer", "minimum": 1}),
                     ("model", {"type": "string"}),
                     ("include_summary", {"type": "boolean", "default": False}),
-                    ("days", {"type": "integer", "minimum": 1, "maximum": 90, "default": 7}),
+                    (
+                        "days",
+                        {"type": "integer", "minimum": 1, "maximum": 90, "default": 7},
+                    ),
                     ("failed", {"type": "boolean"}),
                     ("started_at", {"type": "string", "format": "date-time"}),
                     ("ended_at", {"type": "string", "format": "date-time"}),

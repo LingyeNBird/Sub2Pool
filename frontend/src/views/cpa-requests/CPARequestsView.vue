@@ -254,6 +254,12 @@ onMounted(async () => {
           {{ account.name }}
         </option>
       </select>
+      <RouterLink
+        v-if="accountId && auth.canAccess('dashboard')"
+        :to="{ path: '/', query: { account_id: accountId } }"
+        class="btn"
+        >成员额度</RouterLink
+      >
       <button
         v-if="auth.isStaff && accountId"
         class="btn"

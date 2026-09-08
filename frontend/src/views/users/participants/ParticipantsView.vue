@@ -8,6 +8,7 @@ import type { MonitoredAccount } from "@/types/accounts";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { ApiError, api, jsonBody } from "@/services/api";
+import { useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import type { ConfirmDialogHandle } from "@/types/common";
 import type { Participant, Sub2APIUserOption } from "@/types/participants";
@@ -23,7 +24,9 @@ import type {
 } from "./types";
 
 const auth = useAuthStore();
-const provider = ref<"sub2api" | "cpa">("sub2api");
+const provider = ref<"sub2api" | "cpa">(
+  useRoute().query.provider === "cpa" ? "cpa" : "sub2api",
+);
 const cpaAccounts = ref<MonitoredAccount[]>([]);
 const cpaAccountId = ref<number | null>(null);
 const cpaSummary = ref<CPAPoolSummary | null>(null);
@@ -157,6 +160,7 @@ async function save(form: ParticipantFormData, participantId: number | null) {
     );
     editor.value?.close();
     await load();
+    if (provider.value === "cpa") await loadCPA();
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "保存失败";
   } finally {
@@ -179,6 +183,7 @@ async function remove(participant: Participant) {
     await api(`participants/${participant.id}`, { method: "DELETE" });
     editor.value?.close();
     await load();
+    if (provider.value === "cpa") await loadCPA();
   } catch (error) {
     message.value = error instanceof ApiError ? error.message : "删除失败";
   }
@@ -330,7 +335,7 @@ onMounted(() => {
       </select>
       <button class="btn" @click="loadCPA">刷新 CPA 额度</button>
     </div>
-    <CPAPoolCard v-if="cpaSummary" :data="cpaSummary" />
+    <CPAPoolCard v-if="cpaSummary" :data="cpaSummary" @refresh="loadCPA" />
     <p v-else class="col-span-12">
       {{
         cpaAccounts.length

@@ -50,7 +50,8 @@ class CPAKeyBinding(models.Model):
 
 class CPAClaimPlan(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    key = models.ForeignKey(CPAAPIKey, on_delete=models.PROTECT)
+    key = models.ForeignKey(CPAAPIKey, null=True, on_delete=models.PROTECT)
+    account = models.ForeignKey("MonitoredAccount", null=True, on_delete=models.PROTECT)
     participant = models.ForeignKey(
         "Participant", on_delete=models.PROTECT, related_name="cpa_claim_plans"
     )
@@ -64,6 +65,17 @@ class CPAClaimPlan(models.Model):
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL
     )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(key__isnull=False, account__isnull=True)
+                    | Q(key__isnull=True, account__isnull=False)
+                ),
+                name="cpa_claim_single_source",
+            )
+        ]
 
 
 class CPAQuotaContract(models.Model):
@@ -92,3 +104,32 @@ class CPAClaimEvent(models.Model):
     event = models.OneToOneField(
         "CPAUsageEvent", on_delete=models.PROTECT, related_name="ownership_claim"
     )
+
+
+class CPAAccountOwnerBinding(models.Model):
+    """Prospective fallback ownership. Explicit key and historical claims win."""
+
+    account = models.ForeignKey(
+        "MonitoredAccount", on_delete=models.PROTECT, related_name="cpa_owner_bindings"
+    )
+    participant = models.ForeignKey(
+        "Participant", on_delete=models.PROTECT, related_name="cpa_owner_bindings"
+    )
+    started_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account"],
+                condition=Q(ended_at__isnull=True),
+                name="one_open_cpa_account_owner",
+            ),
+            models.CheckConstraint(
+                condition=Q(ended_at__isnull=True) | Q(ended_at__gt=F("started_at")),
+                name="cpa_owner_positive_interval",
+            ),
+        ]

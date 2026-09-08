@@ -275,7 +275,7 @@ class ParticipantDetailView(AdminAPIView):
                     pk=participant_id
                 )
                 from ..cpa.participants import has_cpa_contract_history
-                if participant.snapshots.exists() or participant.cpa_bindings.exists() or participant.cpa_claim_plans.exists() or has_cpa_contract_history(participant.id):
+                if participant.snapshots.exists() or participant.cpa_bindings.exists() or participant.cpa_claim_plans.exists() or participant.cpa_owner_bindings.exists() or has_cpa_contract_history(participant.id):
                     raise _ParticipantHasSnapshots
                 pool_ids = list(
                     participant.pool_allocations.order_by().values_list(

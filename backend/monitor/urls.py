@@ -205,9 +205,10 @@ urlpatterns = [
     path("monitor/run", RunMonitorView.as_view()),
 ]
 
-from .views.cpa_participants import (CPAKeyListView, CPABindingDetailView, CPAClaimPreviewView, CPAClaimApplyView, CPASummaryView, CPARequestsView, ReadOnlyCPASummaryView, ReadOnlyCPARequestsView)
+from .views.cpa_participants import (CPAUnassignedClaimPreviewView, CPAKeyListView, CPABindingDetailView, CPAClaimPreviewView, CPAClaimApplyView, CPASummaryView, CPARequestsView, ReadOnlyCPASummaryView, ReadOnlyCPARequestsView)
 
 urlpatterns += [
+    path("cpa/unassigned/preview", CPAUnassignedClaimPreviewView.as_view()),
     path("cpa/keys", CPAKeyListView.as_view()),
     path("cpa/bindings/<int:binding_id>", CPABindingDetailView.as_view()),
     path("cpa/claims/preview", CPAClaimPreviewView.as_view()),

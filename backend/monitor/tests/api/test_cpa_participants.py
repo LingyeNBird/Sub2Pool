@@ -195,6 +195,12 @@ def test_model_replay_and_pool_summary_preserve_sub2api_balance(setup, model):
     assert not first.needs_manual_update
     summary = pool_summary(admin, account, config)
     assert all(row["quota_available"] for row in summary["members"])
+    assert summary["accounts"][0]["quota_unavailable_reasons"] == []
+    assert all(not row["is_self"] for row in summary["members"])
+    assert all(
+        row["account_breakdowns"][0]["quota_unavailable_reasons"] == []
+        for row in summary["members"]
+    )
     assert sum(row["usage_usd"] for row in summary["members"]) == 30
     before = list(
         end.participant_snapshots.order_by("participant_id").values(
@@ -377,6 +383,12 @@ def test_unknown_models_and_collection_gap_do_not_show_remaining(setup):
     assert summary["members"][0]["remaining_entitlement_usd"] is None
     assert summary["members"][0]["unpriced_request_count"] == 1
     assert not summary["accounts"][0]["coverage"]["complete"]
+    reasons = summary["accounts"][0]["quota_unavailable_reasons"]
+    assert "1 次请求缺少模型价格" in reasons
+    assert any("采集缺口" in reason for reason in reasons)
+    assert set(reasons) <= set(
+        summary["members"][0]["account_breakdowns"][0]["quota_unavailable_reasons"]
+    )
 
 
 def test_request_filters_and_participant_with_history_cannot_be_deleted(setup):
@@ -649,4 +661,20 @@ def test_detached_sub2api_identity_keeps_historical_replay_subject(setup):
             )
         )
         == before
+    )
+
+
+def test_no_observation_explains_unknown_without_hiding_collected_usage(setup):
+    config, admin, account, alice, bob, keys, start = setup
+    event(account, keys[0], start + timedelta(minutes=10))
+    summary = pool_summary(admin, account, config)
+    assert "尚无额度观测" in summary["accounts"][0]["quota_unavailable_reasons"]
+    member = next(
+        row for row in summary["members"] if row["participant_id"] == alice.id
+    )
+    assert member["usage_usd"] == 10
+    assert member["remaining_entitlement_usd"] is None
+    assert (
+        "缺少历史份额依据或对应额度观测"
+        in member["account_breakdowns"][0]["quota_unavailable_reasons"]
     )

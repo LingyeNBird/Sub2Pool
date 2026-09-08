@@ -37,9 +37,7 @@ class ParticipantWriteSerializer(serializers.ModelSerializer):
     def _account_external_ids() -> list[int]:
         return [
             account.fact_key
-            for account in MonitoredAccount.objects.filter(
-                provider="sub2api"
-            ).order_by("external_account_id")
+            for account in MonitoredAccount.objects.all().order_by("id")
         ]
 
     @staticmethod
@@ -105,6 +103,10 @@ class ParticipantWriteSerializer(serializers.ModelSerializer):
                 setattr(current, field, value)
             current.save()
             self._ensure_account_usage_rows(current)
+            if "is_owner" in validated_data or "enabled" in validated_data:
+                from ..cpa.account_owner import sync_account_owner
+                for account in MonitoredAccount.objects.filter(provider="cpa"):
+                    sync_account_owner(account)
             return current
 
 
