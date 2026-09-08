@@ -12,6 +12,8 @@ class QuotaPool(models.Model):
 
     name = models.CharField(max_length=160)
     contract_revision = models.PositiveBigIntegerField(default=1)
+    cpa_billing_anchor = models.DateField(null=True, blank=True)
+    cpa_billing_timezone = models.CharField(max_length=64, default="Asia/Shanghai")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

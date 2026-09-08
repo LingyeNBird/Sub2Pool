@@ -159,6 +159,7 @@ def pool_summary(user, account, config=None):
                 if observation
                 else None,
                 "coverage": coverage,
+                "upstream_used_percent": float(observation.upstream_used_percent) if observation else None,
                 "quota_available": valid,
                 "quota_unavailable_reasons": unavailable_reasons,
                 **{
@@ -242,7 +243,11 @@ def pool_summary(user, account, config=None):
         for key, value in list(row.items()):
             if isinstance(value, Decimal):
                 row[key] = float(value)
+    from .billing import billing_summary, weekly_distribution
+
     return {
+        "weekly_distribution": weekly_distribution(accounts, members, config, now, bindings),
+        "billing_summary": billing_summary(user, account, config, now, bindings, members),
         "pool_id": account.pool_id,
         "pool_name": account.pool.name,
         "selected_account_id": account.id,

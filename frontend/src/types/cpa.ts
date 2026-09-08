@@ -36,7 +36,71 @@ export interface CPAMember extends CPATotals {
     remaining_entitlement_usd: number | null;
   }[];
 }
+export interface CPABillingMember {
+  participant_id: number;
+  usage_usd: number;
+  usage_percent: number | null;
+  entitlement_usd: number | null;
+  remaining_usd: number | null;
+  recommended_usd: number | null;
+  recommended_percent: number | null;
+  completed_overuse_usd: number | null;
+  projected_overuse: boolean | null;
+}
+export interface CPAWeeklyDistribution {
+  account_id: number;
+  account_name: string;
+  started_at: string;
+  resets_at: string | null;
+  quota_as_of: string | null;
+  requests_as_of: string | null;
+  capacity_usd: number | null;
+  remaining_usd: number | null;
+  upstream_remaining_percent: number | null;
+  usage_usd: number;
+  unpriced_request_count: number;
+  unattributed_usd: number;
+  other_members_usd: number;
+  members: {
+    participant_id: number;
+    usage_usd: number;
+    usage_percent: number | null;
+  }[];
+}
+export interface CPABillingSummary {
+  configured: boolean;
+  anchor_date: string | null;
+  timezone: string;
+  started_at: string | null;
+  ended_at: string | null;
+  generated_at: string;
+  capacity_usd: number | null;
+  actual_capacity_usd: number | null;
+  future_capacity_usd: number | null;
+  expired_usd: number | null;
+  available_usd: number | null;
+  usage_usd: number;
+  unattributed_usd: number;
+  other_members_usd: number;
+  unallocated_usd: number | null;
+  reasons: string[];
+  cycles: {
+    account_id: number;
+    account_name: string;
+    started_at: string;
+    ended_at: string;
+    kind: "historical" | "current" | "future";
+    capacity_usd: number | null;
+    full_capacity_usd: number | null;
+    expired_usd: number | null;
+    quota_as_of: string | null;
+    reasons: string[];
+  }[];
+  members: CPABillingMember[];
+}
 export interface CPAPoolSummary {
+  weekly_distribution?: CPAWeeklyDistribution[];
+  billing_summary?: CPABillingSummary;
   pool_id: number;
   pool_name: string;
   selected_account_id: number;
@@ -51,6 +115,7 @@ export interface CPAPoolSummary {
       status: "active" | "missing" | "ambiguous";
     };
     selected: boolean;
+    upstream_used_percent?: number | null;
     quota_as_of: string | null;
     requests_as_of: string | null;
     cycle_started_at: string;

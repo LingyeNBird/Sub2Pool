@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { CPAMember, CPAPoolSummary } from "@/types/cpa";
+import type { CPABillingMember, CPAMember, CPAPoolSummary } from "@/types/cpa";
+import { cpaColor } from "./cpaColors";
 import { formatCurrency } from "@/utils/formatters";
 
 const props = defineProps<{
   member: CPAMember;
+  billing?: CPABillingMember;
   accounts: CPAPoolSummary["accounts"];
   selectedAccountId: number;
 }>();
@@ -27,6 +29,12 @@ const account = computed(() =>
 );
 const percent = (value: number | null | undefined) =>
   value == null ? "—" : `${value.toFixed(2)}%`;
+const trueProgress = computed(() =>
+  props.member.share_percent
+    ? ((breakdown.value?.charged_percent ?? 0) / props.member.share_percent) *
+      100
+    : null,
+);
 const progressValue = computed(() => {
   if (!breakdown.value?.quota_available) return 0;
   if (!props.member.share_percent)
@@ -60,7 +68,12 @@ const compactTokens = computed(() =>
   >
     <div class="card-body gap-4 p-5">
       <header class="flex flex-wrap items-center justify-between gap-2">
-        <h3 class="card-title break-all">{{ member.participant_name }}</h3>
+        <h3 class="card-title break-all">
+          <span
+            class="size-3 shrink-0 rounded-full"
+            :style="{ backgroundColor: cpaColor(member.participant_id) }"
+          />{{ member.participant_name }}
+        </h3>
         <div class="flex gap-1">
           <span v-if="member.is_self" class="badge badge-outline badge-sm"
             >我</span
@@ -74,7 +87,7 @@ const compactTokens = computed(() =>
         </div>
       </header>
       <div>
-        <p class="text-xs text-base-content/60">已采集消耗 · 估算</p>
+        <p class="text-xs text-base-content/60">本周已采集 · 估算</p>
         <p class="mt-1 text-3xl font-semibold tabular-nums">
           {{ formatCurrency(member.usage_usd) }}
         </p>
@@ -128,12 +141,72 @@ const compactTokens = computed(() =>
           class="progress progress-primary"
           :value="progressValue"
           max="100"
-          :aria-label="`${member.participant_name}已使用其合同份额的 ${progressValue.toFixed(1)}%`"
+          :aria-label="`${member.participant_name}已使用其合同份额的 ${trueProgress?.toFixed(1) ?? '未知'}%`"
         ></progress>
         <p class="text-xs text-base-content/60">
-          进度以该成员合同份额为 100%。
+          进度以个人份额为 100%，实际已用
+          {{ trueProgress == null ? "未知" : `${trueProgress.toFixed(1)}%` }}。
         </p>
       </template>
+      <section v-if="billing" class="space-y-3 border-t border-base-300 pt-4">
+        <div class="flex items-center justify-between gap-2">
+          <h4 class="text-sm font-semibold">账期累计 · 估算</h4>
+          <span class="text-xs text-base-content/60"
+            >占整车
+            {{
+              billing.usage_percent == null
+                ? "未知"
+                : `${billing.usage_percent.toFixed(1)}%`
+            }}</span
+          >
+        </div>
+        <div class="flex flex-wrap justify-between gap-2">
+          <strong class="text-xl">{{
+            formatCurrency(billing.usage_usd)
+          }}</strong
+          ><span class="text-sm"
+            >预计剩余权益
+            {{
+              billing.remaining_usd == null
+                ? "未知"
+                : formatCurrency(billing.remaining_usd)
+            }}</span
+          >
+        </div>
+        <p class="text-xs text-base-content/60">
+          账期预计权益
+          {{
+            billing.entitlement_usd == null
+              ? "未知"
+              : formatCurrency(billing.entitlement_usd)
+          }}
+        </p>
+        <span
+          v-if="billing.projected_overuse"
+          class="badge badge-sm badge-error"
+          >整个账期预计超额</span
+        >
+        <span
+          v-else-if="(billing.completed_overuse_usd ?? 0) > 0"
+          class="badge badge-sm badge-warning"
+          >已结束周期累计多用
+          {{ formatCurrency(billing.completed_overuse_usd) }}</span
+        >
+        <p class="rounded-box bg-base-200 p-3 text-sm">
+          后续建议总量
+          {{
+            billing.recommended_usd == null
+              ? "数据不足"
+              : formatCurrency(billing.recommended_usd)
+          }}<span v-if="billing.recommended_percent != null"
+            >，约占后续可用额度的
+            {{ billing.recommended_percent.toFixed(1) }}%</span
+          >。<span
+            v-if="billing.completed_overuse_usd && !billing.projected_overuse"
+            >后续少用一些，可在账期内平衡。</span
+          >
+        </p>
+      </section>
       <p v-if="reasons.length" class="text-xs leading-5 text-base-content/70">
         {{ reasons.join("；") }}
       </p>
@@ -144,7 +217,7 @@ const compactTokens = computed(() =>
         另有 {{ member.unpriced_request_count }} 次请求缺价，未计入消耗。
       </p>
       <p v-if="member.is_overused" class="text-sm">
-        已超出分配额度，当前仍可调用。
+        本周超份额，当前仍可调用；不直接判定账期超额。
       </p>
     </div>
   </article>

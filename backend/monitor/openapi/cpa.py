@@ -47,9 +47,103 @@ def cpa_schemas():
             "remaining_entitlement_usd": nullable_number,
         }
     )
+    member_billing = _object(
+        {
+            "participant_id": integer,
+            "usage_usd": number,
+            **{
+                key: nullable_number
+                for key in (
+                    "usage_percent",
+                    "entitlement_usd",
+                    "remaining_usd",
+                    "recommended_usd",
+                    "recommended_percent",
+                    "completed_overuse_usd",
+                )
+            },
+            "projected_overuse": {"type": ["boolean", "null"]},
+        }
+    )
+    cycle = _object(
+        {
+            "account_id": integer,
+            "account_name": text,
+            "started_at": time,
+            "ended_at": time,
+            "kind": {"type": "string", "enum": ["historical", "current", "future"]},
+            "capacity_usd": nullable_number,
+            "full_capacity_usd": nullable_number,
+            "expired_usd": nullable_number,
+            "quota_as_of": nullable_time,
+            "reasons": _array(text),
+        }
+    )
+    billing = _object(
+        {
+            "configured": boolean,
+            "anchor_date": {"type": ["string", "null"], "format": "date"},
+            "timezone": text,
+            "started_at": nullable_time,
+            "ended_at": nullable_time,
+            "generated_at": time,
+            **{
+                key: nullable_number
+                for key in (
+                    "capacity_usd",
+                    "actual_capacity_usd",
+                    "future_capacity_usd",
+                    "expired_usd",
+                    "available_usd",
+                    "unallocated_usd",
+                )
+            },
+            **{
+                key: number
+                for key in ("usage_usd", "unattributed_usd", "other_members_usd")
+            },
+            "reasons": _array(text),
+            "cycles": _array(cycle),
+            "members": _array(member_billing),
+        }
+    )
+    weekly = _object(
+        {
+            "account_id": integer,
+            "account_name": text,
+            "started_at": time,
+            "resets_at": nullable_time,
+            "quota_as_of": nullable_time,
+            "requests_as_of": nullable_time,
+            **{
+                key: nullable_number
+                for key in (
+                    "capacity_usd",
+                    "remaining_usd",
+                    "upstream_remaining_percent",
+                )
+            },
+            **{
+                key: number
+                for key in ("usage_usd", "unattributed_usd", "other_members_usd")
+            },
+            "unpriced_request_count": integer,
+            "members": _array(
+                _object(
+                    {
+                        "participant_id": integer,
+                        "usage_usd": number,
+                        "usage_percent": nullable_number,
+                    }
+                )
+            ),
+        }
+    )
     return {
         "CPAPoolSummary": _object(
             {
+                "billing_summary": billing,
+                "weekly_distribution": _array(weekly),
                 "pool_id": integer,
                 "pool_name": text,
                 "selected_account_id": integer,
@@ -75,6 +169,7 @@ def cpa_schemas():
                                 }
                             ),
                             "selected": boolean,
+                            "upstream_used_percent": nullable_number,
                             "quota_as_of": nullable_time,
                             "requests_as_of": nullable_time,
                             "cycle_started_at": time,
@@ -231,4 +326,34 @@ def cpa_paths():
                 },
             }
         }
+    result["/cpa/billing-config"] = {
+        "put": {
+            "summary": "管理员配置 CPA 池订阅账期",
+            "operationId": "configureCPABilling",
+            "description": "仅系统管理员。按起始日和 IANA 时区逐月计算；空日期取消配置，不改写请求、合同或余额。只读 API 不提供写入。",
+            "parameters": [{**_account_id_parameter(), "required": True}],
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "application/json": {
+                        "schema": _object(
+                            {
+                                "anchor_date": {
+                                    "type": ["string", "null"],
+                                    "format": "date",
+                                },
+                                "timezone": {"type": "string"},
+                            }
+                        )
+                    }
+                },
+            },
+            "responses": {
+                "200": _success_response(
+                    "配置后的汇总", {"$ref": "#/components/schemas/CPAPoolSummary"}
+                ),
+                "403": {"description": "仅管理员可修改"},
+            },
+        }
+    }
     return result

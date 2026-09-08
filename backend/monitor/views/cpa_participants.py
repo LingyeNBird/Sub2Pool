@@ -339,3 +339,31 @@ class ReadOnlyCPASummaryView(CPASummaryView):
 class ReadOnlyCPARequestsView(CPARequestsView):
     authentication_classes = [APIKeyAuthentication]
     http_method_names = ["get", "head", "options"]
+
+
+class CPABillingConfigWrite(serializers.Serializer):
+    anchor_date = serializers.DateField(allow_null=True)
+    timezone = serializers.CharField(max_length=64)
+
+    def validate_timezone(self, value):
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise serializers.ValidationError("请选择有效的 IANA 时区")
+        return value
+
+
+class CPABillingConfigView(CPAAdminView):
+    def put(self, request):
+        account = cpa_account(request)
+        serializer = CPABillingConfigWrite(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        pool = account.pool
+        pool.cpa_billing_anchor = serializer.validated_data["anchor_date"]
+        pool.cpa_billing_timezone = serializer.validated_data["timezone"]
+        pool.save(
+            update_fields=["cpa_billing_anchor", "cpa_billing_timezone", "updated_at"]
+        )
+        return ok(pool_summary(request.user, account))

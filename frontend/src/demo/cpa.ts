@@ -1,6 +1,7 @@
 import type { CPAQuotaDetail, CPAResetPreview } from "@/types/accounts";
 import type { CPAPricingInventory, CPAPricingSync } from "@/types/cpaPricing";
 import type {
+  CPABillingSummary,
   CPAKeys,
   CPARequest,
   CPAPoolSummary,
@@ -12,6 +13,10 @@ import type { CPAAPIKeyUsageSeries } from "@/types/statistics";
 import { demoIdentity, saveDemoState } from "./state";
 
 export interface DemoCPAState {
+  billingConfigs?: Record<
+    number,
+    { anchor_date: string | null; timezone: string }
+  >;
   quotaStatuses?: Record<number, CPAQuotaDetail>;
   resetPlans?: CPAResetPreview[];
   keys: CPAKeys;
@@ -277,6 +282,36 @@ export function demoCPASummary(
     ];
   });
   return {
+    billing_summary: demoBilling(state, pool.id, members, accountId),
+    weekly_distribution: [
+      {
+        account_id: accountId,
+        account_name: account.name,
+        started_at: new Date(
+          Date.parse(state.clock) - 3 * 86400000,
+        ).toISOString(),
+        resets_at: new Date(
+          Date.parse(state.clock) + 4 * 86400000,
+        ).toISOString(),
+        quota_as_of: state.clock,
+        requests_as_of: events.at(-1)?.occurred_at ?? null,
+        capacity_usd: quotaAvailable ? 2000 : null,
+        remaining_usd: quotaAvailable
+          ? Math.max(0, 2000 - sum(events).usage_usd)
+          : null,
+        upstream_remaining_percent: 72,
+        usage_usd: sum(events).usage_usd,
+        unpriced_request_count: sum(events).unpriced_request_count,
+        unattributed_usd: sum(events.filter((e) => e.participant_id == null))
+          .usage_usd,
+        other_members_usd: 0,
+        members: members.map((m) => ({
+          participant_id: m.participant_id,
+          usage_usd: m.usage_usd,
+          usage_percent: quotaAvailable ? m.usage_usd / 20 : null,
+        })),
+      },
+    ],
     pool_id: pool.id,
     pool_name: pool.name,
     selected_account_id: accountId,
@@ -321,6 +356,77 @@ export function demoCPASummary(
       last_error_at: null,
     },
   };
+}
+
+function demoBilling(
+  state: DemoState,
+  poolId: number,
+  members: CPAPoolSummary["members"],
+  accountId: number,
+): CPABillingSummary {
+  const config = state.cpa?.billingConfigs?.[poolId];
+  const result: CPABillingSummary = {
+    configured: !!config?.anchor_date,
+    anchor_date: config?.anchor_date ?? null,
+    timezone: config?.timezone ?? "Asia/Shanghai",
+    started_at: null,
+    ended_at: null,
+    generated_at: state.clock,
+    capacity_usd: null,
+    actual_capacity_usd: null,
+    future_capacity_usd: null,
+    expired_usd: null,
+    available_usd: null,
+    usage_usd: 0,
+    unattributed_usd: 0,
+    other_members_usd: 0,
+    unallocated_usd: null,
+    reasons: [],
+    cycles: [],
+    members: [],
+  };
+  if (!result.configured) return result;
+  // Synthetic four-week scenario for UI review; never presented as production facts.
+  const start = Date.parse(state.clock) - 7 * 86400000;
+  const end = start + 28 * 86400000;
+  result.started_at = new Date(start).toISOString();
+  result.ended_at = new Date(end).toISOString();
+  result.capacity_usd = 4000;
+  result.actual_capacity_usd = 2000;
+  result.future_capacity_usd = 2000;
+  result.available_usd = 3000;
+  result.expired_usd = 0;
+  result.usage_usd = 1000;
+  result.unallocated_usd = 0;
+  result.cycles = Array.from({ length: 4 }, (_, i) => ({
+    account_id: accountId,
+    account_name: "CPA 演示账号",
+    started_at: new Date(start + i * 7 * 86400000).toISOString(),
+    ended_at: new Date(start + (i + 1) * 7 * 86400000).toISOString(),
+    kind: i === 0 ? "historical" : i === 1 ? "current" : "future",
+    capacity_usd: 1000,
+    full_capacity_usd: 1000,
+    expired_usd: i === 0 ? 0 : null,
+    quota_as_of: i < 2 ? state.clock : null,
+    reasons: [],
+  }));
+  result.members = members.map((m, i) => {
+    const spend = i === 0 ? 500 : 250;
+    const entitlement = (4000 * (m.share_percent ?? 0)) / 100;
+    const remaining = entitlement - spend;
+    return {
+      participant_id: m.participant_id,
+      usage_usd: spend,
+      usage_percent: spend / 40,
+      entitlement_usd: entitlement,
+      remaining_usd: remaining,
+      recommended_usd: Math.max(0, remaining),
+      recommended_percent: Math.max(0, remaining) / 30,
+      completed_overuse_usd: Math.max(0, spend - entitlement / 4),
+      projected_overuse: remaining < 0,
+    };
+  });
+  return result;
 }
 
 export function demoCPAKeySeries(
@@ -451,6 +557,22 @@ export function handleCPA({
   const cpa = state.cpa!;
   const admin = demoIdentity()?.is_staff;
   const own = ownIds(state);
+  if (pathname === "cpa/billing-config") {
+    if (!admin) return fail("仅管理员可修改", 403);
+    if (method !== "PUT") return fail("不支持此操作", 405);
+    const accountId = Number(url.searchParams.get("account_id"));
+    const account = state.monitoredAccounts.find((a) => a.id === accountId);
+    if (!account || !canRead(state, accountId))
+      return fail("CPA 账号未授权", 403);
+    const body = {
+      anchor_date: payload.anchor_date ? String(payload.anchor_date) : null,
+      timezone: String(payload.timezone),
+    };
+    cpa.billingConfigs ??= {};
+    cpa.billingConfigs[account.pool_id] = body;
+    saveDemoState(state);
+    return ok(demoCPASummary(state, accountId));
+  }
   if (pathname === "cpa/summary" || pathname === "cpa/requests") {
     const accountId = Number(url.searchParams.get("account_id"));
     if (!canRead(state, accountId)) return fail("CPA 账号未授权", 403);

@@ -208,7 +208,18 @@ urlpatterns = [
     path("monitor/run", RunMonitorView.as_view()),
 ]
 
-from .views.cpa_participants import (CPAUnassignedClaimPreviewView, CPAKeyListView, CPABindingDetailView, CPAClaimPreviewView, CPAClaimApplyView, CPASummaryView, CPARequestsView, ReadOnlyCPASummaryView, ReadOnlyCPARequestsView)
+from .views.cpa_participants import (
+    CPABillingConfigView,
+    CPAUnassignedClaimPreviewView,
+    CPAKeyListView,
+    CPABindingDetailView,
+    CPAClaimPreviewView,
+    CPAClaimApplyView,
+    CPASummaryView,
+    CPARequestsView,
+    ReadOnlyCPASummaryView,
+    ReadOnlyCPARequestsView,
+)
 
 urlpatterns += [
     path("cpa/unassigned/preview", CPAUnassignedClaimPreviewView.as_view()),
@@ -216,6 +227,7 @@ urlpatterns += [
     path("cpa/bindings/<int:binding_id>", CPABindingDetailView.as_view()),
     path("cpa/claims/preview", CPAClaimPreviewView.as_view()),
     path("cpa/claims/<uuid:plan_id>/apply", CPAClaimApplyView.as_view()),
+    path("cpa/billing-config", CPABillingConfigView.as_view()),
     path("cpa/summary", CPASummaryView.as_view()),
     path("cpa/requests", CPARequestsView.as_view()),
     path("v1/cpa/summary", ReadOnlyCPASummaryView.as_view()),

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useAuthStore } from "@/stores/auth";
+import CPABillingOverview from "./CPABillingOverview.vue";
 import CPAOwnerClaim from "./CPAOwnerClaim.vue";
 import CPAMemberQuotaCard from "./CPAMemberQuotaCard.vue";
 import type { CPAPoolSummary } from "@/types/cpa";
@@ -34,7 +35,7 @@ const members = computed(() =>
         请求统计更新于
         {{
           formatDateTime(data.generated_at)
-        }}。已用和剩余权益截至各账号的额度更新时间，之后的新请求尚未参与额度估算。
+        }}。周权益卡截至各账号额度更新时间；分布与账期累计按最新采集请求计费，容量基于各周期可靠观测。
       </p>
       <p v-if="data.partial_scope" class="text-sm">
         当前仅汇总你获授权的池内账号。
@@ -50,6 +51,7 @@ const members = computed(() =>
             : "采集器未连接，最新请求数据可能尚未收齐"
         }}
       </div>
+      <CPABillingOverview :data="data" @refresh="emit('refresh')" />
       <div class="flex flex-wrap items-center justify-between gap-3">
         <h3 class="text-lg font-semibold">
           成员额度 · {{ data.members.length }} 人
@@ -80,6 +82,13 @@ const members = computed(() =>
           v-for="member in members"
           :key="member.participant_id"
           :member="member"
+          :billing="
+            data.billing_summary?.configured
+              ? data.billing_summary.members.find(
+                  (m) => m.participant_id === member.participant_id,
+                )
+              : undefined
+          "
           :accounts="data.accounts"
           :selected-account-id="data.selected_account_id"
         />
