@@ -108,7 +108,7 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["available"] is True
-    assert data["algorithm"] == "particle_filter_v9"
+    assert data["algorithm"] == "particle_filter_v10"
     assert data["particle_count"] == 480
     assert data["representative_particle_count"] == 96
     assert data["segment"]["observation_count"] == 2

@@ -14,6 +14,7 @@ export interface ParticleTrajectoryPoint {
   range_min_usd: number;
   range_max_usd: number;
   range_stage: number;
+  range_inherited?: boolean;
   range_direction: "upper" | "lower" | null;
   ess_fraction: number;
   resampled: boolean;

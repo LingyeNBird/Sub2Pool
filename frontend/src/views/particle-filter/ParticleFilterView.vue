@@ -373,7 +373,9 @@ onBeforeUnmount(() => {
               {{
                 activePoint.range_stage
                   ? `第 ${activePoint.range_stage} 级扩张`
-                  : "标准范围"
+                  : activePoint.range_inherited
+                    ? "沿用历史先验范围"
+                    : "标准范围"
               }}
             </div>
           </div>

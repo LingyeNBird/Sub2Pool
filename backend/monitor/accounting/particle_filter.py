@@ -155,6 +155,7 @@ def run_particle_filter(
     capacity_hat = np.zeros(observation_count)
     capacity_lower = np.zeros(observation_count)
     capacity_upper = np.zeros(observation_count)
+    baseline_hat = np.zeros(observation_count)
     total_hat = np.zeros(observation_count)
     total_lower = np.zeros(observation_count)
     total_upper = np.zeros(observation_count)
@@ -200,6 +201,9 @@ def run_particle_filter(
         upper_boundary_mass[index] = weights[
             capacity_particles >= cfg.capacity_max_usd - boundary_band
         ].sum()
+        baseline_hat[index] = _weighted_quantile(
+            baseline_hidden, weights, (0.5,),
+        )[0]
         total_particles = attributed_particles.sum(axis=1)
         remaining_percent = np.maximum(
             model_input.rights_percent[None, :] - attributed_particles,
@@ -384,6 +388,7 @@ def run_particle_filter(
         capacity_hat_usd=capacity_hat,
         capacity_lower_usd=capacity_lower,
         capacity_upper_usd=capacity_upper,
+        baseline_percent_hat=baseline_hat,
         total_percent_hat=total_hat,
         total_percent_lower=total_lower,
         total_percent_upper=total_upper,

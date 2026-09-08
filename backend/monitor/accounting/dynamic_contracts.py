@@ -55,6 +55,7 @@ class ParticleFilterOutput:
     capacity_hat_usd: np.ndarray
     capacity_lower_usd: np.ndarray
     capacity_upper_usd: np.ndarray
+    baseline_percent_hat: np.ndarray
     total_percent_hat: np.ndarray
     total_percent_lower: np.ndarray
     total_percent_upper: np.ndarray

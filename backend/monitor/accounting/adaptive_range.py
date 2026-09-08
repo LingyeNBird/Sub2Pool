@@ -50,14 +50,19 @@ class AdaptiveRangeOutput:
     direction: ExpansionDirection | None
     promotions: tuple[RangePromotion, ...]
     filter_config: ParticleFilterConfig
+    initial_range_usd: tuple[float, float]
 
 
 def _display_residuals(
     particle: ParticleFilterOutput,
     displayed_percent: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    # 与研究实现一致：各主体后验中位数之和用于检查显示单元矛盾。
-    progress = particle.attributed_percent_hat.sum(axis=1)
+    # Compare absolute progress with the provider's absolute display. Baseline
+    # uncertainty is inferred by the filter, not forced to the displayed integer.
+    # Exact-zero baselines retain the validated sum-of-subject-medians behavior.
+    progress = (
+        particle.baseline_percent_hat + particle.attributed_percent_hat.sum(axis=1)
+    )
     upper = np.maximum(
         progress - np.minimum(displayed_percent + 1.0, 100.0),
         0.0,
@@ -193,6 +198,20 @@ def run_adaptive_range_filter(
         capacity_max_usd=capacity_profile.capacity_max_usd,
         initial_capacity_sd_usd=capacity_profile.initial_capacity_sd_usd,
     )
+    # A prior learned outside the base plan range must not be clipped back to
+    # its boundary on reconnect. Reuse the smallest supported range containing
+    # that prior; this is historical input, not a new dual-evidence promotion.
+    prior = base_config.initial_capacity_usd
+    if prior is not None and np.isfinite(prior) and prior > 0:
+        for target in capacity_profile.lower_stages_usd:
+            if prior >= base_config.capacity_min_usd:
+                break
+            base_config = replace(base_config, capacity_min_usd=target)
+        for target in capacity_profile.upper_stages_usd:
+            if prior <= base_config.capacity_max_usd:
+                break
+            base_config = replace(base_config, capacity_max_usd=target)
+    initial_range = (base_config.capacity_min_usd, base_config.capacity_max_usd)
     base_particle = run_particle_filter(
         model_input,
         seed=seed,
@@ -200,20 +219,20 @@ def run_adaptive_range_filter(
     )
     base_bounds = run_deterministic_bounds(
         model_input,
-        capacity_min_usd=capacity_profile.capacity_min_usd,
-        capacity_max_usd=capacity_profile.capacity_max_usd,
+        capacity_min_usd=base_config.capacity_min_usd,
+        capacity_max_usd=base_config.capacity_max_usd,
     )
     particle = _copy_particle(base_particle)
     bounds = _copy_bounds(base_bounds)
     row_count = len(model_input.times_hours)
     active_min = np.full(
         row_count,
-        capacity_profile.capacity_min_usd,
+        base_config.capacity_min_usd,
         dtype=float,
     )
     active_max = np.full(
         row_count,
-        capacity_profile.capacity_max_usd,
+        base_config.capacity_max_usd,
         dtype=float,
     )
     active_stage = np.zeros(row_count, dtype=int)
@@ -232,6 +251,7 @@ def run_adaptive_range_filter(
             direction=None,
             promotions=(),
             filter_config=base_config,
+            initial_range_usd=initial_range,
         )
 
     targets = (
@@ -240,8 +260,12 @@ def run_adaptive_range_filter(
         else capacity_profile.lower_stages_usd
     )
     current_particle = base_particle
-    current_min = capacity_profile.capacity_min_usd
-    current_max = capacity_profile.capacity_max_usd
+    current_min = base_config.capacity_min_usd
+    current_max = base_config.capacity_max_usd
+    targets = tuple(
+        t for t in targets
+        if (t > current_max if direction == "upper" else t < current_min)
+    )
     promotions: list[RangePromotion] = []
 
     for stage_number, target in enumerate(targets, start=1):
@@ -311,4 +335,5 @@ def run_adaptive_range_filter(
         direction=direction,
         promotions=tuple(promotions),
         filter_config=base_config,
+        initial_range_usd=initial_range,
     )

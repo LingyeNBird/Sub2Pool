@@ -323,6 +323,9 @@ def particle_trajectory_data(
                     2,
                 ),
                 "range_stage": int(adaptive.stage[row]),
+                "range_inherited": adaptive.initial_range_usd != (
+                    range_profile.capacity_min_usd, range_profile.capacity_max_usd,
+                ),
                 "range_direction": (
                     adaptive.direction if adaptive.stage[row] > 0 else None
                 ),

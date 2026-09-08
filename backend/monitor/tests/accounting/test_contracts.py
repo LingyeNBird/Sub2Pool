@@ -113,8 +113,8 @@ def test_replay_is_idempotent_preserves_raw_facts_and_model_intervals():
     for observation in (first, second):
         observation.refresh_from_db()
         snapshots = list(observation.participant_snapshots.all())
-        assert observation.raw_window["rate_method"] == "particle_filter_v9"
-        assert observation.model_diagnostics["algorithm"] == "particle_filter_v9"
+        assert observation.raw_window["rate_method"] == "particle_filter_v10"
+        assert observation.model_diagnostics["algorithm"] == "particle_filter_v10"
         assert observation.capacity_lower_usd <= (
             observation.effective_usd_per_percent * Decimal("100")
         )

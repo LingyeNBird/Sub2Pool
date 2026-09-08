@@ -139,6 +139,7 @@ def _diagnostics(
             float(adaptive.capacity_min_usd[row]),
             float(adaptive.capacity_max_usd[row]),
         ],
+        "capacity_initial_range_usd": list(adaptive.initial_range_usd),
         "capacity_range_stage": int(adaptive.stage[row]),
         "capacity_range_direction": (
             adaptive.direction if adaptive.stage[row] > 0 else None

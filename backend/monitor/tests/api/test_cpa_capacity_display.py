@@ -175,3 +175,60 @@ def test_average_model_keeps_its_capacity_after_reconnect(setup):
     assert week["capacity_usd"] == float(expected)
     assert week["capacity_estimate"]["source"] == "quota_model"
     assert week["remaining_usd"] is None
+
+
+def test_v9_upgrade_replays_reconnects_and_preserves_source_facts(setup):
+    from io import StringIO
+    from django.core.management import call_command
+    from monitor.models import CPAUsageEvent
+    from monitor.replay import rebuild_observation_suffix
+
+    config, _, account, a, b, keys, start = setup
+    config.weekly_quota_model = "time_varying"
+    config.save()
+    CPAAccountCollectionInterval.objects.create(
+        account=account, session_key="first", connected_at=start,
+        disconnected_at=start + timedelta(hours=36), end_reliable=True,
+    )
+    for i in range(4):
+        when = start + timedelta(hours=12 * i)
+        if i:
+            event(account, keys[0], when - timedelta(minutes=1), tokens=2_000_000)
+        observation(account, start, when, 18 + 10 * i, 20 * i)
+    connected = start + timedelta(hours=37)
+    CPAAccountCollectionInterval.objects.create(
+        account=account, session_key="next", connected_at=connected,
+    )
+    observation(account, start, connected, 48, 60)
+    latest = observation(account, start, connected + timedelta(seconds=1), 48, 60)
+    rebuild_account(account.fact_key, config)
+    latest.refresh_from_db()
+    expected = latest.effective_usd_per_percent
+    rebuild_observation_suffix(latest, config)
+    latest.refresh_from_db()
+    assert latest.effective_usd_per_percent == expected
+    assert expected < Decimal("7")
+    assert not latest.model_diagnostics["capacity_range_promotions"]
+    assert latest.model_diagnostics["capacity_initial_range_usd"][0] < 1400
+    source_fields = (
+        "id", "observed_at", "upstream_used_percent", "raw_selected_total_cost",
+    )
+    facts = list(Observation.objects.values(*source_fields))
+    events = list(CPAUsageEvent.objects.values())
+    for obs in Observation.objects.all():
+        obs.raw_window["rate_method"] = "particle_filter_v9"
+        obs.save(update_fields=["raw_window"])
+    call_command("replayobservations", stdout=StringIO())
+    latest.refresh_from_db()
+    assert latest.raw_window["rate_method"] == "particle_filter_v10"
+    assert latest.effective_usd_per_percent == expected
+    assert list(Observation.objects.values(*source_fields)) == facts
+    assert list(CPAUsageEvent.objects.values()) == events
+    trajectory = particle_trajectory_data(config, account)
+    week = weekly_distribution(
+        [account], {a.id: a, b.id: b}, config, latest.observed_at, owner_index(),
+    )[0]
+    assert trajectory["points"][-1]["range_inherited"]
+    assert week["capacity_usd"] == trajectory["latest"]["capacity_usd"]
+    a.refresh_from_db()
+    assert a.latest_balance_usd == Decimal("123")

@@ -381,6 +381,7 @@ def observation_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "range_min_usd": {"type": "number"},
                 "range_max_usd": {"type": "number"},
                 "range_stage": {"type": "integer"},
+                "range_inherited": {"type": "boolean"},
                 "range_direction": {
                     "type": ["string", "null"],
                     "enum": ["upper", "lower", None],
