@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { formatCurrency } from "@/utils/formatters";
 const props = defineProps<{
   label: string;
+  percentBasis: string;
   capacity: number | null;
   segments: {
     label: string;
@@ -20,6 +21,10 @@ const total = computed(() =>
   props.segments.reduce((sum, s) => sum + Math.max(0, s.value ?? 0), 0),
 );
 const denominator = computed(() => props.capacity ?? total.value);
+const shareLabel = (value: number | null) =>
+  props.capacity != null && props.capacity > 0 && value != null
+    ? `占${props.percentBasis} ${((value / props.capacity) * 100).toFixed(1)}%`
+    : "额度占比待估算";
 </script>
 <template>
   <div class="space-y-3">
@@ -49,7 +54,7 @@ const denominator = computed(() => props.capacity ?? total.value);
             backgroundColor: segment.color,
             opacity: segment.forecast ? 0.3 : 1,
           }"
-          :title="`${segment.label} ${formatCurrency(segment.value)}`"
+          :title="`${segment.label} ${formatCurrency(segment.value)} · ${shareLabel(segment.value)}`"
         />
       </div>
     </div>
@@ -71,11 +76,8 @@ const denominator = computed(() => props.capacity ?? total.value);
           <strong>{{
             segment.value == null ? "未知" : formatCurrency(segment.value)
           }}</strong
-          ><span
-            v-if="capacity && segment.value != null"
-            class="text-base-content/60"
-          >
-            · {{ ((segment.value / capacity) * 100).toFixed(1) }}%</span
+          ><span class="text-base-content/60">
+            · {{ shareLabel(segment.value) }}</span
           ></span
         >
       </li>

@@ -51,15 +51,13 @@ const compact = (n: number) =>
 const money = (n: number) => `$${n.toFixed(n > 0 && n < 0.01 ? 4 : 2)}`;
 const duration = (ms: number | null | undefined) =>
   ms && ms > 0 ? `${(ms / 1000).toFixed(1)} s` : "—";
-const service = (item: CPARequest) =>
-  item.response_service_tier || item.requested_service_tier || "标准";
 const keyLabel = (item: CPARequest) => {
   const alias = item.api_key_alias?.trim();
   const hint = item.api_key_hint;
-  if (!alias) return `Key ····${hint || "未知"}`;
+  if (!alias) return hint ? `...${hint}` : "未知 Key";
   if (!hint || (alias.endsWith(hint) && /(?:\.\.\.|…|····)/.test(alias)))
-    return alias;
-  return `${alias}…${hint}`;
+    return alias.replace(/(?:…|····)/g, "...");
+  return `${alias}...${hint}`;
 };
 const speed = (item: CPARequest) =>
   item.latency_ms > item.ttft_ms && item.ttft_ms > 0 && item.output_tokens > 0
@@ -504,7 +502,7 @@ onMounted(async () => {
                     {{ item.model }}
                   </div>
                   <div class="mt-1 text-xs text-base-content/60">
-                    {{ service(item) }} · {{ keyLabel(item) }}
+                    {{ keyLabel(item) }}
                   </div>
                 </td>
                 <td>
@@ -586,8 +584,7 @@ onMounted(async () => {
                 <div class="min-w-0">
                   <h3 class="truncate font-medium">{{ item.model }}</h3>
                   <p class="mt-1 text-xs text-base-content/60">
-                    {{ keyLabel(item) }} ·
-                    {{ service(item) }}
+                    {{ keyLabel(item) }}
                   </p>
                 </div>
                 <span

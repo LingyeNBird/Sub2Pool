@@ -111,6 +111,7 @@ const monthlySegments = computed(() => [
         </div>
         <CPADistributionBar
           label="成员已用 / 整车剩余"
+          percent-basis="本周额度"
           :capacity="week.capacity_usd"
           :segments="[
             ...week.members.map((m) => ({
@@ -194,6 +195,7 @@ const monthlySegments = computed(() => [
           </div>
           <CPADistributionBar
             label="容量来源 · 实色已有周期，浅色未来预测"
+            percent-basis="账期总额度"
             :capacity="billing.capacity_usd"
             :segments="[
               {
@@ -211,6 +213,7 @@ const monthlySegments = computed(() => [
           />
           <CPADistributionBar
             label="累计消耗 · 百分比占整车账期预计总容量"
+            percent-basis="账期总额度"
             :capacity="billing.capacity_usd"
             :segments="monthlySegments"
           />
