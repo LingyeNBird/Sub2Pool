@@ -1,3 +1,11 @@
+export interface CPACapacityEstimate {
+  source: "particle_filter" | "quota_model";
+  capacity_usd: number;
+  lower_usd: number | null;
+  upper_usd: number | null;
+  prior_only: boolean;
+  as_of: string;
+}
 import type { CPACollectorStatus } from "./settings";
 
 export interface CPATotals {
@@ -48,6 +56,8 @@ export interface CPABillingMember {
   projected_overuse: boolean | null;
 }
 export interface CPAWeeklyDistribution {
+  capacity_estimate?: CPACapacityEstimate | null;
+  coverage_complete?: boolean;
   account_id: number;
   account_name: string;
   started_at: string;
@@ -92,6 +102,7 @@ export interface CPABillingSummary {
     kind: "historical" | "current" | "future";
     capacity_usd: number | null;
     full_capacity_usd: number | null;
+    capacity_estimate?: CPACapacityEstimate | null;
     expired_usd: number | null;
     quota_as_of: string | null;
     reasons: string[];

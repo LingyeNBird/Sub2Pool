@@ -62,8 +62,15 @@ export function demoCPAStatus(
           metrics: previous,
         },
         prediction: null,
-        notice:
-          "用量为该时间段的账号合计；附加限额的模型范围不明确，暂不预测。",
+        capacity_estimate: {
+          source: "particle_filter",
+          capacity_usd: 2000,
+          lower_usd: 1650,
+          upper_usd: 2400,
+          prior_only: false,
+          as_of: state.clock,
+        },
+        notice: "容量复用粒子轨迹估计；请求数与 Token 总量暂不预测。",
       },
       {
         id: "spark-week",
@@ -149,6 +156,7 @@ export function handleCPAStatus(context: DemoRequestContext): Response | null {
   for (const window of detail.windows) {
     window.used_percent = 0;
     window.prediction = null;
+    window.capacity_estimate = null;
     if (window.current)
       window.current.metrics = {
         request_count: 0,

@@ -1,4 +1,4 @@
-"""Read-only quota cards. Incomplete observations never become projections."""
+"""Read-only quota cards with distinct capacity estimates and usage projections."""
 
 from datetime import UTC, datetime, timedelta
 from math import isfinite
@@ -140,6 +140,7 @@ def quota_detail(account, config, now, body=None, weekly=None):
                 "current": None,
                 "previous": None,
                 "prediction": None,
+                "capacity_estimate": None,
                 "notice": None,
             }
             window_start = (
@@ -181,7 +182,9 @@ def quota_detail(account, config, now, body=None, weekly=None):
                                     "上个窗口提前重置，仅统计已观测区间。"
                                 )
                 if separate_model_limits:
-                    row["notice"] = "用量为该时间段的账号合计；附加限额的模型范围不明确，暂不预测。"
+                    row["notice"] = (
+                        "用量为该时间段的账号合计；附加限额的模型范围不明确，暂不预测。"
+                    )
                 elif not current["coverage_complete"]:
                     row["notice"] = "当前窗口采集不完整，仅展示已采集用量，暂不预测。"
                 elif current["metrics"]["unpriced_request_count"]:
@@ -197,6 +200,29 @@ def quota_detail(account, config, now, body=None, weekly=None):
                         key: current["metrics"][key] * 100 / used
                         for key in ("request_count", "token_count", "usage_usd")
                     }
+            if (
+                standard
+                and seconds == 604800
+                and window_start
+                and window_start <= now < end
+            ):
+                from ..accounting.boundaries import same_official_reset
+                from .billing import cycle_rows
+
+                cycle = next(
+                    (
+                        c
+                        for c in reversed(cycle_rows(account, config, now))
+                        if same_official_reset(c["natural_end"], end)
+                    ),
+                    None,
+                )
+                if cycle and cycle.get("capacity_estimate"):
+                    row["capacity_estimate"] = cycle["capacity_estimate"]
+                    if row["prediction"] is None:
+                        row["notice"] = (
+                            "容量采用当前额度模型估计；请求数与 Token 总量暂不预测，采集缺口仍影响历史结算。"
+                        )
             result["windows"].append(row)
     # Put the weekly account quota first, then other standard/model limits.
     result["windows"].sort(key=lambda row: 0 if row["label"] == "周限额" else 1)

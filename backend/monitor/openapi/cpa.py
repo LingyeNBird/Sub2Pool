@@ -11,6 +11,31 @@ def _array(schema):
     return {"type": "array", "items": schema}
 
 
+def capacity_estimate_schema():
+    number = {"type": "number"}
+    nullable_number = {"type": ["number", "null"]}
+    boolean = {"type": "boolean"}
+    time = {"type": "string", "format": "date-time"}
+    return {
+        "oneOf": [
+            {"type": "null"},
+            _object(
+                {
+                    "source": {
+                        "type": "string",
+                        "enum": ["particle_filter", "quota_model"],
+                    },
+                    "capacity_usd": number,
+                    "lower_usd": nullable_number,
+                    "upper_usd": nullable_number,
+                    "prior_only": boolean,
+                    "as_of": time,
+                }
+            ),
+        ]
+    }
+
+
 def cpa_schemas():
     number = {"type": "number"}
     integer = {"type": "integer"}
@@ -47,6 +72,7 @@ def cpa_schemas():
             "remaining_entitlement_usd": nullable_number,
         }
     )
+    capacity_estimate = capacity_estimate_schema()
     member_billing = _object(
         {
             "participant_id": integer,
@@ -74,6 +100,7 @@ def cpa_schemas():
             "kind": {"type": "string", "enum": ["historical", "current", "future"]},
             "capacity_usd": nullable_number,
             "full_capacity_usd": nullable_number,
+            "capacity_estimate": capacity_estimate,
             "expired_usd": nullable_number,
             "quota_as_of": nullable_time,
             "reasons": _array(text),
@@ -109,6 +136,8 @@ def cpa_schemas():
     )
     weekly = _object(
         {
+            "capacity_estimate": capacity_estimate,
+            "coverage_complete": boolean,
             "account_id": integer,
             "account_name": text,
             "started_at": time,
@@ -211,7 +240,10 @@ def cpa_schemas():
                 "occurred_at": time,
                 "request_id": text,
                 "api_key_hint": text,
-                "api_key_alias": {"type": "string", "description": "请求携带的 CPA Key alias；缺失时使用已绑定 Key 的本地备注，无别名则为空。仅随授权请求返回。"},
+                "api_key_alias": {
+                    "type": "string",
+                    "description": "请求携带的 CPA Key alias；缺失时使用已绑定 Key 的本地备注，无别名则为空。仅随授权请求返回。",
+                },
                 "model": text,
                 "endpoint": text,
                 "input_tokens": integer,

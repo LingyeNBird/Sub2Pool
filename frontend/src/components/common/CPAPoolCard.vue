@@ -82,6 +82,7 @@ const members = computed(() =>
           v-for="member in members"
           :key="member.participant_id"
           :member="member"
+          :weekly-distributions="data.weekly_distribution"
           :billing="
             data.billing_summary?.configured
               ? data.billing_summary.members.find(
@@ -108,7 +109,7 @@ const members = computed(() =>
         v-if="members.some((member) => !member.quota_available)"
         class="text-xs text-base-content/60"
       >
-        已采集消耗正常展示；剩余额度待估算，原因见下方账号状态。
+        容量与份额预算可参考模型估计；个人剩余权益仍需完整历史用量，原因见下方账号状态。
       </p>
       <div
         v-if="data.unattributed.request_count"

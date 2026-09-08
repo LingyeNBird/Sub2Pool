@@ -1,3 +1,4 @@
+import type { CPACapacityEstimate } from "./cpa";
 import type { CorrectionBreakdown } from "./common";
 export type QuotaProfile = "auto" | "plus" | "pro_5x" | "pro_20x";
 export type EffectiveQuotaProfile = Exclude<QuotaProfile, "auto">;
@@ -165,6 +166,7 @@ export interface CPAQuotaDetail {
     current: CPAQuotaPeriod | null;
     previous: CPAQuotaPeriod | null;
     prediction: CPAQuotaMetrics | null;
+    capacity_estimate?: CPACapacityEstimate | null;
     notice: string | null;
   }[];
   reset: {

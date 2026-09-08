@@ -295,7 +295,16 @@ export function demoCPASummary(
         ).toISOString(),
         quota_as_of: state.clock,
         requests_as_of: events.at(-1)?.occurred_at ?? null,
-        capacity_usd: quotaAvailable ? 2000 : null,
+        capacity_usd: 2000,
+        capacity_estimate: {
+          source: "particle_filter",
+          capacity_usd: 2000,
+          lower_usd: 1650,
+          upper_usd: 2400,
+          prior_only: false,
+          as_of: state.clock,
+        },
+        coverage_complete: quotaAvailable,
         remaining_usd: quotaAvailable
           ? Math.max(0, 2000 - sum(events).usage_usd)
           : null,
@@ -308,7 +317,7 @@ export function demoCPASummary(
         members: members.map((m) => ({
           participant_id: m.participant_id,
           usage_usd: m.usage_usd,
-          usage_percent: quotaAvailable ? m.usage_usd / 20 : null,
+          usage_percent: m.usage_usd / 20,
         })),
       },
     ],

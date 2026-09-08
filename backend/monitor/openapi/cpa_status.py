@@ -1,6 +1,6 @@
 """CPA account-window presentation, scoped summary metadata, and reset history."""
 
-from .cpa import _object, _array
+from .cpa import _object, _array, capacity_estimate_schema
 
 
 def cpa_status_schema():
@@ -44,6 +44,7 @@ def cpa_status_schema():
                         "current": optional(period),
                         "previous": optional(period),
                         "prediction": optional(metrics),
+                        "capacity_estimate": capacity_estimate_schema(),
                         "notice": nullable_text,
                     }
                 )

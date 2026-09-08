@@ -1,6 +1,6 @@
 """Read-time, replayable billing projections. Never writes source facts or balances."""
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from calendar import monthrange
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone as dt_timezone
@@ -15,6 +15,7 @@ from ..access import visible_accounts_for
 from ..accounting.boundaries import same_official_reset
 from ..models import CPAUsageEvent, Observation
 from ..reporting.recommendations import _capacity_values
+from .capacity_estimate import particle_capacity_estimate
 from .participants import coverage_data, event_owner
 from .usage import cpa_event_cost
 
@@ -75,7 +76,7 @@ def cycle_rows(account, config, now):
         # Prefix sums price each request once per cycle, even when many stale
         # observations are skipped after a late event or a catalog adjustment.
         times, amounts, unknowns = [], [ZERO], [0]
-        if any(o.valid_sample for o in group):
+        if any(o.valid_sample or particle_capacity_estimate(o) for o in group):
             for event in (
                 CPAUsageEvent.objects.filter(
                     account=account,
@@ -89,13 +90,46 @@ def cycle_rows(account, config, now):
                 times.append(event.occurred_at)
                 amounts.append(amounts[-1] + cost)
                 unknowns.append(unknowns[-1] + int(unknown))
+        details = None
         for obs in reversed(group):
-            if (
+            posterior = particle_capacity_estimate(obs)
+            if not posterior and not (
                 obs.valid_sample
                 and obs.interval_used_percent == obs.upstream_used_percent
             ):
-                # Capacity is independent of participant allocation. The adapter only
-                # supplies fields used by the existing quota-model implementation.
+                continue
+            index = bisect_right(times, obs.observed_at)
+            base = 0
+            if posterior and obs.attribution_started_at:
+                reason = obs.raw_window.get("replay_segment_reason")
+                observed_baseline = (
+                    reason
+                    in {
+                        "manual_override",
+                        "official_zero_observation",
+                        "provider_collection_baseline",
+                    }
+                    or obs.interval_used_percent != obs.upstream_used_percent
+                )
+                base = (bisect_right if observed_baseline else bisect_left)(
+                    times, obs.attribution_started_at
+                )
+            if unknowns[index] - unknowns[base] or abs(
+                amounts[index] - amounts[base] - obs.selected_total_cost
+            ) > Decimal("0.00001"):
+                continue
+            if posterior and config.weekly_quota_model != "constant_average":
+                # Already computed by the same deterministic filter as the trajectory
+                # page. Do not reject it because the official week has collection gaps.
+                capacity = Decimal(str(posterior["capacity_usd"]))
+                details = posterior
+            else:
+                if posterior:
+                    # The average model also uses only the valid connected segment.
+                    if not obs.valid_sample or obs.interval_used_percent <= 0:
+                        continue
+                elif not coverage_data(account, start, obs.observed_at)["complete"]:
+                    continue
                 snap = SimpleNamespace(
                     observation=obs,
                     selected_cost=ZERO,
@@ -103,19 +137,18 @@ def cycle_rows(account, config, now):
                     charged_percent_lower=None,
                     charged_percent_upper=None,
                 )
-                # Claims preserve money, while late facts and repricing can make a
-                # materialized capacity stale. Do not forecast from that stale rate.
-                index = bisect_right(times, obs.observed_at)
-                if unknowns[index] or abs(
-                    amounts[index] - obs.selected_total_cost
-                ) > Decimal("0.00001"):
-                    continue
-                if not coverage_data(account, start, obs.observed_at)["complete"]:
-                    continue
                 capacity = _capacity_values(snap, config)[0]
-                if capacity > 0:
-                    reliable = (obs, capacity)
-                    break
+                details = dict(
+                    source="quota_model",
+                    capacity_usd=float(capacity),
+                    lower_usd=None,
+                    upper_usd=None,
+                    prior_only=False,
+                    as_of=obs.observed_at.isoformat(),
+                )
+            if capacity > 0:
+                reliable = (obs, capacity)
+                break
         rows.append(
             dict(
                 start=start,
@@ -124,6 +157,7 @@ def cycle_rows(account, config, now):
                 window=latest.window_seconds,
                 observation=latest,
                 reliable=reliable,
+                capacity_estimate=details if reliable else None,
             )
         )
     for i, row in enumerate(rows[:-1]):
@@ -175,6 +209,8 @@ def billing_summary(user, account, config, now, bindings, members):
     )
     actual = future = expired = available = reserve = ZERO
     future_known = True
+    capacity_known = True
+    contracts_known = True
     reasons = set()
     for selected in accounts:
         contracts = list(selected.cpa_contracts.order_by("effective_at", "id"))
@@ -255,6 +291,7 @@ def billing_summary(user, account, config, now, bindings, members):
                     if selected.pool_id != pool.id:
                         continue
                     reasons.add("缺少历史份额或账号所属池记录")
+                    contracts_known = False
                 segments.append((a, b, contract))
                 relevant_intervals.append((a, b))
             if not segments:
@@ -270,6 +307,7 @@ def billing_summary(user, account, config, now, bindings, members):
             if predicted and capacity is None:
                 future_known = False
             if capacity is None:
+                capacity_known = False
                 row_reasons.append("缺少可靠周期容量")
             cycle_costs = [
                 (e, cost, unknown)
@@ -278,6 +316,7 @@ def billing_summary(user, account, config, now, bindings, members):
             ]
             if not predicted:
                 if row["observation"].observed_at > row["end"]:
+                    capacity_known = False
                     row_reasons.append("周期边界与观测时间冲突")
                 if not coverage_data(selected, row["start"], min(row["end"], now))[
                     "complete"
@@ -285,17 +324,6 @@ def billing_summary(user, account, config, now, bindings, members):
                     row_reasons.append("采集覆盖不完整")
                 if any(unknown for _, _, unknown in cycle_costs):
                     row_reasons.append("请求缺少模型价格")
-                if observed:
-                    priced = sum(
-                        (
-                            cost
-                            for e, cost, _ in cycle_costs
-                            if e.occurred_at <= observed.observed_at
-                        ),
-                        ZERO,
-                    )
-                    if abs(priced - observed.selected_total_cost) > Decimal("0.00001"):
-                        row_reasons.append("请求或价格已变化，等待额度重算")
             weight = sum(
                 (fraction(row["start"], row["end"], a, b) for a, b, _ in segments), ZERO
             )
@@ -334,6 +362,7 @@ def billing_summary(user, account, config, now, bindings, members):
                         if predicted and row["prediction_as_of"]
                         else None
                     ),
+                    capacity_estimate=row.get("capacity_estimate"),
                     reasons=row_reasons,
                 )
             )
@@ -386,12 +415,15 @@ def billing_summary(user, account, config, now, bindings, members):
                     continue
                 if x > cursor:
                     reasons.add("周期边界不完整")
+                    capacity_known = False
                 cursor = max(cursor, y)
             if cursor < b:
                 reasons.add("周期边界不完整")
+                capacity_known = False
         if selected.pool_id == pool.id and not current:
             reasons.add("等待当前周期观测，无法预测后续自然周期")
             future_known = False
+            capacity_known = False
         for e, cost, unknown in costs:
             if not start <= e.occurred_at < min(end, now):
                 continue
@@ -402,6 +434,7 @@ def billing_summary(user, account, config, now, bindings, members):
                 if selected.pool_id != pool.id:
                     continue
                 reasons.add("缺少历史份额或账号所属池记录")
+                contracts_known = False
             if unknown:
                 reasons.add("请求缺少模型价格")
             owner = event_owner(e, bindings)
@@ -411,7 +444,7 @@ def billing_summary(user, account, config, now, bindings, members):
     known = not reasons
     total = actual + future
     result.update(
-        capacity_usd=float(total) if known else None,
+        capacity_usd=float(total) if capacity_known and contracts_known else None,
         actual_capacity_usd=float(actual),
         future_capacity_usd=float(future) if future_known else None,
         expired_usd=float(expired) if known else None,
@@ -452,9 +485,11 @@ def billing_summary(user, account, config, now, bindings, members):
                 participant_id=pk,
                 usage_usd=float(usage[pk]),
                 usage_percent=float(usage[pk] / total * 100)
-                if known and total
+                if capacity_known and contracts_known and total
                 else None,
-                entitlement_usd=float(entitlement[pk]) if known else None,
+                entitlement_usd=float(entitlement[pk])
+                if capacity_known and contracts_known
+                else None,
                 remaining_usd=float(rest) if known else None,
                 recommended_usd=float(recommended) if known else None,
                 recommended_percent=float(recommended / available * 100)
@@ -490,23 +525,6 @@ def weekly_distribution(accounts, members, config, now, bindings):
             and coverage_data(account, current["start"], now)["complete"]
             and not total["unpriced_request_count"]
         )
-        if reliable:
-            priced = sum(
-                (
-                    cpa_event_cost(e, config)[0]
-                    for e in CPAUsageEvent.objects.filter(
-                        account=account,
-                        occurred_at__gte=current["start"],
-                        occurred_at__lte=reliable[0].observed_at,
-                    )
-                ),
-                ZERO,
-            )
-            complete = complete and abs(
-                priced - reliable[0].selected_total_cost
-            ) <= Decimal("0.00001")
-        if not complete:
-            capacity = None
         output.append(
             dict(
                 account_id=account.id,
@@ -516,8 +534,10 @@ def weekly_distribution(accounts, members, config, now, bindings):
                 quota_as_of=reliable[0].observed_at.isoformat() if reliable else None,
                 requests_as_of=latest_request.isoformat() if latest_request else None,
                 capacity_usd=float(capacity) if capacity is not None else None,
+                capacity_estimate=current.get("capacity_estimate") if current else None,
+                coverage_complete=complete,
                 remaining_usd=float(max(ZERO, capacity - total["usage_usd"]))
-                if capacity is not None
+                if capacity is not None and complete
                 else None,
                 upstream_remaining_percent=float(
                     max(ZERO, 100 - obs.upstream_used_percent)

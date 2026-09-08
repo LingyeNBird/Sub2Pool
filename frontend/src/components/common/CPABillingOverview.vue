@@ -109,8 +109,34 @@ const monthlySegments = computed(() => [
             <strong class="text-xl">{{ money(week.capacity_usd) }}</strong>
           </div>
         </div>
+        <p
+          v-if="week.capacity_estimate?.source === 'particle_filter'"
+          class="text-sm text-base-content/70"
+        >
+          {{
+            week.capacity_estimate.prior_only
+              ? "粒子模型先验 · 尚待有效观测校准"
+              : "粒子轨迹估计"
+          }}
+          <span
+            v-if="
+              week.capacity_estimate.lower_usd != null &&
+              week.capacity_estimate.upper_usd != null
+            "
+          >
+            · 90% 区间 {{ money(week.capacity_estimate.lower_usd) }} ～
+            {{ money(week.capacity_estimate.upper_usd) }}</span
+          >
+          · {{ dateTime(week.capacity_estimate.as_of) }}
+        </p>
+        <p
+          v-if="week.capacity_usd != null && week.coverage_complete === false"
+          class="text-xs text-base-content/60"
+        >
+          容量与占比可供参考；条内只列已采集费用，未采集消耗未计入成员，留白不代表可用余额。上游剩余比例见下方。
+        </p>
         <CPADistributionBar
-          label="成员已用 / 整车剩余"
+          label="成员已采集消耗 / 已知剩余"
           percent-basis="本周额度"
           :capacity="week.capacity_usd"
           :segments="[
@@ -224,9 +250,9 @@ const monthlySegments = computed(() => [
             }}。个人预计剩余权益用于跨周协调；已失效额度无法在下周恢复，建议不会修改份额或限制调用。
           </p>
           <p v-if="billing.reasons.length" class="alert text-sm" role="status">
-            数据不足：{{
+            结算待补全：{{
               billing.reasons.join("；")
-            }}。已采集金额保留，缺口不计作剩余。
+            }}。保留可用容量估计和已采集金额，缺口不计作剩余。
           </p>
           <details class="collapse-arrow collapse border border-base-300">
             <summary class="collapse-title text-sm font-medium">

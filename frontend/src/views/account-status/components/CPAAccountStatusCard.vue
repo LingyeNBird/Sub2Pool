@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatCurrency } from "@/utils/formatters";
 import { computed, ref } from "vue";
 import type { AccountStatusAccount, CPAResetPreview } from "@/types/accounts";
 import { useDateTime } from "@/composables/useDateTime";
@@ -223,17 +224,57 @@ async function confirmReset() {
                       />当前窗口预测
                     </h5>
                     <p class="mt-1 text-xs text-base-content/60">
-                      按已用比例估算满额总量
+                      {{
+                        window.capacity_estimate
+                          ? window.capacity_estimate.source ===
+                            "particle_filter"
+                            ? "复用粒子轨迹的容量估计"
+                            : "平均恒定模型容量估计"
+                          : "按已用比例估算满额总量"
+                      }}
                     </p>
                   </div>
-                  <CPAQuotaMetricList :metrics="window.prediction" prediction />
+                  <div v-if="window.capacity_estimate" class="space-y-2">
+                    <p class="text-xs text-base-content/60">周期估算容量</p>
+                    <strong class="text-2xl">{{
+                      formatCurrency(window.capacity_estimate.capacity_usd)
+                    }}</strong>
+                    <p
+                      v-if="
+                        window.capacity_estimate.lower_usd != null &&
+                        window.capacity_estimate.upper_usd != null
+                      "
+                      class="text-xs text-base-content/60"
+                    >
+                      90% 区间
+                      {{ formatCurrency(window.capacity_estimate.lower_usd) }}
+                      ～
+                      {{ formatCurrency(window.capacity_estimate.upper_usd) }}
+                    </p>
+                    <p class="text-xs text-base-content/60">
+                      估算更新 {{ time(window.capacity_estimate.as_of) }}
+                    </p>
+                    <p
+                      v-if="window.capacity_estimate.prior_only"
+                      class="text-xs text-warning"
+                    >
+                      模型先验，尚待有效观测校准。
+                    </p>
+                  </div>
+                  <CPAQuotaMetricList
+                    v-else
+                    :metrics="window.prediction"
+                    prediction
+                  />
                   <p
                     class="border-t border-dashed border-info/30 pt-3 text-xs text-base-content/60"
                   >
                     {{
-                      window.prediction
-                        ? "线性估算，不代表保证可用的余额；不预测成功率。"
-                        : "数据不足，暂不预测。"
+                      window.capacity_estimate
+                        ? "模型估计，不代表保证可用的余额；不补造漏采消耗。"
+                        : window.prediction
+                          ? "线性估算，不代表保证可用的余额；不预测成功率。"
+                          : "数据不足，暂不预测。"
                     }}
                   </p>
                 </div>

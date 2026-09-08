@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { CPABillingMember, CPAMember, CPAPoolSummary } from "@/types/cpa";
+import type {
+  CPABillingMember,
+  CPAMember,
+  CPAPoolSummary,
+  CPAWeeklyDistribution,
+} from "@/types/cpa";
 import { cpaColor } from "./cpaColors";
 import { formatCurrency } from "@/utils/formatters";
 
@@ -9,6 +14,7 @@ const props = defineProps<{
   billing?: CPABillingMember;
   accounts: CPAPoolSummary["accounts"];
   selectedAccountId: number;
+  weeklyDistributions?: CPAWeeklyDistribution[];
 }>();
 
 const selected = ref(props.selectedAccountId);
@@ -48,6 +54,25 @@ const progressValue = computed(() => {
     ),
   );
 });
+const weekEstimate = computed(() =>
+  props.weeklyDistributions?.find(
+    (w) => w.account_id === (breakdown.value?.account_id ?? selected.value),
+  ),
+);
+const estimatedBudget = computed(() =>
+  weekEstimate.value?.capacity_usd != null && props.member.share_percent != null
+    ? (weekEstimate.value.capacity_usd * props.member.share_percent) / 100
+    : null,
+);
+const collectedProgress = computed(() =>
+  estimatedBudget.value && weekEstimate.value
+    ? ((weekEstimate.value.members.find(
+        (m) => m.participant_id === props.member.participant_id,
+      )?.usage_usd ?? 0) /
+        estimatedBudget.value) *
+      100
+    : null,
+);
 const reasons = computed(() =>
   (breakdown.value?.quota_unavailable_reasons ?? []).filter(
     (reason) => !account.value?.quota_unavailable_reasons?.includes(reason),
@@ -148,6 +173,28 @@ const compactTokens = computed(() =>
           {{ trueProgress == null ? "未知" : `${trueProgress.toFixed(1)}%` }}。
         </p>
       </template>
+      <div
+        v-if="!breakdown?.quota_available && estimatedBudget != null"
+        class="space-y-2 rounded-box bg-base-200 p-3 text-sm"
+      >
+        <p>
+          本周份额预算 · 估算
+          <strong>{{ formatCurrency(estimatedBudget) }}</strong>
+        </p>
+        <p v-if="collectedProgress != null">
+          已采集消耗占个人份额 {{ collectedProgress.toFixed(1) }}%
+        </p>
+        <progress
+          v-if="collectedProgress != null"
+          class="progress progress-primary"
+          :value="Math.min(100, Math.max(0, collectedProgress))"
+          max="100"
+          :aria-label="`已采集消耗占个人份额 ${collectedProgress.toFixed(1)}%`"
+        />
+        <p class="text-xs text-base-content/60">
+          按整车模型容量和当前份额估算，不补造漏采的个人用量。
+        </p>
+      </div>
       <section v-if="billing" class="space-y-3 border-t border-base-300 pt-4">
         <div class="flex items-center justify-between gap-2">
           <h4 class="text-sm font-semibold">账期累计 · 估算</h4>
