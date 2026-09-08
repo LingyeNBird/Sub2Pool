@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from monitor.engine import run_monitor
 from monitor.api_usage import refresh_due_api_usage_snapshots
+from monitor.balance_operations import auto_apply_recommendations
 from monitor.models import AppSettings, MonitoredAccount
 
 
@@ -59,6 +60,12 @@ class Command(BaseCommand):
                 # 引擎已经记录错误并按配置发邮件；命令保持运行，等待配置修复或上游恢复。
                 self.stderr.write(f"监控失败：{exc}")
             else:
+                try:
+                    applications = auto_apply_recommendations()
+                    if applications["applied"] or applications["failed"]:
+                        self.stdout.write(f"自动应用建议额度：{applications}")
+                except Exception as exc:
+                    self.stderr.write(f"自动应用建议额度失败：{exc}")
                 try:
                     api_usage = refresh_due_api_usage_snapshots(
                         AppSettings.load()

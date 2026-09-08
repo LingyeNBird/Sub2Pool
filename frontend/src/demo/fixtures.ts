@@ -217,6 +217,7 @@ function buildLoginEvents(): LoginEventRecord[] {
 function baseSettings(): AppSettingsData {
   return {
     monitoring_enabled: true,
+    auto_apply_recommendations: true,
     sub2api_base_url: "https://demo.example.test",
     cpa_base_url: "https://cpa.demo.example.test",
     cpa_management_key_configured: false,

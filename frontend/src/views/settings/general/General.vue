@@ -6,6 +6,7 @@ import { useAuthStore } from "@/stores/auth";
 import type { ConfirmDialogHandle, ConfirmDialogOptions } from "@/types/common";
 
 import AllocationModelCard from "./components/AllocationModelCard.vue";
+import AutoApplyRecommendationsCard from "./components/AutoApplyRecommendationsCard.vue";
 import DatabaseTransferCard from "./components/DatabaseTransferCard.vue";
 import CPAConnectionCard from "./components/CPAConnectionCard.vue";
 import DataMaintenanceCard from "./components/DataMaintenanceCard.vue";
@@ -63,6 +64,7 @@ const {
   saveCPAPricing,
   saveAllocation,
   saveSampling,
+  saveAutoApplyRecommendations,
   saveEmail,
   saveBillingCorrection,
   saveNotifications,
@@ -210,6 +212,11 @@ async function handleRevokeReadOnlyAPIKey() {
       v-model:settings="settings"
       :saving="saving === 'sampling'"
       @save="saveSampling"
+    />
+    <AutoApplyRecommendationsCard
+      v-model:settings="settings"
+      :saving="saving === 'auto-apply-recommendations'"
+      @save="saveAutoApplyRecommendations"
     />
     <EmailServiceCard
       v-model:settings="settings"

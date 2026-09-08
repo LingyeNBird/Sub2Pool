@@ -41,6 +41,7 @@ export interface AppSettingsData {
     | CPAModelPricing
     | CPACollectorStatus;
   monitoring_enabled: boolean;
+  auto_apply_recommendations: boolean;
   sub2api_base_url: string;
   cpa_base_url: string;
   cpa_management_key_configured: boolean;

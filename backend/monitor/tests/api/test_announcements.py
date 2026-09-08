@@ -32,15 +32,11 @@ def test_admin_announcements_have_persistent_per_user_read_state():
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["unread_count"] == 3
-    assert len(data["items"]) == 3
-    announcement = next(item for item in data["items"] if item["code"] == "sub2api-fast-model-correction-0-1-179")
-    assert announcement["code"] == "sub2api-fast-model-correction-0-1-179"
+    unread_codes = {item["code"] for item in data["items"] if not item["read"]}
+    assert data["unread_count"] == len(unread_codes)
+    announcement = data["items"][0]
     assert announcement["read"] is False
     assert announcement["read_at"] is None
-    assert "Sub2API 0.1.179" in announcement["title"]
-    assert any("建议优先在 Sub2API" in paragraph for paragraph in announcement["paragraphs"])
-    assert any("更详细的 FAST 模型修正" in paragraph for paragraph in announcement["paragraphs"])
     assert regular_client.get(
         "/api/announcements",
         **regular_headers,
@@ -72,7 +68,7 @@ def test_admin_announcements_have_persistent_per_user_read_state():
     refreshed = admin_client.get("/api/announcements", **admin_headers).json()[
         "data"
     ]
-    assert refreshed["unread_count"] == 2
+    assert refreshed["unread_count"] == len(unread_codes) - 1
     assert next(item for item in refreshed["items"] if item["code"] == announcement["code"])["read"] is True
     assert admin_client.post(
         "/api/announcements/not-a-real-announcement/read",

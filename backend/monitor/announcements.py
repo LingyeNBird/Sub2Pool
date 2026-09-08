@@ -12,6 +12,15 @@ class SystemAnnouncement:
 
 ANNOUNCEMENTS = (
     SystemAnnouncement(
+        code="auto-apply-recommendations-default-2026-09-08",
+        title="自动应用建议额度默认开启",
+        published_at="2026-09-08T00:00:00Z",
+        severity="info",
+        paragraphs=(
+            "因为现在额度测算较为完善，所以默认为您打开“自动应用建议额度”。如不需要，请在系统设置里面关闭。",
+        ),
+    ),
+    SystemAnnouncement(
         code="sub2api-long-context-correction-2026-09",
         title="长上下文双倍倍率修正默认启用",
         published_at="2026-09-05T00:00:00Z",

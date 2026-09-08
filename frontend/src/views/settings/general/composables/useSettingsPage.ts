@@ -382,6 +382,12 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     ]);
   }
 
+  function saveAutoApplyRecommendations() {
+    return saveSection("auto-apply-recommendations", "自动应用建议额度设置", [
+      "auto_apply_recommendations",
+    ]);
+  }
+
   async function saveBillingCorrection() {
     if (!settings.value) return false;
     saving.value = "billing-correction";
@@ -780,6 +786,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     saveMonitoredAccount,
     saveAllocation,
     saveSampling,
+    saveAutoApplyRecommendations,
     saveEmail,
     saveNotifications,
     exportDatabase,

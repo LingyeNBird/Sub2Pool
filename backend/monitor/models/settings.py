@@ -310,6 +310,7 @@ class AppSettings(models.Model):
     local_poll_minutes = models.PositiveIntegerField(
         default=10, validators=[MinValueValidator(2), MaxValueValidator(1440)]
     )
+    auto_apply_recommendations = models.BooleanField(default=True)
     progress_threshold_percent = models.DecimalField(
         max_digits=6,
         decimal_places=3,

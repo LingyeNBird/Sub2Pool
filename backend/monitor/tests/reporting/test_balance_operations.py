@@ -65,7 +65,7 @@ def test_apply_recommendation_updates_balance_and_hides_current_snapshot(
             captured.update(user_id=user_id, balance=balance)
             return balance
 
-    monkeypatch.setattr("monitor.views.dashboard.Sub2APIClient", FakeClient)
+    monkeypatch.setattr("monitor.balance_operations.Sub2APIClient", FakeClient)
     client = Client()
     headers, _ = jwt_login(client)
     expected = Decimal(
@@ -140,7 +140,7 @@ def test_balance_rpc_blocks_concurrent_participant_policy_write(monkeypatch):
             return balance
 
     monkeypatch.setattr(
-        "monitor.views.dashboard.Sub2APIClient",
+        "monitor.balance_operations.Sub2APIClient",
         RacingClient,
     )
 
@@ -192,18 +192,18 @@ def test_remote_success_survives_local_commit_failure_and_retries_idempotently(
             return balance
 
     monkeypatch.setattr(
-        "monitor.views.dashboard.Sub2APIClient",
+        "monitor.balance_operations.Sub2APIClient",
         BalanceClient,
     )
-    from monitor.views import dashboard as dashboard_view
+    from monitor import balance_operations
 
-    real_commit = dashboard_view._commit_balance_operation
+    real_commit = balance_operations._commit_balance_operation
 
     def fail_local_commit(_operation_id, _guard):
         raise DatabaseError("injected local commit failure")
 
     monkeypatch.setattr(
-        dashboard_view,
+        balance_operations,
         "_commit_balance_operation",
         fail_local_commit,
     )
@@ -229,7 +229,7 @@ def test_remote_success_survives_local_commit_failure_and_retries_idempotently(
     snapshot.refresh_from_db()
     assert snapshot.recommendation_applied is False
     monkeypatch.setattr(
-        dashboard_view,
+        balance_operations,
         "_commit_balance_operation",
         real_commit,
     )
@@ -239,7 +239,7 @@ def test_remote_success_survives_local_commit_failure_and_retries_idempotently(
             raise AssertionError("remote-confirmed retry must not call Sub2API")
 
     monkeypatch.setattr(
-        dashboard_view,
+        balance_operations,
         "Sub2APIClient",
         NoNetworkClient,
     )
@@ -297,7 +297,7 @@ def test_ambiguous_remote_failure_reconciles_before_idempotent_retry(monkeypatch
             return balance
 
     monkeypatch.setattr(
-        "monitor.views.dashboard.Sub2APIClient",
+        "monitor.balance_operations.Sub2APIClient",
         AmbiguousClient,
     )
     client = Client()
@@ -385,7 +385,7 @@ def test_constant_average_one_click_applies_recommendation_midpoint(monkeypatch)
             captured.update(user_id=user_id, balance=balance)
             return balance
 
-    monkeypatch.setattr("monitor.views.dashboard.Sub2APIClient", FakeClient)
+    monkeypatch.setattr("monitor.balance_operations.Sub2APIClient", FakeClient)
     client = Client()
     headers, _ = jwt_login(client)
     expected = Decimal(
@@ -438,7 +438,7 @@ def test_apply_recommendation_failure_keeps_snapshot_actionable(monkeypatch):
             raise Sub2APIError("上游拒绝更新")
 
     monkeypatch.setattr(
-        "monitor.views.dashboard.Sub2APIClient",
+        "monitor.balance_operations.Sub2APIClient",
         FailingClient,
     )
     client = Client()

@@ -600,7 +600,7 @@ def test_share_change_can_reapply_reused_account_snapshot(monkeypatch):
             calls.append((user_id, balance))
             return balance
 
-    monkeypatch.setattr("monitor.views.dashboard.Sub2APIClient", FakeClient)
+    monkeypatch.setattr("monitor.balance_operations.Sub2APIClient", FakeClient)
     client = Client()
     headers, _response = jwt_login(client)
     response = client.post(
@@ -697,7 +697,7 @@ def test_applying_aggregate_recommendation_writes_one_global_balance_and_two_sou
             calls.append((user_id, balance))
             return balance
 
-    monkeypatch.setattr("monitor.views.dashboard.Sub2APIClient", FakeClient)
+    monkeypatch.setattr("monitor.balance_operations.Sub2APIClient", FakeClient)
     client = Client()
     headers, _response = jwt_login(client)
     response = client.post(
@@ -774,7 +774,7 @@ def test_applying_exhausted_contract_sets_global_balance_to_zero(monkeypatch):
             calls.append((user_id, balance))
             return balance
 
-    monkeypatch.setattr("monitor.views.dashboard.Sub2APIClient", FakeClient)
+    monkeypatch.setattr("monitor.balance_operations.Sub2APIClient", FakeClient)
     client = Client()
     headers, _response = jwt_login(client)
 

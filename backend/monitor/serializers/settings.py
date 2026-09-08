@@ -89,6 +89,7 @@ SETTINGS_FIELDS = (
     "safety_factor",
     "daily_estimate_min_percent_span",
     "local_poll_minutes",
+    "auto_apply_recommendations",
     "progress_threshold_percent",
     "active_max_calibration_hours",
     "reset_proximity_minutes",

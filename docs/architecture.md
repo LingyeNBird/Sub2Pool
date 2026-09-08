@@ -8,7 +8,7 @@
 Sub2API 只读用量 ─┐
 CPA usage 订阅 ───┼─> 采样证据 ─> 区间识别 ─> 账本重放 ─> 读取投影
 上游整数百分比 ───┘                                  ├─> API/页面
-                                                     └─> 人工余额建议（仅 Sub2API）
+                                                     └─> 余额建议（仅 Sub2API）
 ```
 
 ## 模块责任
@@ -20,6 +20,7 @@ CPA usage 订阅 ───┼─> 采样证据 ─> 区间识别 ─> 账本重�
 - `monitor.history_state`：账号级 fact revision、lease 与 fencing token。
 - `monitor.accounting`：识别归属区间，重放时变账本，保存兼容现有读取路径的 legacy live projection。
 - `monitor.reporting`：把已有事实和账本投影为首页、统计和参与者数据，不改写账本。
+- `monitor.balance_operations`：手动和定时应用共用余额写入服务及原有操作日志。自动任务每轮读取一次设置，按建议层的 `needs_manual_update` 消费待应用建议，不额外复查完整性、金额、已应用状态或参与者是否消失；账号租约被占用就直接跳过，不等待、不重试、不计作应用失败。预期业务错误按参与者记录，其他异常交给外层任务报告。`runmonitor` 复用 `local_poll_minutes` 调度，不另设定时器；本轮中关闭自动应用或暂停监控，从下一轮自动任务生效。迁移 `0053` 为已有安装一次性开启，后续保留用户设置。
 - `monitor.views`：鉴权、校验和 HTTP 编排，不实现计算公式。
 - Vue 前端：展示本地计划、blocker 和后端重放结论，不重复实现后端算法。
 
@@ -40,7 +41,7 @@ CPA usage 订阅 ───┼─> 采样证据 ─> 区间识别 ─> 账本重�
 3. 当前仍可查询的请求日志不能证明历史 retention 完整；缺失的历史 FAST 或请求数事实保持 unknown。
 4. 维护 apply 必须只消费持久化 plan，零联网，并在同一事务内完成全点审计和 legacy projection 重放；不得改写来源成本。
 5. 所有来源事实写入由 fact revision、lease 和 fencing token 协调；旧 owner 不得在租约失效后提交。
-6. 算法不能调用 Sub2API 写接口；写余额只允许管理员显式操作。CPA 账号不创建参与者、余额、建议或人工额度调整。
+6. 算法和重放不能调用 Sub2API 写接口；写余额由管理员手动触发，或在自动应用开关开启时由定时任务消费当前有效建议。CPA 账号不创建参与者、余额、建议或人工额度调整。
 7. 合同权益不参与消费事实推断，不得用当前参与者策略发明历史用户或 policy。
 8. 未解释成本必须显式保留，不能静默分给已绑定参与者。
 9. 相同原始数据、算法/构建版本和配置必须产生相同 legacy read projection。
