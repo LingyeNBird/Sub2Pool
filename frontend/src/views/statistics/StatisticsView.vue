@@ -3,7 +3,6 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import CPAModelPricingDialog from "@/components/common/CPAModelPricingDialog.vue";
 
-import CPARequestsCard from "./components/CPARequestsCard.vue";
 import CPAPoolCard from "@/components/common/CPAPoolCard.vue";
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import { ApiError, api } from "@/services/api";
@@ -38,7 +37,6 @@ const auth = useAuthStore();
 const pricingDialog = ref<InstanceType<typeof CPAModelPricingDialog> | null>(
   null,
 );
-const pricingRevision = ref(0);
 const unpricedCount = computed(
   () =>
     data.value?.cpa_api_key_series.reduce(
@@ -46,13 +44,7 @@ const unpricedCount = computed(
       0,
     ) ?? 0,
 );
-function showRequests() {
-  const element = document.getElementById("cpa-requests");
-  element?.scrollIntoView({ behavior: "smooth", block: "start" });
-  element?.focus({ preventScroll: true });
-}
 function pricesSaved() {
-  pricingRevision.value++;
   void load();
 }
 const accounts = ref<MonitoredAccount[]>([]);
@@ -148,7 +140,14 @@ onMounted(initialize);
       <AppIcon name="arrow-path" class="size-4" />刷新
     </button>
     <template v-if="data?.account.provider === 'cpa'">
-      <button class="btn btn-sm" @click="showRequests">请求明细</button>
+      <RouterLink
+        class="btn btn-sm"
+        :to="{
+          path: '/cpa-requests',
+          query: { account_id: selectedAccountId },
+        }"
+        >请求明细<AppIcon name="arrow-up-tray" class="size-4"
+      /></RouterLink>
       <button
         v-if="auth.isStaff"
         class="btn btn-sm"
@@ -198,11 +197,6 @@ onMounted(initialize);
     @show-closing-basis="showClosingBasis"
   />
   <CPAPoolCard v-if="data?.cpa_summary" :data="data.cpa_summary" />
-  <CPARequestsCard
-    v-if="data?.account.provider === 'cpa'"
-    :account-id="data.account.id"
-    :refresh-key="pricingRevision"
-  />
   <ParticipantUsageCard
     v-model:days="usageDays"
     v-model:precision="usagePrecision"

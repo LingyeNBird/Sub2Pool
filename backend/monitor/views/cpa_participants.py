@@ -15,6 +15,7 @@ from ..cpa.participants import (
     unbind_key,
 )
 from ..cpa.reporting import pool_summary
+from ..cpa.request_summary import request_summary
 from ..cpa.usage import cpa_event_cost
 from ..models import (
     AppSettings,
@@ -217,10 +218,12 @@ class CPARequestQuery(serializers.Serializer):
     ended_at = serializers.DateTimeField(required=False)
     page = serializers.IntegerField(default=1, min_value=1)
     page_size = serializers.IntegerField(default=50, min_value=1, max_value=100)
+    include_summary = serializers.BooleanField(default=False)
+    days = serializers.IntegerField(default=7, min_value=1, max_value=90)
 
     def validate(self, attrs):
         end = attrs.get("ended_at", timezone.now())
-        start = attrs.get("started_at", end - timedelta(days=7))
+        start = attrs.get("started_at", end - timedelta(days=attrs["days"]))
         if start >= end or end - start > timedelta(days=90):
             raise serializers.ValidationError("请求查询时间范围须大于零且不超过 90 天")
         attrs.update(started_at=start, ended_at=end)
@@ -303,6 +306,9 @@ class CPARequestsView(CPAReadView):
                 "account_id": account.id,
                 "items": rows,
                 "total": count,
+                "summary": request_summary(events, config) if params["include_summary"] else None,
+                "started_at": params["started_at"].isoformat(),
+                "ended_at": params["ended_at"].isoformat(),
                 "page": params["page"],
                 "page_size": params["page_size"],
                 "keys": key_options,

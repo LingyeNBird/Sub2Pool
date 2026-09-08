@@ -56,7 +56,7 @@ export const pagePermissionGroups: PagePermissionGroup[] = [
       {
         code: "statistics",
         label: "额度统计",
-        description: "查看容量和参与者用量统计",
+        description: "查看容量、参与者用量及本人 CPA 请求明细",
       },
     ],
   },

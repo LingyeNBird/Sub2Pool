@@ -444,15 +444,53 @@ export function handleCPA({
       events = events.filter(
         (e) => e.failed === (params.get("failed") === "true"),
       );
-    if (params.get("started_at"))
-      events = events.filter(
-        (e) =>
-          Date.parse(e.occurred_at) >= Date.parse(params.get("started_at")!),
-      );
-    if (params.get("ended_at"))
-      events = events.filter(
-        (e) => Date.parse(e.occurred_at) < Date.parse(params.get("ended_at")!),
-      );
+    const endedAt = params.get("ended_at") || state.clock;
+    const startedAt =
+      params.get("started_at") ||
+      new Date(
+        Date.parse(endedAt) - Number(params.get("days") || 7) * 86400000,
+      ).toISOString();
+    if (
+      !Number.isFinite(Date.parse(startedAt)) ||
+      !Number.isFinite(Date.parse(endedAt)) ||
+      Date.parse(startedAt) >= Date.parse(endedAt) ||
+      Date.parse(endedAt) - Date.parse(startedAt) > 90 * 86400000
+    )
+      return fail("请求查询时间范围须大于零且不超过 90 天");
+    events = events.filter(
+      (e) => e.occurred_at >= startedAt && e.occurred_at < endedAt,
+    );
+    const sum = (
+      field:
+        | "input_tokens"
+        | "cached_input_tokens"
+        | "output_tokens"
+        | "reasoning_tokens"
+        | "total_tokens"
+        | "usage_usd",
+    ) => events.reduce((total, event) => total + event[field], 0);
+    const average = (field: "latency_ms" | "ttft_ms") => {
+      const observed = events.filter((e) => e[field] > 0);
+      return observed.length
+        ? observed.reduce((total, e) => total + e[field], 0) / observed.length
+        : null;
+    };
+    const summary =
+      params.get("include_summary") === "true"
+        ? {
+            request_count: events.length,
+            failed_count: events.filter((e) => e.failed).length,
+            input_tokens: sum("input_tokens"),
+            cached_input_tokens: sum("cached_input_tokens"),
+            output_tokens: sum("output_tokens"),
+            reasoning_tokens: sum("reasoning_tokens"),
+            total_tokens: sum("total_tokens"),
+            usage_usd: sum("usage_usd"),
+            unpriced_request_count: events.filter((e) => e.unpriced).length,
+            average_latency_ms: average("latency_ms"),
+            average_ttft_ms: average("ttft_ms"),
+          }
+        : null;
     events.sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
     const page = Math.max(1, Number(params.get("page") ?? 1));
     const size = Math.min(
@@ -463,6 +501,9 @@ export function handleCPA({
       account_id: accountId,
       items: events.slice((page - 1) * size, page * size),
       total: events.length,
+      summary,
+      started_at: startedAt,
+      ended_at: endedAt,
       page,
       page_size: size,
       keys,

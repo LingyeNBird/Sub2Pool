@@ -112,7 +112,23 @@ export interface CPARequest {
   requested_service_tier: string;
   response_service_tier: string;
 }
+export interface CPARequestSummary {
+  request_count: number;
+  failed_count: number;
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  unpriced_request_count: number;
+  usage_usd: number;
+  average_latency_ms: number | null;
+  average_ttft_ms: number | null;
+}
 export interface CPARequests {
+  summary: CPARequestSummary | null;
+  started_at: string;
+  ended_at: string;
   account_id: number;
   items: CPARequest[];
   total: number;

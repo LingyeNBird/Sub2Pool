@@ -70,6 +70,12 @@ export const navigation: NavigationGroup[] = [
     permission: "statistics",
   },
   {
+    label: "CPA 请求明细",
+    icon: "queue-list",
+    to: "/cpa-requests",
+    permission: "statistics",
+  },
+  {
     label: "通知记录",
     icon: "bell",
     to: "/notifications",

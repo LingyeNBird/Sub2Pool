@@ -123,6 +123,16 @@ def cpa_schemas():
                 "account_id": integer,
                 "items": _array({"$ref": "#/components/schemas/CPARequest"}),
                 "total": integer,
+                "started_at": time,
+                "ended_at": time,
+                "summary": {"oneOf": [
+                    _object({
+                        **{name: integer for name in ("request_count", "failed_count", "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens", "total_tokens", "unpriced_request_count")},
+                        "usage_usd": number,
+                        "average_latency_ms": {"type": ["number", "null"]},
+                        "average_ttft_ms": {"type": ["number", "null"]},
+                    }), {"type": "null"}
+                ], "description": "include_summary=true 时返回整个授权筛选范围的汇总，不受分页限制；缺失耗时不计入均值。"},
                 "page": integer,
                 "page_size": integer,
                 "cost_estimate": boolean,
@@ -152,6 +162,8 @@ def cpa_paths():
                     ("participant_id", {"type": "integer", "minimum": 1}),
                     ("key_id", {"type": "integer", "minimum": 1}),
                     ("model", {"type": "string"}),
+                    ("include_summary", {"type": "boolean", "default": False}),
+                    ("days", {"type": "integer", "minimum": 1, "maximum": 90, "default": 7}),
                     ("failed", {"type": "boolean"}),
                     ("started_at", {"type": "string", "format": "date-time"}),
                     ("ended_at", {"type": "string", "format": "date-time"}),

@@ -56,6 +56,12 @@ export const appRoutes: RouteRecordRaw[] = [
     meta: pageMeta("额度统计", "statistics"),
   },
   {
+    path: "cpa-requests",
+    name: "cpa-requests",
+    component: () => import("@/views/cpa-requests/CPARequestsView.vue"),
+    meta: pageMeta("CPA 请求明细", "statistics"),
+  },
+  {
     path: "notifications",
     name: "notifications",
     component: () => import("@/views/transactions/logs/Logs.vue"),
