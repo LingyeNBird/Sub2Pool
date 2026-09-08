@@ -6,7 +6,7 @@ import type { CPAAccountOption, MonitoredAccount } from "@/types/accounts";
 import type { AppSettingsData, CPAModelPricing } from "@/types/settings";
 
 import AccountCapacityEditor from "./AccountCapacityEditor.vue";
-import CPAModelPricingDialog from "./CPAModelPricingDialog.vue";
+import CPAModelPricingDialog from "@/components/common/CPAModelPricingDialog.vue";
 
 const settings = defineModel<AppSettingsData>("settings", { required: true });
 const managementKey = defineModel<string>("managementKey", { required: true });
@@ -443,5 +443,6 @@ function addSelectedAccount() {
     ref="pricingDialog"
     :pricing="settings.cpa_model_pricing"
     :save-pricing="props.savePricing"
+    @saved="settings.cpa_model_pricing = $event"
   />
 </template>

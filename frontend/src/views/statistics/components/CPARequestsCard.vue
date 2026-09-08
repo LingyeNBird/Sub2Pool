@@ -8,7 +8,7 @@ import { formatCurrency } from "@/utils/formatters";
 
 const formatDateTime = useDateTime();
 const toIso = useZonedDateTimeIso();
-const props = defineProps<{ accountId: number }>();
+const props = defineProps<{ accountId: number; refreshKey?: number }>();
 const auth = useAuthStore();
 const data = ref<CPARequests | null>(null);
 const loading = ref(false);
@@ -52,6 +52,7 @@ function search() {
   page.value = 1;
   void load();
 }
+watch(() => props.refreshKey, search);
 function paginate(delta: number) {
   page.value += delta;
   void load();
@@ -70,6 +71,8 @@ watch(
 
 <template>
   <section
+    id="cpa-requests"
+    tabindex="-1"
     class="card col-span-12 min-w-0 bg-base-200 shadow-xs"
     data-testid="cpa-requests"
   >

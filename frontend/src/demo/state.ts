@@ -55,7 +55,7 @@ export interface DemoPeriod {
 
 export interface DemoState {
   cpa?: DemoCPAState;
-  version: 16;
+  version: 17;
   clock: string;
   nextParticipantId: number;
   nextPoolId: number;
@@ -83,7 +83,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 16) {
+      if (parsed.version === 17) {
         initializeCPADemo(parsed);
         return parsed;
       }

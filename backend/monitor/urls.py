@@ -81,8 +81,10 @@ from .views.users import (
 )
 
 from .views.research import ResearchSettingsView, ResearchRunView
+from .views.cpa_pricing import CPAPricingView
 
 urlpatterns = [
+    path("settings/cpa-pricing", CPAPricingView.as_view()),
     path("settings/research", ResearchSettingsView.as_view()),
     path("settings/research/run", ResearchRunView.as_view()),
     path("health", HealthView.as_view()),

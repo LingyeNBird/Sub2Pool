@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
+import { useAuthStore } from "@/stores/auth";
+import CPAModelPricingDialog from "@/components/common/CPAModelPricingDialog.vue";
 
 import CPARequestsCard from "./components/CPARequestsCard.vue";
 import CPAPoolCard from "@/components/common/CPAPoolCard.vue";
@@ -32,6 +34,27 @@ interface APIUsageDialogHandle {
 }
 
 const data = ref<StatisticsData | null>(null);
+const auth = useAuthStore();
+const pricingDialog = ref<InstanceType<typeof CPAModelPricingDialog> | null>(
+  null,
+);
+const pricingRevision = ref(0);
+const unpricedCount = computed(
+  () =>
+    data.value?.cpa_api_key_series.reduce(
+      (sum, row) => sum + row.unpriced_request_count,
+      0,
+    ) ?? 0,
+);
+function showRequests() {
+  const element = document.getElementById("cpa-requests");
+  element?.scrollIntoView({ behavior: "smooth", block: "start" });
+  element?.focus({ preventScroll: true });
+}
+function pricesSaved() {
+  pricingRevision.value++;
+  void load();
+}
 const accounts = ref<MonitoredAccount[]>([]);
 const selectedAccountId = ref<number | null>(null);
 const loading = ref(true);
@@ -124,6 +147,16 @@ onMounted(initialize);
     <button class="btn btn-sm" :disabled="loading" @click="load">
       <AppIcon name="arrow-path" class="size-4" />刷新
     </button>
+    <template v-if="data?.account.provider === 'cpa'">
+      <button class="btn btn-sm" @click="showRequests">请求明细</button>
+      <button
+        v-if="auth.isStaff"
+        class="btn btn-sm"
+        @click="pricingDialog?.open()"
+      >
+        模型价格
+      </button>
+    </template>
   </PageShellHeader>
 
   <div v-if="message" class="col-span-12 alert alert-error">
@@ -131,6 +164,31 @@ onMounted(initialize);
     <span>{{ message }}</span>
   </div>
 
+  <div
+    v-if="data?.account.provider === 'cpa' && unpricedCount"
+    class="col-span-12 alert alert-warning"
+    role="status"
+  >
+    <div>
+      <p>
+        当前统计范围内 {{ unpricedCount }} 次请求缺少模型定价，费用尚未计入。
+      </p>
+      <p class="text-sm">
+        {{
+          auth.isStaff
+            ? "可查看缺价模型并同步基础价格，保存后自动重算历史。"
+            : "请联系管理员同步模型价格。"
+        }}
+      </p>
+    </div>
+    <button
+      v-if="auth.isStaff"
+      class="btn btn-sm"
+      @click="pricingDialog?.open(true)"
+    >
+      一键同步缺失价格
+    </button>
+  </div>
   <CapacityOverviewCard
     v-model:period="capacityPeriod"
     v-model:days="capacityDays"
@@ -143,6 +201,7 @@ onMounted(initialize);
   <CPARequestsCard
     v-if="data?.account.provider === 'cpa'"
     :account-id="data.account.id"
+    :refresh-key="pricingRevision"
   />
   <ParticipantUsageCard
     v-model:days="usageDays"
@@ -157,4 +216,10 @@ onMounted(initialize);
     :show-corrections="data?.account?.provider !== 'cpa'"
   />
   <APIUsageBreakdownDialog ref="apiUsageDialog" />
+  <CPAModelPricingDialog
+    v-if="auth.isStaff"
+    ref="pricingDialog"
+    :account-id="selectedAccountId ?? undefined"
+    @saved="pricesSaved"
+  />
 </template>

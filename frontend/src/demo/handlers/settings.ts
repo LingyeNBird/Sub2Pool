@@ -1,3 +1,4 @@
+import { repriceCPADemo } from "../cpa";
 import type { MonitoredAccount } from "@/types/accounts";
 import type {
   AppSettingsData,
@@ -224,6 +225,7 @@ export function handleSettings({
           | FastCorrectionRule[];
       }
     }
+    repriceCPADemo(state);
     saveDemoState(state);
     return ok(state.settings);
   }

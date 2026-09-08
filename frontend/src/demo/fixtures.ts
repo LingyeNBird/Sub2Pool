@@ -225,6 +225,7 @@ function baseSettings(): AppSettingsData {
     cpa_double_billing_threshold_tokens: 272000,
     cpa_double_billing_multiplier: 2,
     cpa_model_pricing: {
+      "gpt-5.4": { input: "2.5", cached_input: "0.25", output: "15" },
       "gpt-5-codex": {
         input: "1.25",
         cached_input: "0.125",
@@ -369,7 +370,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 16,
+    version: 17,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextPoolId: 2,

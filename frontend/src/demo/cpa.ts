@@ -1,3 +1,4 @@
+import type { CPAPricingInventory, CPAPricingSync } from "@/types/cpaPricing";
 import type {
   CPAKeys,
   CPARequest,
@@ -82,7 +83,7 @@ export function initializeCPADemo(state: DemoState) {
       occurred_at: new Date(anchor - (84 - i) * 1800000).toISOString(),
       request_id: `demo-cpa-request-${i + 1}`,
       api_key_hint: String(1001 + owner),
-      model: "gpt-5.4",
+      model: owner === 3 ? "gpt-6-astra" : "gpt-5.4",
       endpoint: "/v1/responses",
       input_tokens: 9000 + i * 70,
       cached_input_tokens: 3000,
@@ -92,13 +93,80 @@ export function initializeCPADemo(state: DemoState) {
       failed: i % 17 === 0,
       latency_ms: 1800 + i * 15,
       ttft_ms: 210 + i,
-      usage_usd: Number((0.14 + i * 0.004).toFixed(4)),
+      usage_usd: 0,
       unpriced: false,
       requested_service_tier: "",
       response_service_tier: "default",
     };
   });
   state.cpa = { keys, events, claims: [] };
+  repriceCPADemo(state);
+}
+
+function demoPrice(state: DemoState, model: string) {
+  const pricing = state.settings.cpa_model_pricing;
+  const name = model in pricing ? model : model.replace(/-latest$/i, "");
+  return pricing[name] ? { name, price: pricing[name] } : null;
+}
+
+export function repriceCPADemo(state: DemoState) {
+  for (const event of state.cpa?.events ?? []) {
+    const match = demoPrice(state, event.model);
+    event.unpriced = !match;
+    const cached = Math.min(event.input_tokens, event.cached_input_tokens);
+    const fast = ["fast", "priority"].includes(
+      event.response_service_tier || event.requested_service_tier,
+    )
+      ? Number(state.settings.cpa_fast_multiplier)
+      : 1;
+    const context =
+      state.settings.cpa_double_billing_enabled &&
+      event.input_tokens >
+        Number(state.settings.cpa_double_billing_threshold_tokens)
+        ? Number(state.settings.cpa_double_billing_multiplier)
+        : 1;
+    event.usage_usd = match
+      ? (((event.input_tokens - cached) * Number(match.price.input) +
+          cached * Number(match.price.cached_input) +
+          event.output_tokens * Number(match.price.output)) /
+          1_000_000) *
+        fast *
+        context
+      : 0;
+  }
+}
+
+function demoPricingInventory(
+  state: DemoState,
+  accountId: number | null,
+): CPAPricingInventory {
+  const groups = new Map<string, CPAPricingInventory["models"][number]>();
+  for (const event of state.cpa?.events ?? []) {
+    if (accountId != null && event.account_id !== accountId) continue;
+    const match = demoPrice(state, event.model);
+    const row = groups.get(event.model) ?? {
+      model: event.model,
+      request_count: 0,
+      token_count: 0,
+      missing: !match,
+      pricing_model: match?.name ?? null,
+    };
+    row.request_count++;
+    row.token_count += event.total_tokens;
+    groups.set(event.model, row);
+  }
+  const models = [...groups.values()];
+  return {
+    pricing: state.settings.cpa_model_pricing,
+    models,
+    missing_model_count: models.filter((row) => row.missing).length,
+    unpriced_request_count: models
+      .filter((row) => row.missing)
+      .reduce((sum, row) => sum + row.request_count, 0),
+    source: "models.dev（演示快照）",
+    source_url: "https://models.dev/api.json",
+    generated_at: state.clock,
+  };
 }
 
 function ownIds(state: DemoState) {
@@ -141,6 +209,7 @@ export function demoCPASummary(
     unpriced_request_count: events.filter((e) => e.unpriced).length,
   });
   const events = state.cpa!.events.filter((e) => e.account_id === accountId);
+  const quotaAvailable = !events.some((e) => e.unpriced);
   const members = pool.allocations.flatMap((allocation) => {
     const person = state.participants.find(
       (p) => p.id === allocation.participant_id,
@@ -156,23 +225,25 @@ export function demoCPASummary(
         participant_name: person.name,
         is_self: own != null && own.includes(person.id),
         share_percent: allocation.share_percent,
-        quota_available: true,
-        is_overused: remaining < 0,
-        expected_entitlement_usd: expected,
-        consumed_entitlement_usd: totals.usage_usd,
-        remaining_entitlement_usd: remaining,
+        quota_available: quotaAvailable,
+        is_overused: quotaAvailable && remaining < 0,
+        expected_entitlement_usd: quotaAvailable ? expected : null,
+        consumed_entitlement_usd: quotaAvailable ? totals.usage_usd : null,
+        remaining_entitlement_usd: quotaAvailable ? remaining : null,
         account_breakdowns: [
           {
             account_id: accountId,
-            quota_available: true,
+            quota_available: quotaAvailable,
             quota_as_of: state.clock,
-            charged_percent: totals.usage_usd / 20,
-            remaining_share_percent: Math.max(0, remaining / 20),
+            charged_percent: quotaAvailable ? totals.usage_usd / 20 : null,
+            remaining_share_percent: quotaAvailable
+              ? Math.max(0, remaining / 20)
+              : null,
             usage_usd: totals.usage_usd,
-            estimated_capacity_usd: 2000,
-            expected_entitlement_usd: expected,
-            consumed_entitlement_usd: totals.usage_usd,
-            remaining_entitlement_usd: remaining,
+            estimated_capacity_usd: quotaAvailable ? 2000 : null,
+            expected_entitlement_usd: quotaAvailable ? expected : null,
+            consumed_entitlement_usd: quotaAvailable ? totals.usage_usd : null,
+            remaining_entitlement_usd: quotaAvailable ? remaining : null,
           },
         ],
       },
@@ -199,7 +270,7 @@ export function demoCPASummary(
           Date.parse(state.clock) + 4 * 86400000,
         ).toISOString(),
         coverage: { complete: true, uncertain_end: false, gaps: [] },
-        quota_available: true,
+        quota_available: quotaAvailable,
       },
     ],
     unattributed: sum(events.filter((e) => e.participant_id == null)),
@@ -304,6 +375,47 @@ export function handleCPA({
   ok,
   fail,
 }: DemoRequestContext): Response | null {
+  if (pathname === "settings/cpa-pricing") {
+    if (!demoIdentity()?.is_staff) return fail("仅管理员可管理模型价格", 403);
+    const accountId = url.searchParams.has("account_id")
+      ? Number(url.searchParams.get("account_id"))
+      : null;
+    if (
+      accountId != null &&
+      !state.monitoredAccounts.some(
+        (a) => a.id === accountId && a.provider === "cpa",
+      )
+    )
+      return fail("CPA 账号不存在", 404);
+    const inventory = demoPricingInventory(state, accountId);
+    if (method === "GET") return ok(inventory);
+    if (method !== "POST") return fail("不支持此操作", 405);
+    const added: CPAPricingSync["added"] = [];
+    const unresolved: CPAPricingSync["unresolved"] = [];
+    // Deterministic public-catalog snapshot; demo mode never contacts a service.
+    const catalog = {
+      "gpt-6-astra": { input: "10", cached_input: "1", output: "50" },
+      "gpt-5.4": { input: "2.5", cached_input: "0.25", output: "15" },
+    };
+    for (const row of inventory.models.filter((row) => row.missing)) {
+      const price = catalog[row.model as keyof typeof catalog];
+      if (price) {
+        state.settings.cpa_model_pricing[row.model] = { ...price };
+        added.push({
+          model: row.model,
+          source_model: `openai/${row.model}`,
+          price,
+        });
+      } else
+        unresolved.push({
+          model: row.model,
+          reason: "演示目录未收录此模型，请手动填写",
+        });
+    }
+    repriceCPADemo(state);
+    saveDemoState(state);
+    return ok({ ...demoPricingInventory(state, accountId), added, unresolved });
+  }
   if (!pathname.startsWith("cpa/")) return null;
   const cpa = state.cpa!;
   const admin = demoIdentity()?.is_staff;
