@@ -674,7 +674,7 @@ def test_manual_stop_restores_normal_suggestions_and_never_carries_later(riders,
     assert client.delete(url, body, format="json").status_code == 200
     assert active_session(config) is None
     assert not burst_payload()["can_stop"]
-    assert not burst_payload()["can_start"]
+    assert burst_payload()["can_start"]
     assert sampling_policy(account, config)[1] is False
     actual = [aggregate_recommendation(person, config)[0]["recommended_balance_usd"] for person in people]
     assert actual == normal
@@ -717,3 +717,33 @@ def test_stop_after_first_rollover_cancels_other_accounts_and_open_credits(rider
                    second_old.upstream_resets_at + timedelta(days=7), [0, 0, 0])
     reconcile_account(second, later, config)
     assert not TemporaryBurstCycle.objects.filter(session=session, settled_at__isnull=True).exists()
+
+
+@pytest.mark.parametrize("carryover", [True, False])
+def test_same_cycle_restart_settles_only_the_new_round(riders, carryover):
+    from monitor.temporary_burst import stop_session, burst_payload
+
+    config, account, people, old = riders
+    first = start_session(True)
+    stop_session(first.pk)
+    cancelled = TemporaryBurstCycle.objects.get(session=first)
+    cancelled_state = (cancelled.settled_at, cancelled.settlement_context.copy())
+    assert burst_payload()["can_start"]
+    second = start_session(carryover)
+    assert second.pk != first.pk
+    assert not burst_payload()["can_start"]
+    with pytest.raises(ValueError):
+        start_session(carryover)
+    assert TemporaryBurstCycle.objects.filter(account=account, resets_at=old.upstream_resets_at).count() == 2
+    assert all(aggregate_recommendation(person, config)[0]["recommended_balance_usd"] == 9999 for person in people)
+    new = record(account, people, old.upstream_resets_at + timedelta(minutes=1),
+                 old.upstream_resets_at + timedelta(days=7), [0, 0, 0])
+    reconcile_account(account, new, config)
+    reconcile_account(account, new, config)
+    expected = [67, 17, 16] if carryover else [50, 25, 25]
+    for person, share in zip(people, expected):
+        assert aggregate_recommendation(person, config)[0]["sources"][0]["effective_share_percent"] == share
+    cancelled.refresh_from_db()
+    assert (cancelled.settled_at, cancelled.settlement_context) == cancelled_state
+    assert cancelled.settlement == []
+    assert TemporaryBurstCycle.objects.filter(session=second, is_burst_cycle=False).count() == int(carryover)

@@ -111,7 +111,7 @@ async function stop() {
   if (
     !(await confirmation.value?.open({
       title: "你确定提前终止爽蹬吗？",
-      message: `立即恢复普通额度建议，停止本轮加速采样和提醒，并取消本轮全部后续结转。已经超用的部分不追账，也不补偿少用者。此操作不可撤销，本周期不能再次开启。\n\n${data.value.auto_apply ? "系统将尝试自动应用普通余额建议；失败项需手动重试。" : "结束后请手动应用普通余额建议，收回上游的高余额。仅结束模式不会直接改动上游余额。"}`,
+      message: `立即恢复普通额度建议，停止本轮加速采样和提醒，并取消本轮全部后续结转。已经超用的部分不追账，也不补偿少用者。此操作不可撤销，结束后可重新选择模式并开启。\n\n${data.value.auto_apply ? "系统将尝试自动应用普通余额建议；失败项需手动重试。" : "结束后请手动应用普通余额建议，收回上游的高余额。仅结束模式不会直接改动上游余额。"}`,
       confirmLabel: "确认提前终止",
       tone: "error",
     }))
@@ -335,11 +335,7 @@ defineExpose({ refresh });
         v-if="data && !data.active && !data.can_start"
         class="text-sm text-warning"
       >
-        {{
-          data.terminated_at
-            ? "本轮已提前终止，本周期不能再次开启。"
-            : "仍有账号等待原周期结束；完成后才能开始新一轮。"
-        }}
+        仍有账号等待原周期结束；完成或提前终止后才能开始新一轮。
       </p>
       <details
         v-for="cycle in data?.cycles"

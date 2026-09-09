@@ -36,7 +36,7 @@ class TemporaryBurstCycle(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["account", "resets_at"], name="unique_burst_account_cycle"
+                fields=["session", "account", "resets_at"], name="unique_burst_session_account_cycle"
             )
         ]
         indexes = [

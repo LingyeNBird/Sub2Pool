@@ -479,8 +479,8 @@ def reconcile_account(account, observation, config):
             TemporaryBurstCycle.objects.get_or_create(
                 account=account,
                 resets_at=observation.upstream_resets_at,
+                session=cycle.session,
                 defaults={
-                    "session": cycle.session,
                     "quota_model": config.weekly_quota_model,
                     "members": next_members,
                 },
@@ -537,8 +537,8 @@ def start_session(carryover_enabled):
                     {str(row["participant_id"]): row["user_id"] for row in members}
                 )
                 existing = cycle_for(account, observation)
-                if existing and existing.is_burst_cycle:
-                    raise ValueError(f"{account.name} 本周期已经开启过临时爽蹬")
+                if existing and existing.settled_at is not None:
+                    existing = None
                 captured.append((account, observation, members, existing))
             if TemporaryBurstCycle.objects.filter(
                 is_burst_cycle=True, settled_at__isnull=True
@@ -643,12 +643,6 @@ def burst_payload():
             "interval_seconds": seconds,
             "accelerated": accelerated,
         })
-    original_cycle_open = any(
-        cycle.is_burst_cycle
-        and (latest := _latest(cycle.account)) is not None
-        and not official_reset_advanced(latest.upstream_resets_at, cycle.resets_at)
-        for cycle in cycles
-    )
     return {
         "carryover_enabled": session.carryover_enabled if session else None,
         "terminated_at": session.terminated_at if session else None,
@@ -666,7 +660,7 @@ def burst_payload():
         "auto_apply": config.auto_apply_recommendations,
         "monitoring_enabled": config.monitoring_enabled,
         "recommended_balance_usd": float(BURST_BALANCE),
-        "can_start": active is None and not pending and not original_cycle_open,
+        "can_start": active is None and not pending,
         "enabled_account_count": len(accounts),
         "sampling": sampling,
         "reminder_enabled": bool(session and session.exhaustion_reminder_enabled and pending),

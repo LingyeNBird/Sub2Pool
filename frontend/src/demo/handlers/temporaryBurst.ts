@@ -212,12 +212,7 @@ export function refreshDemoBurst(state: DemoState, apply = false) {
   const pending = mode.cycles.some(
     (cycle) => cycle.is_burst_cycle && !cycle.settled_at,
   );
-  mode.can_start =
-    !mode.active &&
-    !pending &&
-    !mode.cycles.some(
-      (cycle) => cycle.is_burst_cycle && now < Date.parse(cycle.resets_at),
-    );
+  mode.can_start = !mode.active && !pending;
   mode.can_stop = !mode.terminated_at && (mode.active || pending);
   mode.reminder_email_ready = reminderEmailReady(state);
   if (!pending) mode.reminder_enabled = false;
