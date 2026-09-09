@@ -79,6 +79,9 @@ def _rebuild_capture(
             )
         else:
             rebuild_observation_suffix(observation, config, guard=guard)
+        from .temporary_burst import reconcile_account
+        observation.refresh_from_db()
+        reconcile_account(account, observation, config)
 
 
 @transaction.atomic

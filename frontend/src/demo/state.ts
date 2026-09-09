@@ -1,4 +1,5 @@
 import type { PagePermission } from "@/config/pagePermissions";
+import type { TemporaryBurstData } from "@/types/temporaryBurst";
 import type { MonitoredAccount } from "@/types/accounts";
 import type { Observation } from "@/types/observations";
 import type {
@@ -58,7 +59,7 @@ export interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 18;
+  version: 19;
   clock: string;
   nextParticipantId: number;
   nextPoolId: number;
@@ -80,6 +81,7 @@ export interface DemoState {
   settings: AppSettingsData;
   upstreamPricing: UpstreamPricingState;
   upstreamGroupPolicies: Record<number, UpstreamPricingPolicy | null>;
+  temporaryBurst: TemporaryBurstData | null;
   plans: HistoricalRebuildPlan[];
 }
 
@@ -88,7 +90,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 18) return parsed;
+      if (parsed.version === 19) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }

@@ -60,7 +60,14 @@ defineExpose({ open, close });
         </button>
       </form>
       <h2 class="mb-4 card-title text-xl">处理额度建议</h2>
-      <p class="mb-4 text-sm opacity-70">
+      <p
+        v-if="participant?.snapshot?.temporary_burst"
+        class="mb-4 text-sm text-warning"
+      >
+        临时爽蹬生效中：这次会把余额设为
+        9999，不是按剩余权益换算的正常建议；用量继续记账，换周期后恢复普通建议。
+      </p>
+      <p v-else class="mb-4 text-sm opacity-70">
         建议值是根据当前测算区间的历史消费结构换算后的 Sub2API 余额；未来模型或
         FAST 用法变化时，估计也会随采样调整。
       </p>

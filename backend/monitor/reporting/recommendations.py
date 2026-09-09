@@ -6,6 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from .common import iso
 from ..billing_correction.settlement import balance_conversion_factor
+from ..temporary_burst import BURST_BALANCE, active_session, adjustment_for, cycle_for, prior_cycle_usage
 from ..fast_correction.prefix import FastCorrectionPrefix
 from ..models import (
     AccountParticipant,
@@ -538,6 +539,7 @@ def _pool_source_values(
     share_percent: Decimal,
     *,
     correction_prefix: FastCorrectionPrefix | None = None,
+    charged_before: Decimal = ZERO,
 ) -> dict[str, Decimal]:
     (
         capacity_point,
@@ -547,6 +549,9 @@ def _pool_source_values(
         charged_lower,
         charged_upper,
     ) = _capacity_values(snapshot, config)
+    charged += charged_before
+    charged_lower += charged_before
+    charged_upper += charged_before
     remaining_lower = share_percent - charged_upper
     remaining_upper = share_percent - charged_lower
     expected_entitlement = share_percent * capacity_point / HUNDRED
@@ -775,6 +780,8 @@ def aggregate_recommendation(
     weighted_charged = ZERO
     total_capacity = ZERO
     correction_prefixes: dict[int, FastCorrectionPrefix] = {}
+    burst_session = active_session(config)
+    burst_active = bool(burst_session and burst_session.participant_users.get(str(participant.id)) == participant.sub2api_user_id)
     for account in accounts:
         allocation = allocation_by_pool_id[account.pool_id]
         snapshot = latest_snapshot(participant, account)
@@ -792,6 +799,8 @@ def aggregate_recommendation(
             else None
         )
         source = {
+            "carry_adjustment_percent": 0.0,
+            "effective_share_percent": float(allocation.share_percent),
             "account_id": account.id,
             "external_account_id": account.external_account_id,
             "account_name": account.name,
@@ -817,11 +826,16 @@ def aggregate_recommendation(
             sources.append(source)
             continue
         source_snapshots.append(snapshot)
+        burst_cycle = cycle_for(account, snapshot.observation)
+        carry = adjustment_for(burst_cycle, participant)
+        source["carry_adjustment_percent"] = float(carry)
+        source["effective_share_percent"] = float(allocation.share_percent + carry)
         values = _pool_source_values(
             snapshot,
             config,
-            allocation.share_percent,
+            allocation.share_percent + carry,
             correction_prefix=correction_prefix,
+            charged_before=prior_cycle_usage(burst_cycle, participant, snapshot.observation.attribution_started_at),
         )
         source["net_position_usd"] = values["point"]
         source["net_position_min_usd"] = values["lower"]
@@ -857,22 +871,24 @@ def aggregate_recommendation(
         max(ZERO, net_upper) * safety_factor
     ).quantize(CENT, rounding=ROUND_HALF_UP)
     recommended = min(recommended_max, max(recommended_min, recommended))
+    if burst_active and complete:
+        recommended = recommended_min = recommended_max = BURST_BALANCE
     if complete:
         _allocate_contributions(
             sources,
-            net_key="net_position_usd",
+            net_key="estimated_capacity_usd" if burst_active else "net_position_usd",
             output_key="contribution_usd",
             total=recommended,
         )
         _allocate_contributions(
             sources,
-            net_key="net_position_min_usd",
+            net_key="estimated_capacity_usd" if burst_active else "net_position_min_usd",
             output_key="contribution_min_usd",
             total=recommended_min,
         )
         _allocate_contributions(
             sources,
-            net_key="net_position_max_usd",
+            net_key="estimated_capacity_usd" if burst_active else "net_position_max_usd",
             output_key="contribution_max_usd",
             total=recommended_max,
         )
@@ -935,6 +951,9 @@ def aggregate_recommendation(
         reason = "全局余额与所有已分配池的剩余权益区间差异较大"
     else:
         reason = "全局余额处于所有已分配池的合计建议区间内，无需调整"
+    if burst_active and complete:
+        reason = "临时爽蹬：本周期统一建议余额 9999，实际消耗继续记账；首个账号换周期后恢复正常建议"
+        needs_update = not applied and balance != BURST_BALANCE
 
     for source in sources:
         for key in (
@@ -954,6 +973,8 @@ def aggregate_recommendation(
                 source[key] = float(source[key])
     return (
         {
+            "temporary_burst": burst_active,
+            "temporary_burst_expires_at": burst_session.expires_at.isoformat() if burst_active else None,
             "participant_id": participant.id,
             "participant_name": participant.name,
             "pool_allocations": pool_contracts,

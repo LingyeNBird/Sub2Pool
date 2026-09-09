@@ -116,6 +116,11 @@ export const navigation: NavigationGroup[] = [
         exactQuery: true,
       },
       {
+        label: "临时爽蹬",
+        to: "/tutorial?page=temporary-burst",
+        exactQuery: true,
+      },
+      {
         label: "采样与校准",
         to: "/tutorial?page=collection",
         exactQuery: true,

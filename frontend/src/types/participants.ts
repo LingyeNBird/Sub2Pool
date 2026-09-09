@@ -53,6 +53,8 @@ export interface AggregateRecommendationSource {
   pool_name: string;
   pool_contract_revision: number;
   contract_share_percent: number;
+  carry_adjustment_percent?: number;
+  effective_share_percent?: number;
   snapshot: Snapshot | null;
   net_position_usd: number | null;
   net_position_min_usd: number | null;
@@ -74,6 +76,8 @@ export interface ParticipantPoolAllocation {
   account_count?: number;
 }
 export interface AggregateRecommendation {
+  temporary_burst?: boolean;
+  temporary_burst_expires_at?: string | null;
   participant_id: number;
   participant_name: string;
   pool_allocations: ParticipantPoolAllocation[];
