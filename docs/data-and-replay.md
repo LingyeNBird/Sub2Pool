@@ -24,7 +24,7 @@
 - 账号累计与相邻区间成本；
 - 完整 Sub2API 用户集合及逐用户累计、区间成本；
 - 参与者展示用趋势点和独立余额证据；
-- 若本次读取百分比，再写 `Observation` 与 FAST 父级/明细事实。
+- 若本次读取百分比，再写 `Observation`、计费来源/时期及原始请求捕获；新的 Sub2API 观测不生成本地 FAST 修正事实。
 
 只有整个事务成功后，point 才是 `write_status=complete`。它还保存 capture bounds、expected-user 数量与摘要、显式 residual 和 reconciliation 状态。任一步失败都会回滚整个事实组，不会留下“账号已写、用户只写一半”的采样点。
 

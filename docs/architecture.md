@@ -37,7 +37,7 @@ CPA usage 订阅 ───┼─> 采样证据 ─> 区间识别 ─> 账本重�
 ## 不变量
 
 1. 上游百分比、观测时间、窗口边界和已采集余额不可被算法覆盖；无法证明恢复的事实保持 unknown。
-2. 新采样的账号、完整用户集合、参与者趋势/余额及可选 observation/FAST 必须按一个 canonical point 原子提交。
+2. 新采样的账号、完整用户集合、参与者趋势/余额及可选 observation/原始请求捕获必须按一个 canonical point 原子提交；不再生成本地 FAST 修正。
 3. 当前仍可查询的请求日志不能证明历史 retention 完整；缺失的历史 FAST 或请求数事实保持 unknown。
 4. 维护 apply 必须只消费持久化 plan，零联网，并在同一事务内完成全点审计和 legacy projection 重放；不得改写来源成本。
 5. 所有来源事实写入由 fact revision、lease 和 fencing token 协调；旧 owner 不得在租约失效后提交。
