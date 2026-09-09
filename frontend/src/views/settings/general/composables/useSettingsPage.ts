@@ -22,6 +22,8 @@ import type {
   CPAModelPricing,
   HistoricalRebuildPlan,
   ReadOnlyAPIKeyGenerated,
+  UpstreamPricingPolicy,
+  UpstreamPricingState,
 } from "@/types/settings";
 
 export interface PasswordForm {
@@ -36,6 +38,7 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
   const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
   const auth = useAuthStore();
   const settings = ref<AppSettingsData | null>(null);
+  const upstreamPricing = ref<UpstreamPricingState | null>(null);
   const personalApiKey = ref<APIKeyState | null>(null);
   const loading = ref(true);
   const saving = ref("");
@@ -173,6 +176,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     try {
       if (auth.isStaff) {
         settings.value = await api<AppSettingsData>("settings");
+        upstreamPricing.value = await api<UpstreamPricingState>(
+          "settings/upstream-pricing",
+        );
         await loadMonitoredAccounts();
         if (settings.value.sub2api_token_configured) {
           await loadOpenAIAccounts(false);
@@ -388,50 +394,77 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     ]);
   }
 
-  async function saveBillingCorrection() {
-    if (!settings.value) return false;
+  async function changeUpstreamPricing(
+    action: "apply" | "revert",
+    policy?: UpstreamPricingPolicy,
+    groupIds?: number[],
+  ) {
+    if (!upstreamPricing.value) return false;
+    if (
+      action === "revert" &&
+      !(await confirmAction({
+        title: "撤回上游计费配置？",
+        message:
+          "将恢复所有仍被本服务接管分组的计费字段，不重新开启本地修正，也不会自动再次应用。",
+        confirmLabel: "确认撤回",
+        tone: "warning",
+      }))
+    )
+      return false;
     saving.value = "billing-correction";
     message.value = "";
     success.value = "";
     try {
-      const updated = await api<AppSettingsData>("settings", {
-        method: "PATCH",
-        body: jsonBody({
-          fast_correction_enabled: settings.value.fast_correction_enabled,
-          fast_correction_rules: settings.value.fast_correction_rules,
-          long_context_correction_enabled:
-            settings.value.long_context_correction_enabled,
-          long_context_correction_rules:
-            settings.value.long_context_correction_rules,
-          model_correction_enabled: settings.value.model_correction_enabled,
-          model_correction_rules: settings.value.model_correction_rules,
-        }),
-      });
-      settings.value.fast_correction_enabled = updated.fast_correction_enabled;
-      settings.value.fast_correction_rules = updated.fast_correction_rules;
-      settings.value.long_context_correction_enabled =
-        updated.long_context_correction_enabled;
-      settings.value.long_context_correction_rules =
-        updated.long_context_correction_rules;
-      settings.value.model_correction_enabled =
-        updated.model_correction_enabled;
-      settings.value.model_correction_rules = updated.model_correction_rules;
-      settings.value.correction_missing_intervals =
-        updated.correction_missing_intervals;
-      settings.value.fast_correction_rebuild_recommended =
-        updated.fast_correction_rebuild_recommended;
-      settings.value.fast_correction_missing_intervals =
-        updated.fast_correction_missing_intervals;
-      historyRebuildPlan.value = null;
-      success.value = "计费修正设置已保存";
+      upstreamPricing.value = await api<UpstreamPricingState>(
+        `settings/upstream-pricing/${action}`,
+        {
+          method: "POST",
+          body: jsonBody({
+            confirm: true,
+            policy,
+            group_ids: groupIds,
+            revision: upstreamPricing.value.revision,
+          }),
+        },
+      );
+      success.value =
+        action === "apply" ? "上游计费已应用并确认" : "上游计费已撤回";
       return true;
     } catch (error) {
       message.value =
-        error instanceof ApiError ? error.message : "保存 计费修正设置失败";
+        error instanceof ApiError ? error.message : "上游计费操作失败";
+      if (
+        !(
+          error instanceof ApiError &&
+          error.status === 400 &&
+          action === "apply"
+        )
+      ) {
+        try {
+          upstreamPricing.value = await api<UpstreamPricingState>(
+            "settings/upstream-pricing",
+          );
+        } catch {
+          message.value += "；状态刷新失败，请重新加载页面核对结果。";
+        }
+      }
       return false;
     } finally {
       saving.value = "";
     }
+  }
+
+  async function applyUpstreamPricing(
+    policy: UpstreamPricingPolicy,
+    groupIds: number[],
+  ) {
+    return (await changeUpstreamPricing("apply", policy, groupIds))
+      ? null
+      : message.value || "上游计费写入未完成";
+  }
+
+  function revertUpstreamPricing() {
+    return changeUpstreamPricing("revert");
   }
 
   function saveEmail() {
@@ -739,11 +772,46 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     }
   }
 
+  async function refreshUpstreamPricing() {
+    if (!auth.isStaff) return;
+    success.value = "";
+    try {
+      upstreamPricing.value = await api<UpstreamPricingState>(
+        "settings/upstream-pricing",
+      );
+    } catch (cause) {
+      message.value =
+        cause instanceof ApiError
+          ? cause.message
+          : "计费状态刷新失败，请重新加载页面核对。";
+    }
+  }
+
+  function recommendationsEnabled() {
+    if (settings.value) settings.value.auto_apply_recommendations = true;
+  }
+
   onMounted(async () => {
+    window.addEventListener(
+      "sub2pool:auto-apply-recommendations-enabled",
+      recommendationsEnabled,
+    );
+    window.addEventListener(
+      "sub2pool:upstream-pricing-changed",
+      refreshUpstreamPricing,
+    );
     await load();
     startCollectorStatusPolling();
   });
   onBeforeUnmount(() => {
+    window.removeEventListener(
+      "sub2pool:auto-apply-recommendations-enabled",
+      recommendationsEnabled,
+    );
+    window.removeEventListener(
+      "sub2pool:upstream-pricing-changed",
+      refreshUpstreamPricing,
+    );
     if (collectorStatusTimer !== null) {
       window.clearInterval(collectorStatusTimer);
     }
@@ -791,7 +859,9 @@ export function useSettingsPage(confirmAction: ConfirmAction) {
     saveNotifications,
     exportDatabase,
     importDatabase,
-    saveBillingCorrection,
+    upstreamPricing,
+    applyUpstreamPricing,
+    revertUpstreamPricing,
     createHistoricalRebuildPlan,
     applyHistoricalRebuildPlan,
     test,

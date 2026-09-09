@@ -124,9 +124,7 @@ async function load(clearMessage = true) {
     rows.value = observations.items;
     pagination.value = observations.pagination;
     Object.assign(summary, observations.summary);
-    fastCorrectionEnabled.value =
-      observations.corrections_available ??
-      observations.fast_correction_enabled;
+    fastCorrectionEnabled.value = observations.corrections_available;
     applySchedule(monitorSchedule);
   } catch (error) {
     message.value =

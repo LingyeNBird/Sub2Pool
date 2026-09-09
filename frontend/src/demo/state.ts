@@ -16,7 +16,12 @@ import type {
   NotificationRecord,
   SystemUser,
 } from "@/types/security";
-import type { AppSettingsData, HistoricalRebuildPlan } from "@/types/settings";
+import type {
+  AppSettingsData,
+  HistoricalRebuildPlan,
+  UpstreamPricingState,
+  UpstreamPricingPolicy,
+} from "@/types/settings";
 
 import { initializeState } from "./fixtures";
 
@@ -53,7 +58,7 @@ export interface DemoPeriod {
 }
 
 export interface DemoState {
-  version: 15;
+  version: 18;
   clock: string;
   nextParticipantId: number;
   nextPoolId: number;
@@ -73,6 +78,8 @@ export interface DemoState {
   blockedAddresses: BlockedIPAddress[];
   announcementReads: string[];
   settings: AppSettingsData;
+  upstreamPricing: UpstreamPricingState;
+  upstreamGroupPolicies: Record<number, UpstreamPricingPolicy | null>;
   plans: HistoricalRebuildPlan[];
 }
 
@@ -81,7 +88,7 @@ export function loadDemoState(): DemoState {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as DemoState;
-      if (parsed.version === 15) return parsed;
+      if (parsed.version === 18) return parsed;
     } catch {
       sessionStorage.removeItem(DEMO_STATE_KEY);
     }

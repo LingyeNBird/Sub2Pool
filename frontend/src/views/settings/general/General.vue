@@ -66,7 +66,9 @@ const {
   saveSampling,
   saveAutoApplyRecommendations,
   saveEmail,
-  saveBillingCorrection,
+  upstreamPricing,
+  applyUpstreamPricing,
+  revertUpstreamPricing,
   saveNotifications,
   exportDatabase,
   importDatabase,
@@ -203,9 +205,12 @@ async function handleRevokeReadOnlyAPIKey() {
       @save="saveAllocation"
     />
     <BillingCorrectionCard
-      v-model:settings="settings"
+      v-if="upstreamPricing"
+      :state="upstreamPricing"
+      :demo="demoMode"
       :saving="saving === 'billing-correction'"
-      :save="saveBillingCorrection"
+      :apply-policy="applyUpstreamPricing"
+      :revert-policy="revertUpstreamPricing"
     />
     <ResearchCard :demo="demoMode" />
     <SamplingStrategyCard

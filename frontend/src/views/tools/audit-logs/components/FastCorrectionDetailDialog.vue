@@ -91,7 +91,13 @@ defineExpose<DialogController<[Observation]> & { refresh: typeof refresh }>({
       <div v-else-if="message" class="mt-4 alert alert-error" role="alert">
         <span>{{ message }}</span>
       </div>
-      <template v-else-if="data">
+      <div v-else-if="data && data.correction_source !== 'local'" class="mt-5">
+        <p class="text-lg font-medium">{{ data.message }}</p>
+        <p class="mt-3 text-sm opacity-65">
+          此记录不叠加本地修正；计费状态变更会建立新的测算区间。
+        </p>
+      </div>
+      <template v-else-if="data && data.correction_source === 'local'">
         <p class="mt-1 text-sm opacity-60">
           {{ dateTime(data.started_at) }} 至 {{ dateTime(data.ended_at) }} ·
           {{ data.cost_basis_label }}口径
@@ -161,7 +167,7 @@ defineExpose<DialogController<[Observation]> & { refresh: typeof refresh }>({
         </div>
         <CorrectionDetails :breakdown="data" />
         <p class="mt-3 text-sm opacity-65">
-          有完整原始事实的区间按当前设置重算；修改规则不需要重新请求上游。未保存完整事实的旧记录保持可见并明确标记。
+          此历史区间按升级时冻结的规则计算；以后修改上游计费不会改变这里的结果。缺少原始事实的旧记录可单独补齐。
         </p>
         <div class="mt-4 overflow-x-auto">
           <table class="table table-sm">

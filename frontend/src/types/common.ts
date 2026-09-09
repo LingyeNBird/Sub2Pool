@@ -12,6 +12,7 @@ export interface SelectOption {
   value: string;
   label: string;
 }
+export type CorrectionSource = "local" | "upstream" | "none";
 /** Additive fields also accept legacy FAST-only responses during upgrades. */
 export interface CorrectionBreakdown {
   fast_correction_usd?: number | null;

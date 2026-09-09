@@ -1,5 +1,9 @@
 import type { MonitoredAccount } from "./accounts";
-import type { CorrectionBreakdown, PaginatedData } from "./common";
+import type {
+  CorrectionBreakdown,
+  CorrectionSource,
+  PaginatedData,
+} from "./common";
 import type { ModelDiagnostics } from "./dashboard";
 import type { Snapshot } from "./participants";
 
@@ -9,6 +13,8 @@ export interface Observation extends CorrectionBreakdown {
   source: string;
   provider: "sub2api" | "cpa";
   account_id: number;
+  correction_source: CorrectionSource;
+  pricing_epoch: string;
   attribution_started_at: string | null;
   upstream_resets_at: string;
   upstream_used_percent: number;
@@ -67,7 +73,17 @@ export interface FastCorrectionCalculateResult extends CorrectionBreakdown {
   fast_correction_calculated: boolean;
   correction_calculated?: boolean;
 }
-export interface FastCorrectionDetail extends CorrectionBreakdown {
+export type FastCorrectionDetail =
+  | HistoricalCorrectionDetail
+  | {
+      observation_id: number;
+      correction_source: "upstream" | "none";
+      pricing_epoch: string;
+      message: string;
+    };
+export interface HistoricalCorrectionDetail extends CorrectionBreakdown {
+  correction_source: "local";
+  pricing_epoch: string;
   raw_cost_usd?: number | null;
   corrected_cost_usd?: number | null;
   rules_digest?: string;
@@ -117,8 +133,7 @@ export interface ObservationListData extends PaginatedData<Observation> {
     MonitoredAccount,
     "id" | "provider" | "source_account_id" | "external_account_id" | "name"
   > | null;
-  fast_correction_enabled: boolean;
-  corrections_available?: boolean;
+  corrections_available: boolean;
   summary: {
     total: number;
     valid_count: number;

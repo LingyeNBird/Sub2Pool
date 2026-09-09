@@ -1,14 +1,36 @@
-export interface FastCorrectionRule {
+export interface UpstreamPricingRule {
   model_pattern: string;
-  source_multiplier: string | number;
-  target_multiplier: string | number;
+  multiplier: string;
 }
-export interface LongContextCorrectionRule extends FastCorrectionRule {
-  threshold_tokens: number;
+export interface UpstreamPricingPolicy {
+  fast_rules: UpstreamPricingRule[];
+  model_rules: UpstreamPricingRule[];
+  long_context_pricing_enabled: boolean | null;
 }
-export interface ModelCorrectionRule {
-  model_pattern: string;
-  multiplier: string | number;
+export type UpstreamPricingStatus =
+  | "pending"
+  | "applied"
+  | "partial"
+  | "failed"
+  | "reverted";
+export interface UpstreamPricingTarget {
+  group_id: number;
+  group_name: string;
+  status: string;
+  error: string;
+}
+export interface UpstreamPricingState {
+  policy: UpstreamPricingPolicy;
+  selected_group_ids: number[];
+  status: UpstreamPricingStatus;
+  revision: number;
+  targets: UpstreamPricingTarget[];
+  attempted_at: string | null;
+  applied_at: string | null;
+  reverted_at: string | null;
+  announcement_applied_at: string | null;
+  last_error: string;
+  can_revert: boolean;
 }
 export interface CPAModelPrice {
   input: string | number;
@@ -35,9 +57,8 @@ export interface AppSettingsData {
     | number
     | boolean
     | null
-    | FastCorrectionRule[]
-    | LongContextCorrectionRule[]
-    | ModelCorrectionRule[]
+    | UpstreamPricingPolicy
+    | UpstreamPricingState
     | CPAModelPricing
     | CPACollectorStatus;
   monitoring_enabled: boolean;
@@ -56,15 +77,6 @@ export interface AppSettingsData {
   timezone: string;
   cost_basis: string;
   weekly_quota_model: "time_varying" | "constant_average";
-  fast_correction_enabled: boolean;
-  fast_correction_rules: FastCorrectionRule[];
-  long_context_correction_enabled: boolean;
-  long_context_correction_rules: LongContextCorrectionRule[];
-  model_correction_enabled: boolean;
-  model_correction_rules: ModelCorrectionRule[];
-  correction_missing_intervals: number;
-  fast_correction_rebuild_recommended: boolean;
-  fast_correction_missing_intervals: number;
   initial_usd_per_percent: number;
   safety_factor: number;
   daily_estimate_min_percent_span: number;

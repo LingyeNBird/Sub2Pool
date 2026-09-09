@@ -1,7 +1,7 @@
 import type { MonitoredAccount } from "@/types/accounts";
 import type {
   AppSettingsData,
-  FastCorrectionRule,
+  UpstreamPricingPolicy,
   HistoricalRebuildPlan,
 } from "@/types/settings";
 
@@ -78,12 +78,135 @@ function createPlan(
 
 export function handleSettings({
   method,
+  url,
   pathname,
   payload,
   state,
   ok,
   fail,
 }: DemoRequestContext): Response | null {
+  if (
+    pathname === "settings/upstream-pricing" &&
+    method === "GET" &&
+    url.searchParams.get("groups") === "1"
+  )
+    return ok([
+      { id: 7, name: "合成演示分组" },
+      { id: 8, name: "合成备用分组" },
+    ]);
+  if (
+    pathname === "settings/upstream-pricing" &&
+    method === "GET" &&
+    url.searchParams.has("kind")
+  ) {
+    const groupId = Number(url.searchParams.get("group_id"));
+    const kind = url.searchParams.get("kind");
+    if (
+      (groupId !== 7 && groupId !== 8) ||
+      !["fast", "model", "context"].includes(kind ?? "")
+    )
+      return fail("请选择有效分组与计费类型", 400);
+    const current = state.upstreamGroupPolicies[groupId];
+    const info = {
+      kind,
+      group_id: groupId,
+      group_name: groupId === 7 ? "合成演示分组" : "合成备用分组",
+    };
+    if (kind === "context")
+      return ok({
+        ...info,
+        enabled: current?.long_context_pricing_enabled ?? true,
+      });
+    if (kind === "fast")
+      return ok({
+        ...info,
+        free_fast: false,
+        rows: (current?.fast_rules ?? []).map((row) => ({
+          models: [row.model_pattern],
+          multiplier: Number(row.multiplier),
+        })),
+      });
+    return ok({
+      ...info,
+      rows: (current?.model_rules ?? []).map((row) => ({
+        model: row.model_pattern,
+        multiplier: row.multiplier,
+        reference: "合成演示基础价",
+        warning: "",
+        prices: {
+          input_price: 0.000005 * Number(row.multiplier),
+          output_price: 0.00003 * Number(row.multiplier),
+        },
+        ratios: { input_price: row.multiplier, output_price: row.multiplier },
+      })),
+    });
+  }
+  if (pathname === "settings/upstream-pricing" && method === "GET")
+    return ok(state.upstreamPricing);
+  if (
+    method === "POST" &&
+    (pathname === "settings/upstream-pricing/apply" ||
+      pathname === "settings/upstream-pricing/revert")
+  ) {
+    if (payload.confirm !== true) return fail("请确认上游计费操作", 400);
+    const pricing = state.upstreamPricing;
+    if (pathname.endsWith("/revert")) {
+      if (payload.revision !== pricing.revision || !pricing.can_revert)
+        return fail("没有此版本可撤回的配置", 409);
+      pricing.status = "reverted";
+      pricing.reverted_at = state.clock;
+      pricing.can_revert = false;
+    } else {
+      if (payload.announcement === true) {
+        if (pricing.announcement_applied_at)
+          return fail("公告一键应用已确认过，请在设置页调整或重试", 400);
+        payload.policy = {
+          fast_rules: [{ model_pattern: "*", multiplier: "2.5" }],
+          model_rules: [{ model_pattern: "gpt-6*", multiplier: "1.8" }],
+          long_context_pricing_enabled: false,
+        };
+      }
+      if (!payload.policy || typeof payload.policy !== "object")
+        return fail("策略无效", 400);
+      if (
+        !Array.isArray(payload.group_ids) ||
+        payload.group_ids.length === 0 ||
+        payload.group_ids.some((id) => id !== 7 && id !== 8)
+      )
+        return fail("请至少选择一个有效的目标分组", 400);
+      pricing.selected_group_ids = [...new Set(payload.group_ids as number[])];
+      if (payload.announcement === true)
+        pricing.announcement_applied_at = state.clock;
+      for (const id of pricing.selected_group_ids) {
+        if (!pricing.targets.some((target) => target.group_id === id))
+          pricing.targets.push({
+            group_id: id,
+            group_name: id === 7 ? "合成演示分组" : "合成备用分组",
+            status: "pending",
+            error: "",
+          });
+      }
+      pricing.policy = structuredClone(payload.policy) as UpstreamPricingPolicy;
+      pricing.status = "applied";
+      pricing.attempted_at = state.clock;
+      pricing.applied_at = state.clock;
+      pricing.can_revert = true;
+    }
+    pricing.revision += 1;
+    pricing.targets.forEach((target) => {
+      if (
+        pathname.endsWith("/apply") &&
+        !pricing.selected_group_ids.includes(target.group_id)
+      )
+        return;
+      target.status = pricing.status;
+      target.error = "";
+      state.upstreamGroupPolicies[target.group_id] =
+        pricing.status === "reverted" ? null : structuredClone(pricing.policy);
+    });
+    saveDemoState(state);
+    return ok(pricing);
+  }
   if (method === "GET" && pathname === "settings/monitored-accounts") {
     return ok(state.monitoredAccounts);
   }
@@ -216,12 +339,7 @@ export function handleSettings({
           ] = true;
         }
       } else {
-        state.settings[key] = value as
-          | string
-          | number
-          | boolean
-          | null
-          | FastCorrectionRule[];
+        state.settings[key] = value as AppSettingsData[string];
       }
     }
     saveDemoState(state);

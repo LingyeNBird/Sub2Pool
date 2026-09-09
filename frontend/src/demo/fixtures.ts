@@ -249,34 +249,9 @@ function baseSettings(): AppSettingsData {
     timezone: "Asia/Shanghai",
     cost_basis: "actual",
     weekly_quota_model: "time_varying",
-    fast_correction_enabled: true,
-    fast_correction_rules: [
-      {
-        model_pattern: "*",
-        source_multiplier: "2",
-        target_multiplier: "2.5",
-      },
-    ],
     fast_correction_rebuild_recommended: false,
     fast_correction_missing_intervals: 0,
     correction_missing_intervals: 0,
-    long_context_correction_enabled: true,
-    long_context_correction_rules: [
-      {
-        model_pattern: "gpt-5.6*",
-        source_multiplier: "2",
-        target_multiplier: "1",
-        threshold_tokens: 272000,
-      },
-      {
-        model_pattern: "gpt-6*",
-        source_multiplier: "2",
-        target_multiplier: "1",
-        threshold_tokens: 272000,
-      },
-    ],
-    model_correction_enabled: true,
-    model_correction_rules: [{ model_pattern: "gpt-6*", multiplier: "1.8" }],
     initial_usd_per_percent: 30,
     safety_factor: 0.92,
     daily_estimate_min_percent_span: 3,
@@ -370,7 +345,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 15,
+    version: 18,
     clock: iso(DEMO_ANCHOR),
     nextParticipantId: 4,
     nextPoolId: 2,
@@ -423,6 +398,38 @@ function initializeState(): DemoState {
     blockedAddresses: [],
     announcementReads: [],
     settings: baseSettings(),
+    upstreamGroupPolicies: {
+      7: {
+        fast_rules: [{ model_pattern: "*", multiplier: "2.5" }],
+        model_rules: [{ model_pattern: "gpt-6*", multiplier: "1.8" }],
+        long_context_pricing_enabled: false,
+      },
+      8: null,
+    },
+    upstreamPricing: {
+      selected_group_ids: [7],
+      policy: {
+        fast_rules: [{ model_pattern: "*", multiplier: "2.5" }],
+        model_rules: [{ model_pattern: "gpt-6*", multiplier: "1.8" }],
+        long_context_pricing_enabled: false,
+      },
+      status: "applied",
+      revision: 1,
+      targets: [
+        {
+          group_id: 7,
+          group_name: "合成演示分组",
+          status: "applied",
+          error: "",
+        },
+      ],
+      attempted_at: iso(DEMO_ANCHOR),
+      applied_at: iso(DEMO_ANCHOR),
+      reverted_at: null,
+      announcement_applied_at: null,
+      last_error: "",
+      can_revert: true,
+    },
     plans: [],
   };
 }

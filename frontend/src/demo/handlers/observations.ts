@@ -45,9 +45,6 @@ function observationsData(context: DemoRequestContext): ObservationListData {
         }
       : null,
     corrections_available: account?.provider === "sub2api",
-    fast_correction_enabled:
-      account?.provider === "sub2api" &&
-      Boolean(state.settings.fast_correction_enabled),
     summary: {
       total: items.length,
       valid_count: items.filter((item) => item.valid_sample).length,
@@ -62,6 +59,17 @@ function fastCorrectionData(
   state: DemoState,
   observation: Observation,
 ): FastCorrectionDetail {
+  if (observation.correction_source !== "local") {
+    return {
+      observation_id: observation.id,
+      correction_source: observation.correction_source,
+      pricing_epoch: observation.pricing_epoch,
+      message:
+        observation.correction_source === "upstream"
+          ? "上游 Sub2API 已修正"
+          : "此记录不进行本地修正。",
+    };
+  }
   const totalRequests = Math.max(
     12,
     Math.round((observation.delta_cost ?? 8) * 9),
@@ -70,6 +78,8 @@ function fastCorrectionData(
   const fastCost = observation.fast_correction_usd ?? 0;
   return {
     observation_id: observation.id,
+    correction_source: "local",
+    pricing_epoch: observation.pricing_epoch,
     started_at: observation.interval_cost_started_at,
     ended_at: observation.observed_at,
     calculated: observation.correction_calculated ?? false,

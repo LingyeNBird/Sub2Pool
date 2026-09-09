@@ -1,161 +1,148 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import type { AppSettingsData } from "@/types/settings";
+import { ref, watch } from "vue";
+import PricingGroupDialog from "@/components/common/PricingGroupDialog.vue";
+import PricingCurrentButton from "./PricingCurrentButton.vue";
+import SettingLabel from "@/components/common/SettingLabel.vue";
 
-const settings = defineModel<AppSettingsData>("settings", { required: true });
-const props = defineProps<{ saving: boolean; save: () => Promise<boolean> }>();
-type Kind = "fast" | "long" | "model";
-interface DraftRule {
-  model_pattern: string;
-  source_multiplier: string | number;
-  target_multiplier: string | number;
-  multiplier: string | number;
-  threshold_tokens: string | number;
-}
-const sections = [
+import { useDateTime } from "@/composables/useDateTime";
+import type {
+  UpstreamPricingPolicy,
+  UpstreamPricingRule,
+  UpstreamPricingState,
+} from "@/types/settings";
+
+const props = defineProps<{
+  state: UpstreamPricingState;
+  saving: boolean;
+  demo: boolean;
+  applyPolicy: (
+    policy: UpstreamPricingPolicy,
+    groupIds: number[],
+  ) => Promise<string | null>;
+  revertPolicy: () => Promise<boolean>;
+}>();
+
+type RuleKey = "fast_rules" | "model_rules";
+
+const ruleSections: Array<{
+  key: RuleKey;
+  title: string;
+  help: string;
+  placeholder: string;
+}> = [
   {
-    kind: "fast",
-    title: "FAST 模型修正",
-    enabled: "fast_correction_enabled",
-    rules: "fast_correction_rules",
+    key: "fast_rules",
+    title: "FAST 目标倍率",
+    help: "按模型匹配写入 FAST 目标倍率。",
+    placeholder: "*",
   },
   {
-    kind: "long",
-    title: "双倍倍率修正",
-    enabled: "long_context_correction_enabled",
-    rules: "long_context_correction_rules",
+    key: "model_rules",
+    title: "模型倍率",
+    help: "倍率相对未由本服务加倍的基础价写入，不与已应用值叠乘。",
+    placeholder: "gpt-6*",
   },
-  {
-    kind: "model",
-    title: "模型计费倍率",
-    enabled: "model_correction_enabled",
-    rules: "model_correction_rules",
-  },
-] as const;
-const active = ref<Kind>("fast");
-const section = computed(() =>
-  sections.find((item) => item.kind === active.value)!,
-);
-const dialog = ref<HTMLDialogElement | null>(null);
-const draftRules = ref<DraftRule[]>([]);
+];
+
+const draft = ref<UpstreamPricingPolicy>({
+  fast_rules: [],
+  model_rules: [],
+  long_context_pricing_enabled: null,
+});
 const validationMessage = ref("");
+const writeDialog = ref<InstanceType<typeof PricingGroupDialog> | null>(null);
+const dateTime = useDateTime();
 
-function newRule(): DraftRule {
+function copyPolicy(policy: UpstreamPricingPolicy): UpstreamPricingPolicy {
   return {
-    model_pattern: "",
-    source_multiplier: "2",
-    target_multiplier: active.value === "fast" ? "2.5" : "1",
-    multiplier: "1.8",
-    threshold_tokens: 272000,
+    fast_rules: policy.fast_rules.map((rule) => ({ ...rule })),
+    model_rules: policy.model_rules.map((rule) => ({ ...rule })),
+    long_context_pricing_enabled: policy.long_context_pricing_enabled,
   };
 }
-function openRules(kind: Kind) {
-  active.value = kind;
-  draftRules.value = settings.value[section.value.rules].map((rule) => ({
-    ...newRule(),
-    ...rule,
-  }));
-  validationMessage.value = "";
-  dialog.value?.showModal();
+
+watch(
+  () => props.state,
+  (state) => {
+    draft.value = copyPolicy(state.policy);
+    validationMessage.value = "";
+  },
+  { immediate: true },
+);
+
+function addRule(key: RuleKey) {
+  if (draft.value[key].length >= 100) return;
+  draft.value[key].push({
+    model_pattern: "",
+    multiplier: key === "fast_rules" ? "2.5" : "1.8",
+  });
 }
-function closeRules() {
-  if (!props.saving) dialog.value?.close();
-}
-function onCancel(event: Event) {
-  if (props.saving) event.preventDefault();
-}
-function addRule() {
-  if (draftRules.value.length >= 100) return;
-  const catchAll = draftRules.value.findIndex(
-    (rule) => rule.model_pattern.trim() === "*",
-  );
-  draftRules.value.splice(
-    catchAll < 0 ? draftRules.value.length : catchAll,
-    0,
-    newRule(),
-  );
-}
-function moveRule(index: number, offset: number) {
+
+function moveRule(key: RuleKey, index: number, offset: number) {
+  const rules = draft.value[key];
   const target = index + offset;
-  if (target < 0 || target >= draftRules.value.length) return;
-  const [rule] = draftRules.value.splice(index, 1);
-  if (rule) draftRules.value.splice(target, 0, rule);
+  if (target < 0 || target >= rules.length) return;
+  const [rule] = rules.splice(index, 1);
+  if (rule) rules.splice(target, 0, rule);
 }
-function validateRules(): string {
-  if (draftRules.value.length > 100) return "最多可设置 100 条规则";
-  for (const [index, rule] of draftRules.value.entries()) {
-    if (!rule.model_pattern.trim() || rule.model_pattern.trim().length > 160)
-      return `第 ${index + 1} 条规则的模型匹配须为 1 至 160 个字符`;
-    const values =
-      active.value === "model"
-        ? [rule.multiplier]
-        : [rule.source_multiplier, rule.target_multiplier];
-    if (
-      values.some(
-        (value) =>
-          !Number.isFinite(Number(value)) ||
-          Number(value) < 0.01 ||
-          Number(value) > 100,
-      )
-    )
-      return `第 ${index + 1} 条规则的倍率必须在 0.01 至 100 之间`;
-    if (
-      active.value === "fast" &&
-      Number(rule.target_multiplier) < Number(rule.source_multiplier)
-    )
-      return `第 ${index + 1} 条 FAST 规则的目标倍率不能小于源倍率`;
-    const threshold = Number(rule.threshold_tokens);
-    if (
-      active.value === "long" &&
-      (!Number.isInteger(threshold) || threshold < 1 || threshold > 100000000)
-    )
-      return `第 ${index + 1} 条规则的阈值必须为 1 至 100000000 的整数`;
+
+function validateRules(rules: UpstreamPricingRule[], label: string): string {
+  if (rules.length > 100) return `${label}最多可设置 100 条规则`;
+  for (const [index, rule] of rules.entries()) {
+    const pattern = rule.model_pattern.trim();
+    if (!pattern || pattern.length > 160) {
+      return `${label}第 ${index + 1} 条的模型匹配须为 1 至 160 个字符`;
+    }
+    const multiplier = Number(rule.multiplier);
+    if (!Number.isFinite(multiplier) || multiplier < 0.01 || multiplier > 100) {
+      return `${label}第 ${index + 1} 条的倍率必须在 0.01 至 100 之间`;
+    }
   }
   return "";
 }
-async function saveRules() {
-  validationMessage.value = validateRules();
+
+function normalizedPolicy(): UpstreamPricingPolicy {
+  return {
+    fast_rules: draft.value.fast_rules.map((rule) => ({
+      model_pattern: rule.model_pattern.trim(),
+      multiplier: String(rule.multiplier).trim(),
+    })),
+    model_rules: draft.value.model_rules.map((rule) => ({
+      model_pattern: rule.model_pattern.trim(),
+      multiplier: String(rule.multiplier).trim(),
+    })),
+    long_context_pricing_enabled: draft.value.long_context_pricing_enabled,
+  };
+}
+
+function apply() {
+  validationMessage.value =
+    validateRules(draft.value.fast_rules, "FAST 规则") ||
+    validateRules(draft.value.model_rules, "模型规则");
   if (validationMessage.value) return;
-  const previousFast = settings.value.fast_correction_rules;
-  const previousLong = settings.value.long_context_correction_rules;
-  const previousModel = settings.value.model_correction_rules;
-  if (active.value === "fast")
-    settings.value.fast_correction_rules = draftRules.value.map(
-      ({ model_pattern, source_multiplier, target_multiplier }) => ({
-        model_pattern: model_pattern.trim(),
-        source_multiplier,
-        target_multiplier,
-      }),
-    );
-  else if (active.value === "long")
-    settings.value.long_context_correction_rules = draftRules.value.map(
-      ({
-        model_pattern,
-        source_multiplier,
-        target_multiplier,
-        threshold_tokens,
-      }) => ({
-        model_pattern: model_pattern.trim(),
-        source_multiplier,
-        target_multiplier,
-        threshold_tokens: Number(threshold_tokens),
-      }),
-    );
-  else
-    settings.value.model_correction_rules = draftRules.value.map(
-      ({ model_pattern, multiplier }) => ({
-        model_pattern: model_pattern.trim(),
-        multiplier,
-      }),
-    );
-  if (await props.save()) dialog.value?.close();
-  else {
-    settings.value.fast_correction_rules = previousFast;
-    settings.value.long_context_correction_rules = previousLong;
-    settings.value.model_correction_rules = previousModel;
-    validationMessage.value =
-      "保存失败，规则尚未生效。请检查页面错误提示后重试。";
-  }
+  const policy = normalizedPolicy();
+  writeDialog.value?.open(props.state.selected_group_ids, (groupIds) =>
+    props.applyPolicy(policy, groupIds),
+  );
+}
+
+function statusLabel(status: string): string {
+  return (
+    {
+      pending: "等待应用",
+      applied: "已应用",
+      partial: "部分成功",
+      failed: "应用失败",
+      reverted: "已撤回",
+    }[status] ?? status
+  );
+}
+
+function statusClass(status: string): string {
+  if (status === "applied") return "badge-success";
+  if (status === "partial" || status === "pending") return "badge-warning";
+  if (status === "failed") return "badge-error";
+  return "badge-ghost";
 }
 </script>
 
@@ -164,275 +151,250 @@ async function saveRules() {
     class="card mb-6 inline-block w-full break-inside-avoid bg-base-200 shadow-xs"
   >
     <div class="card-body gap-4">
-      <h2 class="card-title">
-        <AppIcon name="adjustments-horizontal" class="size-5" />计费修正
-      </h2>
-      <p class="text-sm opacity-65">
-        三种修正统一管理，仅调整 Sub2Pool 测算成本，不修改
-        Sub2API。保存后使用本地原始事实重算。
-      </p>
-      <div
-        v-for="item in sections"
-        :key="item.kind"
-        class="flex flex-wrap items-center justify-between gap-3 rounded-box bg-base-100 p-3"
-      >
-        <label class="flex cursor-pointer items-center gap-3">
-          <input
-            v-model="settings[item.enabled]"
-            type="checkbox"
-            class="toggle toggle-sm"
-            :disabled="saving"
-          />
-          <span class="font-medium">{{ item.title }}</span>
-        </label>
-        <button
-          type="button"
-          class="btn btn-outline btn-sm"
-          :disabled="saving"
-          @click="openRules(item.kind)"
-        >
-          配置规则 · {{ settings[item.rules].length }}
-        </button>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="card-title">
+            <AppIcon name="cloud-arrow-up" class="size-5" />Sub2API 上游计费
+          </h2>
+          <p class="mt-1 text-sm opacity-65">
+            直接写入 Sub2API
+            分组计费，影响目标分组中的全部用户。只管理后续上游扣费，不改写或重算历史记录。
+          </p>
+        </div>
+        <span class="badge" :class="statusClass(state.status)">
+          {{ statusLabel(state.status) }}
+        </span>
       </div>
+
+      <div v-if="demo" class="alert items-start text-sm alert-info">
+        <AppIcon name="information-circle" class="mt-0.5 size-5 shrink-0" />
+        <span
+          >公开演示只更新当前标签页的合成状态，不会向任何 Sub2API
+          服务发送请求。</span
+        >
+      </div>
+
+      <div class="rounded-box bg-base-100 p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="font-medium">策略版本</span>
+          <span class="font-mono text-sm">revision {{ state.revision }}</span>
+        </div>
+        <dl class="mt-3 grid gap-2 text-xs opacity-65 sm:grid-cols-3">
+          <div v-if="state.attempted_at">
+            <dt>最近尝试</dt>
+            <dd>{{ dateTime(state.attempted_at) }}</dd>
+          </div>
+          <div v-if="state.applied_at">
+            <dt>最近应用</dt>
+            <dd>{{ dateTime(state.applied_at) }}</dd>
+          </div>
+          <div v-if="state.reverted_at">
+            <dt>最近撤回</dt>
+            <dd>{{ dateTime(state.reverted_at) }}</dd>
+          </div>
+        </dl>
+      </div>
+
       <div
-        v-if="settings.correction_missing_intervals"
-        class="alert items-start text-sm alert-warning"
+        v-if="state.last_error"
+        class="alert items-start text-sm alert-error"
+        role="alert"
       >
         <AppIcon name="exclamation-triangle" class="mt-0.5 size-5 shrink-0" />
-        <span
-          >当前周期
-          {{ settings.correction_missing_intervals }} 个区间缺少原始请求事实。旧
-          FAST
-          修正保留，无法证实的新修正不补造；完整事实区间可直接重算，无需重新请求上游。</span
-        >
+        <span>{{ state.last_error }}</span>
       </div>
-      <button
-        type="button"
-        class="btn btn-primary btn-sm"
-        :disabled="saving"
-        @click="save"
-      >
-        <span v-if="saving" class="loading loading-xs loading-spinner"></span>
-        <AppIcon v-else name="check" class="size-4" />保存修正设置
-      </button>
-    </div>
-  </section>
-  <Teleport to="body">
-    <dialog
-      ref="dialog"
-      class="modal"
-      aria-labelledby="billing-rule-title"
-      @cancel="onCancel"
-    >
+
       <div
-        class="modal-box flex max-h-[calc(100dvh-2rem)] max-w-4xl flex-col overflow-hidden p-0"
+        class="overflow-x-auto rounded-box border border-base-300 bg-base-100"
       >
-        <header
-          class="flex shrink-0 items-center justify-between gap-4 border-b border-base-300 px-5 py-4"
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>分组操作记录</th>
+              <th>状态</th>
+              <th>错误</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="target in state.targets" :key="target.group_id">
+              <td>
+                <div class="font-medium">{{ target.group_name }}</div>
+                <div class="text-xs opacity-50">ID {{ target.group_id }}</div>
+              </td>
+              <td>
+                <span
+                  class="badge badge-sm"
+                  :class="statusClass(target.status)"
+                >
+                  {{ statusLabel(target.status) }}
+                </span>
+              </td>
+              <td class="text-sm" :class="{ 'text-error': target.error }">
+                {{ target.error || "—" }}
+              </td>
+            </tr>
+            <tr v-if="state.targets.length === 0">
+              <td colspan="3" class="py-6 text-center text-sm opacity-60">
+                尚无操作记录；点击写入后选择目标分组。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <fieldset :disabled="saving" class="space-y-4">
+        <section
+          v-for="section in ruleSections"
+          :key="section.key"
+          class="rounded-box border border-base-300 bg-base-100 p-4"
         >
-          <h2 id="billing-rule-title" class="text-lg font-bold">
-            {{ section.title }}规则
-          </h2>
-          <button
-            type="button"
-            class="btn btn-circle btn-ghost btn-sm"
-            aria-label="关闭修正规则"
-            :disabled="saving"
-            @click="closeRules"
-          >
-            <AppIcon name="x-mark" class="size-4" />
-          </button>
-        </header>
-        <div class="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-6">
-          <div class="alert items-start text-sm alert-info">
-            <span
-              >支持 *
-              通配符，不区分大小写，从上到下命中第一条后停止；不同修正类型按
-              FAST → 长上下文 → 模型倍率叠加。</span
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="font-semibold">
+              <SettingLabel
+                :label="section.title"
+                :help="section.help"
+                class="p-0 text-inherit"
+              />
+            </h3>
+            <PricingCurrentButton
+              :kind="section.key === 'fast_rules' ? 'fast' : 'model'"
+              :demo="demo"
+            />
+            <button
+              type="button"
+              class="btn ml-auto shrink-0 btn-outline btn-xs"
+              :disabled="draft[section.key].length >= 100"
+              @click="addRule(section.key)"
             >
+              <AppIcon name="plus" class="size-3.5" />添加规则
+            </button>
           </div>
-          <p v-if="active === 'long'" class="text-sm opacity-70">
-            默认匹配 GPT-5.6 与 GPT-6 系列，将 Sub2API 双倍倍率 2 修正为
-            1。上游已设为 1 时，将源倍率也改为
-            1。优先使用上游实际计费标记；缺少标记时，以普通输入、缓存写入与缓存命中
-            Token 之和严格大于兜底阈值判断，不包含输出 Token。
-          </p>
-          <p v-else-if="active === 'model'" class="text-sm opacity-70">
-            默认将 GPT-6 系列成本乘以 1.8。上游已经应用此倍率时请改为
-            1，避免重复修正。
-          </p>
-          <p v-else class="text-sm opacity-70">
-            仅修正 FAST 请求，默认由 Sub2API 2 倍换算为 2.5
-            倍。上游已正确配置时，将源倍率与目标倍率设为相同值。
-          </p>
-          <fieldset
-            v-for="(rule, index) in draftRules"
+
+          <div
+            v-for="(rule, index) in draft[section.key]"
             :key="index"
-            class="@container/rule relative fieldset min-w-0 gap-2 rounded-box border border-base-300 bg-base-200 p-3"
-            :disabled="saving"
+            class="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_auto]"
           >
-            <legend class="sr-only">规则 {{ index + 1 }}</legend>
-            <div class="flex min-h-8 items-center pr-32" aria-hidden="true">
-              <span class="font-semibold">规则 {{ index + 1 }}</span>
-            </div>
-            <div class="absolute top-2 right-2 flex items-center gap-0.5">
+            <label class="col-span-2 fieldset min-w-0 gap-1 p-0 sm:col-span-1">
+              <span class="fieldset-legend p-0 text-xs">模型匹配</span>
+              <input
+                v-model="rule.model_pattern"
+                class="input w-full font-mono input-sm"
+                type="text"
+                maxlength="160"
+                :placeholder="section.placeholder"
+              />
+            </label>
+            <label class="fieldset min-w-0 gap-1 p-0">
+              <span class="fieldset-legend p-0 text-xs">倍率</span>
+              <input
+                v-model="rule.multiplier"
+                class="input w-full input-sm"
+                type="number"
+                min="0.01"
+                max="100"
+                step="0.01"
+                inputmode="decimal"
+              />
+            </label>
+            <div class="flex items-center gap-0.5 pb-0.5">
               <button
                 type="button"
-                class="btn btn-square btn-ghost btn-sm"
+                class="btn btn-square btn-ghost btn-xs"
                 :disabled="index === 0"
                 aria-label="上移规则"
                 title="上移规则"
-                @click="moveRule(index, -1)"
+                @click="moveRule(section.key, index, -1)"
               >
-                <AppIcon name="chevron-up" class="size-4" />
+                <AppIcon name="chevron-up" class="size-3.5" />
               </button>
               <button
                 type="button"
-                class="btn btn-square btn-ghost btn-sm"
-                :disabled="index === draftRules.length - 1"
+                class="btn btn-square btn-ghost btn-xs"
+                :disabled="index === draft[section.key].length - 1"
                 aria-label="下移规则"
                 title="下移规则"
-                @click="moveRule(index, 1)"
+                @click="moveRule(section.key, index, 1)"
               >
-                <AppIcon name="chevron-up" class="size-4 rotate-180" />
+                <AppIcon name="chevron-up" class="size-3.5 rotate-180" />
               </button>
               <button
                 type="button"
-                class="btn btn-ghost px-2 text-error btn-sm"
+                class="btn btn-ghost px-1.5 text-error btn-xs"
                 aria-label="删除规则"
                 title="删除规则"
-                @click="draftRules.splice(index, 1)"
+                @click="draft[section.key].splice(index, 1)"
               >
                 删除
               </button>
             </div>
-            <div
-              class="grid grid-cols-2 items-end gap-x-3 gap-y-2"
-              :class="{
-                '@lg/rule:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem]':
-                  active === 'fast',
-                '@2xl/rule:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_10rem]':
-                  active === 'long',
-                '@sm/rule:grid-cols-[minmax(0,1fr)_8.5rem]': active === 'model',
-              }"
-            >
-              <label
-                class="col-span-2 fieldset min-w-0 gap-1 p-0 @sm/rule:col-span-1"
-                ><span class="m-0 fieldset-legend block p-0 leading-snug"
-                  >模型匹配</span
-                ><input
-                  v-model.trim="rule.model_pattern"
-                  type="text"
-                  class="input w-full font-mono"
-                  maxlength="160"
-                  placeholder="gpt-6*"
-              /></label>
-              <label
-                v-if="active === 'model'"
-                class="fieldset min-w-0 gap-1 p-0"
-                ><span class="m-0 fieldset-legend block p-0 leading-snug"
-                  >计费倍率</span
-                ><input
-                  v-model="rule.multiplier"
-                  type="number"
-                  class="input w-full"
-                  min="0.01"
-                  max="100"
-                  step="0.01"
-                  inputmode="decimal"
-              /></label>
-              <template v-else>
-                <label class="fieldset min-w-0 gap-1 p-0"
-                  ><span class="m-0 fieldset-legend block p-0 leading-snug"
-                    >Sub2API {{ active === "long" ? "双倍" : "FAST" }}倍率</span
-                  ><input
-                    v-model="rule.source_multiplier"
-                    type="number"
-                    class="input w-full"
-                    min="0.01"
-                    max="100"
-                    step="0.01"
-                    inputmode="decimal"
-                /></label>
-                <label class="fieldset min-w-0 gap-1 p-0"
-                  ><span class="m-0 fieldset-legend block p-0 leading-snug"
-                    >修正目标倍率</span
-                  ><input
-                    v-model="rule.target_multiplier"
-                    type="number"
-                    class="input w-full"
-                    min="0.01"
-                    max="100"
-                    step="0.01"
-                    inputmode="decimal"
-                /></label>
-                <label
-                  v-if="active === 'long'"
-                  class="col-span-2 fieldset min-w-0 gap-1 p-0 @sm/rule:col-span-1"
-                  ><span class="m-0 fieldset-legend block p-0 leading-snug"
-                    >兜底阈值（输入 Token）</span
-                  ><input
-                    v-model="rule.threshold_tokens"
-                    type="number"
-                    class="input w-full"
-                    min="1"
-                    max="100000000"
-                    step="1"
-                    inputmode="numeric"
-                /></label>
-              </template>
-            </div>
-          </fieldset>
-          <p
-            v-if="draftRules.length === 0"
-            class="py-6 text-center text-sm opacity-60"
-          >
-            没有规则时，该项修正对所有模型均不生效。
-          </p>
-          <button
-            type="button"
-            class="btn btn-outline btn-sm"
-            :disabled="saving || draftRules.length >= 100"
-            @click="addRule"
-          >
-            <AppIcon name="plus" class="size-4" />添加模型规则
-          </button>
-          <div
-            v-if="validationMessage"
-            class="alert text-sm alert-error"
-            role="alert"
-          >
-            <span>{{ validationMessage }}</span>
           </div>
-        </div>
-        <footer
-          class="flex shrink-0 justify-end gap-2 border-t border-base-300 px-5 py-4"
-        >
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm"
-            :disabled="saving"
-            @click="closeRules"
+          <p
+            v-if="draft[section.key].length === 0"
+            class="mt-3 text-xs opacity-60"
           >
-            取消
-          </button>
-          <button
-            type="button"
-            class="btn btn-primary btn-sm"
-            :disabled="saving"
-            @click="saveRules"
+            空规则表示不接管该项；应用时恢复接管前的上游值。
+          </p>
+        </section>
+
+        <section class="rounded-box border border-base-300 bg-base-100 p-4">
+          <div class="flex items-center gap-2">
+            <label for="upstream-context-policy" class="font-semibold"
+              >长上下文阶梯计费</label
+            >
+            <PricingCurrentButton kind="context" :demo="demo" />
+          </div>
+          <select
+            id="upstream-context-policy"
+            v-model="draft.long_context_pricing_enabled"
+            class="select mt-3 w-full select-sm"
           >
-            <span
-              v-if="saving"
-              class="loading loading-xs loading-spinner"
-            ></span
-            >保存规则并重算
-          </button>
-        </footer>
+            <option :value="null">不接管（恢复接管前的上游值）</option>
+            <option :value="true">启用</option>
+            <option :value="false">关闭</option>
+          </select>
+        </section>
+      </fieldset>
+
+      <div
+        v-if="validationMessage"
+        class="alert text-sm alert-error"
+        role="alert"
+      >
+        <span>{{ validationMessage }}</span>
       </div>
-      <form method="dialog" class="modal-backdrop">
-        <button :disabled="saving">关闭</button>
-      </form>
-    </dialog>
-  </Teleport>
+
+      <p class="text-xs opacity-60">
+        规则按列表顺序提交。清空某类规则或把长上下文设为“不接管”，会恢复该项接管前保存的
+        Sub2API
+        值，不会与已应用值叠乘。仅覆盖本次能够解析的模型；上游新增模型后请重新应用。
+      </p>
+      <p class="text-xs opacity-65">
+        复杂渠道定价或无法无损展开的已有通配符价卡会明确报错，不会静默覆盖。
+      </p>
+
+      <div class="flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          class="btn btn-outline btn-sm"
+          :disabled="saving || !state.can_revert"
+          @click="revertPolicy"
+        >
+          <AppIcon name="arrow-uturn-left" class="size-4" />
+          撤回至接管前值
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary btn-sm"
+          :disabled="saving"
+          @click="apply"
+        >
+          <span v-if="saving" class="loading loading-xs loading-spinner"></span>
+          <AppIcon v-else name="cloud-arrow-up" class="size-4" />
+          写入 Sub2API 分组计费
+        </button>
+      </div>
+    </div>
+  </section>
+  <PricingGroupDialog ref="writeDialog" />
 </template>

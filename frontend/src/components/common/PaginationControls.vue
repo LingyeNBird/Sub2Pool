@@ -5,6 +5,7 @@ const props = defineProps<{
   page: number;
   totalPages: number;
   total: number;
+  showPageSummary?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -29,10 +30,14 @@ function change(page: number) {
 
 <template>
   <div
-    v-if="totalPages > 1"
+    v-if="totalPages > 1 || showPageSummary"
     class="mt-4 flex flex-wrap items-center justify-between gap-3"
   >
-    <span class="text-sm opacity-60">共 {{ total }} 条</span>
+    <span class="text-sm opacity-60">
+      共 {{ total }} 条<span v-if="showPageSummary">
+        · 第 {{ page }} / {{ totalPages }} 页</span
+      >
+    </span>
     <div class="join">
       <button
         type="button"

@@ -98,7 +98,8 @@ function buildPeriods(participants: Participant[]): {
 } {
   const observations: Observation[] = [];
   const periods: DemoPeriod[] = [];
-  const counts = [188, 216, 203, 224, 207];
+  // Leave room below sessionStorage's quota for source metadata and user edits.
+  const counts = [140, 160, 150, 170, 155];
   let observationId = 1;
 
   for (let periodIndex = 0; periodIndex < counts.length; periodIndex += 1) {
@@ -203,9 +204,15 @@ function buildPeriods(participants: Participant[]): {
       const excluded = observationId % 389 === 0;
       const fastCorrectionRemainder = observationId % 37;
       const fastCorrectionCalculated =
-        fastCorrectionRemainder > 5 && fastCorrectionRemainder < 31;
+        periodIndex < counts.length - 1 &&
+        fastCorrectionRemainder > 5 &&
+        fastCorrectionRemainder < 31;
       const item: Observation = {
         id: observationId,
+        correction_source:
+          periodIndex === counts.length - 1 ? "upstream" : "local",
+        pricing_epoch:
+          periodIndex === counts.length - 1 ? "upstream-v1:1:applied" : "local",
         observed_at: iso(observedAt),
         source,
         provider: "sub2api",

@@ -235,7 +235,16 @@ function isAtOrAfter(row: Observation, start: Observation) {
                 </td>
                 <td v-if="fastCorrectionEnabled">
                   <button
-                    v-if="correctionCalculated(row)"
+                    v-if="row.correction_source === 'upstream'"
+                    type="button"
+                    class="link font-medium link-hover"
+                    @click="emit('fastCorrectionDetail', row)"
+                  >
+                    已修正
+                  </button>
+                  <span v-else-if="row.correction_source === 'none'">—</span>
+                  <button
+                    v-else-if="correctionCalculated(row)"
                     type="button"
                     class="link cursor-pointer font-medium tabular-nums link-hover"
                     @click="emit('fastCorrectionDetail', row)"
@@ -243,7 +252,11 @@ function isAtOrAfter(row: Observation, start: Observation) {
                     {{ formatCorrectionCurrency(correctionTotal(row)) }}
                   </button>
                   <button
-                    v-else-if="editable && row.provider !== 'cpa'"
+                    v-else-if="
+                      editable &&
+                      row.provider !== 'cpa' &&
+                      row.correction_source === 'local'
+                    "
                     type="button"
                     class="inline-flex link cursor-pointer items-center gap-1 font-medium link-hover disabled:cursor-wait disabled:opacity-70"
                     :disabled="fastCorrectionPendingIds.has(row.id)"
@@ -269,7 +282,11 @@ function isAtOrAfter(row: Observation, start: Observation) {
                   </button>
                   <span v-else class="opacity-60">未计算</span>
                   <button
-                    v-if="!correctionCalculated(row) && row.legacy_fast_only"
+                    v-if="
+                      row.correction_source === 'local' &&
+                      !correctionCalculated(row) &&
+                      row.legacy_fast_only
+                    "
                     type="button"
                     class="ml-2 link text-xs link-hover"
                     title="查看已保存的旧 FAST 明细；修正合计尚未完整计算"

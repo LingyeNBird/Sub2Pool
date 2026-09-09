@@ -1,5 +1,6 @@
 import type { PagePermission } from "@/config/pagePermissions";
 import type { PaginatedData, SelectOption } from "./common";
+import type { UpstreamPricingStatus } from "./settings";
 
 export interface SystemUser {
   id: number;
@@ -22,6 +23,11 @@ export interface AnnouncementRecord {
   paragraphs: string[];
   read: boolean;
   read_at: string | null;
+  pricing_status?: UpstreamPricingStatus;
+  can_revert?: boolean;
+  pricing_revision?: number;
+  can_apply_pricing?: boolean;
+  auto_apply_recommendations?: boolean;
 }
 export interface AnnouncementListData {
   items: AnnouncementRecord[];
