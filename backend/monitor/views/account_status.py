@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from .base import PageAccessAPIView, ok
 from ..access import visible_accounts_for
-from ..billing_correction.domain import BillingCorrectionRules, CorrectionAmounts
+from ..billing_correction.domain import CorrectionAmounts
 from ..billing_correction.observations import interval_corrections
 from ..api_auth import APIKeyAuthentication
 from ..cpa.usage import cpa_events_cost
@@ -28,13 +28,12 @@ STATS_DAYS = 30
 
 
 def _correction_totals(account_ids, *, config, observed_after, observed_before) -> dict:
-    rules = BillingCorrectionRules(config)
     totals = {}
     observations = Observation.objects.filter(
         account_id__in=account_ids, observed_at__range=(observed_after, observed_before),
     ).select_related("billing_capture").prefetch_related("billing_capture__facts", "fast_corrections").order_by("observed_at", "id")
     for observation in observations:
-        value = interval_corrections(observation, config, rules=rules, started_at=observed_after, ended_at=observed_before)
+        value = interval_corrections(observation, config, started_at=observed_after, ended_at=observed_before)
         row = totals.setdefault(observation.account_id, {"amounts": CorrectionAmounts(), "missing_correction_intervals": 0, "unknown_long_context_request_count": 0, "correction_collected_until": None})
         row["amounts"] += value.amounts
         row["missing_correction_intervals"] += int(not value.facts_complete)

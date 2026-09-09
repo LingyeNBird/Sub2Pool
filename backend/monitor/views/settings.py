@@ -1,6 +1,7 @@
 """系统业务设置与连接测试 API。"""
 
 from datetime import timedelta
+from uuid import uuid4
 
 from django.db import transaction
 from django.utils import timezone
@@ -23,6 +24,7 @@ from ..models import (
     PagePermission,
     Participant,
     SystemUserAPIKey,
+    UpstreamPricingState,
 )
 from ..notifications import send_notification
 from ..replay import rebuild_account
@@ -43,7 +45,6 @@ DERIVED_RESULT_SETTINGS = frozenset(
         "recommendation_change_usd",
     }
 )
-DERIVED_RESULT_SETTINGS |= CORRECTION_SETTINGS
 
 CPA_PRICING_SETTINGS = frozenset(
     {
@@ -60,14 +61,12 @@ PLAN_RELEVANT_SETTINGS = frozenset(
         "timezone",
         "cost_basis",
         "weekly_quota_model",
-        "fast_correction_enabled",
         "initial_usd_per_percent",
         "safety_factor",
         "daily_estimate_min_percent_span",
     }
 )
 
-PLAN_RELEVANT_SETTINGS |= CORRECTION_SETTINGS
 
 
 def _temporary_sub2api_client(
@@ -123,7 +122,12 @@ class SettingsView(AdminAPIView):
         return ok(AppSettingsSerializer(AppSettings.load()).data)
 
     def patch(self, request):
+        if CORRECTION_SETTINGS.intersection(request.data):
+            return error(
+                "本地修正规则已冻结；请使用上游计费设置应用新策略。", 400
+            )
         config = AppSettings.load()
+        previous_base_url = config.sub2api_base_url.rstrip("/")
         account_ids = {account.fact_key for account in MonitoredAccount.objects.all()}
         serializer = AppSettingsSerializer(
             config,
@@ -183,6 +187,16 @@ class SettingsView(AdminAPIView):
                     raise LeaseLostError("系统设置已被其他请求修改，请刷新后重试")
                 serializer.instance = locked_config
                 config = serializer.save()
+                if config.sub2api_base_url.rstrip("/") != previous_base_url:
+                    MonitoredAccount.objects.filter(provider="sub2api").update(
+                        upstream_pricing_applied=False,
+                        pricing_epoch=f"connection:{uuid4().hex}",
+                    )
+                    UpstreamPricingState.objects.exclude(base_url="").update(
+                        status="failed",
+                        selected_group_ids=[],
+                        last_error="连接地址已变更，旧上游计费确认不适用于新服务；请核对原服务日志后手动处理。",
+                    )
                 if changed_cpa_pricing:
                     refresh_cpa_history(config, rebuild=False)
                 for replay_account_id in (

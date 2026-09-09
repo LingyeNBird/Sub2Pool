@@ -12,7 +12,7 @@ def observation_schemas(nullable_number: dict, nullable_string: dict) -> dict:
             "required": [
                 "account",
                 "items",
-                "fast_correction_enabled",
+                "corrections_available",
                 "pagination",
                 "summary",
             ],
@@ -29,7 +29,7 @@ def observation_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                     "type": "array",
                     "items": {"$ref": "#/components/schemas/Observation"},
                 },
-                "fast_correction_enabled": {"type": "boolean"},
+                "corrections_available": {"type": "boolean"},
                 "pagination": {
                     "$ref": "#/components/schemas/Pagination"
                 },

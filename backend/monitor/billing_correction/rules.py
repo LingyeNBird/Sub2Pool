@@ -1,15 +1,20 @@
 """Ordered, bounded model rules. Defaults are operator policy, not API prices."""
 
 import re
+from datetime import datetime
 from hashlib import sha256
 import json
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, Mapping
 
 from django.core.exceptions import ValidationError
 
 from ..fast_correction.rules import (
-    _decimal_text, _multiplier, MAX_FAST_CORRECTION_RULES,
+    _decimal_text,
+    _multiplier,
+    MAX_FAST_CORRECTION_RULES,
     MAX_MODEL_PATTERN_LENGTH,
+    normalize_fast_correction_rules,
 )
 
 CORRECTION_SETTINGS = frozenset({
@@ -17,6 +22,8 @@ CORRECTION_SETTINGS = frozenset({
     "long_context_correction_enabled", "long_context_correction_rules",
     "model_correction_enabled", "model_correction_rules",
 })
+
+CALCULATION_VERSION = "fast-long-model-v1"
 
 
 def default_long_context_correction_rules() -> list[dict]:
@@ -88,12 +95,124 @@ def first_match(rules: tuple, model: str) -> dict | None:
     return next((row for matcher, row in rules if matcher.fullmatch(str(model or "").strip())), None)
 
 
-def corrections_digest(config) -> str:
-    payload = {name: getattr(config, name) for name in sorted(CORRECTION_SETTINGS)}
-    # Change this version when the order or rounding semantics change.
-    payload["calculation_version"] = "fast-long-model-v1"
-    return sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+def disabled_correction_policy() -> dict[str, Any]:
+    return {
+        "fast_correction_enabled": False,
+        "fast_correction_rules": [],
+        "long_context_correction_enabled": False,
+        "long_context_correction_rules": [],
+        "model_correction_enabled": False,
+        "model_correction_rules": [],
+    }
 
 
-def corrections_enabled(config) -> bool:
-    return any(getattr(config, name) for name in CORRECTION_SETTINGS if name.endswith("_enabled"))
+def _policy_value(source: Any, name: str) -> Any:
+    if isinstance(source, Mapping):
+        if name not in source:
+            raise ValueError(f"冻结修正策略缺少字段 {name}")
+        return source[name]
+    try:
+        return getattr(source, name)
+    except AttributeError as exc:
+        raise ValueError(f"冻结修正策略缺少字段 {name}") from exc
+
+
+def correction_policy_values(
+    source: Any,
+    *,
+    allow_empty: bool = False,
+) -> dict[str, Any]:
+    """Return the normalized six-field legacy local-pricing policy."""
+
+    if isinstance(source, Mapping) and not source:
+        if allow_empty:
+            return disabled_correction_policy()
+        raise ValueError("历史本地修正观测缺少冻结策略")
+    enabled = {}
+    for name in (
+        "fast_correction_enabled",
+        "long_context_correction_enabled",
+        "model_correction_enabled",
+    ):
+        value = _policy_value(source, name)
+        if type(value) is not bool:
+            raise ValueError(f"冻结修正策略字段 {name} 必须是布尔值")
+        enabled[name] = value
+    return {
+        "fast_correction_enabled": enabled["fast_correction_enabled"],
+        "fast_correction_rules": normalize_fast_correction_rules(
+            _policy_value(source, "fast_correction_rules")
+        ),
+        "long_context_correction_enabled": enabled[
+            "long_context_correction_enabled"
+        ],
+        "long_context_correction_rules": normalize_long_context_correction_rules(
+            _policy_value(source, "long_context_correction_rules")
+        ),
+        "model_correction_enabled": enabled["model_correction_enabled"],
+        "model_correction_rules": normalize_model_correction_rules(
+            _policy_value(source, "model_correction_rules")
+        ),
+    }
+
+
+def observation_correction_config(observation) -> SimpleNamespace:
+    """Resolve one observation's immutable local-pricing configuration."""
+
+    source = str(observation.correction_source)
+    if source == "local":
+        policy = correction_policy_values(observation.frozen_correction_policy)
+    elif source in {"upstream", "none"}:
+        policy = disabled_correction_policy()
+    else:
+        raise ValueError(f"未知修正来源：{source}")
+    return SimpleNamespace(**policy)
+
+
+def corrections_digest(
+    source: Any,
+    *,
+    cutoff_at: datetime | None = None,
+) -> str:
+    payload = {
+        "calculation_version": CALCULATION_VERSION,
+        "policy": correction_policy_values(source, allow_empty=True),
+    }
+    if cutoff_at is not None:
+        payload["local_cutoff_at"] = cutoff_at.isoformat()
+    return sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
+def historical_rules_digest(observation) -> str:
+    payload = {
+        "calculation_version": CALCULATION_VERSION,
+        "correction_source": str(observation.correction_source),
+        "pricing_epoch": str(observation.pricing_epoch),
+        "policy": correction_policy_values(
+            observation_correction_config(observation)
+        ),
+    }
+    return sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
+def corrections_enabled(source: Any) -> bool:
+    policy = correction_policy_values(source, allow_empty=True)
+    return any(
+        policy[name]
+        for name in CORRECTION_SETTINGS
+        if name.endswith("_enabled")
+    )

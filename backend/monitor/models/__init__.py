@@ -26,6 +26,7 @@ from .cpa_usage import CPAUsageEvent
 from .cpa_collector import CPACollectorState
 from .cpa_collection import CPAAccountCollectionInterval
 from .audit import AnnouncementRead, BlockedIPAddress, LoginEvent, NotificationEvent
+from .upstream_pricing import UpstreamPricingState
 from .history_maintenance import (
     HistoricalRebuildRun,
     HistoryMaintenanceState,
@@ -41,6 +42,7 @@ __all__ = [
     "QuotaPool",
     "AnnouncementRead",
     "AppSettings",
+    "UpstreamPricingState",
     "BlockedIPAddress",
     "CPAUsageEvent",
     "CPAAccountCollectionInterval",

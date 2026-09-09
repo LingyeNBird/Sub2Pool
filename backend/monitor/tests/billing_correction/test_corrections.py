@@ -21,7 +21,7 @@ from monitor.fast_correction.domain import aggregate_fast_logs
 from monitor.fast_correction.persistence import apply_fast_interval
 from monitor.fast_correction.prefix import FastCorrectionPrefix
 from monitor.fast_correction.rules import FastCorrectionRuleSet
-from monitor.historical_rebuild.contracts import config_digest, source_fact_digest
+from monitor.historical_rebuild.contracts import source_fact_digest
 from monitor.integrations.sub2api import Sub2APIUsageLog
 from monitor.models import (
     AppSettings, BillingUsageFact, Observation, ObservationBillingCapture,
@@ -29,7 +29,7 @@ from monitor.models import (
 )
 from monitor.replay import rebuild_account
 from monitor.reporting.costs import FastCorrectionBreakdownPresenter
-from monitor.tests.helpers import create_monitored_account, create_participant, jwt_login
+from monitor.tests.helpers import create_monitored_account, create_participant, jwt_login, historical_pricing
 
 D = Decimal
 
@@ -134,6 +134,7 @@ def captured_observation(config, *, at=None, started=None, logs=None):
     started = started or at - timedelta(days=1)
     logs = logs if logs is not None else [log(created_at=at - timedelta(seconds=1))]
     observation = Observation.objects.create(
+        **historical_pricing(config),
         account_id=7, observed_at=at, window_seconds=604800,
         upstream_resets_at=started + timedelta(days=7), attribution_started_at=started,
         upstream_used_percent=D("10"), interval_used_percent=D("10"),
@@ -148,7 +149,7 @@ def captured_observation(config, *, at=None, started=None, logs=None):
 
 
 @pytest.mark.django_db
-def test_primary_facts_unchanged_by_local_repricing_and_empty_capture_is_known():
+def test_frozen_policy_preserves_primary_facts_and_historical_costs():
     config = AppSettings.load()
     create_monitored_account()
     observation, interval = captured_observation(config)
@@ -157,11 +158,11 @@ def test_primary_facts_unchanged_by_local_repricing_and_empty_capture_is_known()
     assert interval_corrections(observation, config).amounts.total == D("12.5")
     config.model_correction_rules = [{"model_pattern": "*", "multiplier": "1"}]
     result = interval_corrections(observation, config, include_models=True)
-    assert result.amounts.total == D("-37.5")
-    assert result.model_details[0]["corrected_cost_usd"] == 62.5
+    assert result.amounts.total == D("12.5")
+    assert result.model_details[0]["corrected_cost_usd"] == 112.5
     prefix = FastCorrectionPrefix(7, "actual", config)
-    assert prefix.total_between(interval.started_at, observation) == D("-37.5")
-    assert prefix.user_between(51, interval.started_at, interval.ended_at) == D("-37.5")
+    assert prefix.total_between(interval.started_at, observation) == D("12.5")
+    assert prefix.user_between(51, interval.started_at, interval.ended_at) == D("12.5")
     assert list(BillingUsageFact.objects.values()) == original
     assert source_fact_digest(7) == source_digest
     with pytest.raises(ValueError, match="禁止覆盖"):
@@ -174,7 +175,7 @@ def test_primary_facts_unchanged_by_local_repricing_and_empty_capture_is_known()
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("model", ["constant_average", "time_varying"])
-def test_setting_patch_replays_history_atomically_without_upstream(monkeypatch, model):
+def test_old_settings_patch_cannot_reprice_frozen_history(monkeypatch, model):
     config = AppSettings.load()
     config.weekly_quota_model = model
     config.save()
@@ -185,7 +186,6 @@ def test_setting_patch_replays_history_atomically_without_upstream(monkeypatch, 
     assert observation.selected_total_cost == D("112.5")
     source = list(BillingUsageFact.objects.values())
     captures = list(ObservationBillingCapture.objects.values())
-    before_config_digest = config_digest(config, account)
     get_user_model().objects.create_superuser("owner", "owner@example.com", "very-strong-password")
     client = Client()
     headers, _ = jwt_login(client)
@@ -193,26 +193,17 @@ def test_setting_patch_replays_history_atomically_without_upstream(monkeypatch, 
         raise AssertionError("Changing policy must NEVER create an upstream client")
     monkeypatch.setattr("monitor.integrations.sub2api.Sub2APIClient.__init__", offline)
     response = client.patch("/api/settings", data=json.dumps({"model_correction_enabled": False}), content_type="application/json", **headers)
-    assert response.status_code == 200, response.content
+    assert response.status_code == 400, response.content
     observation.refresh_from_db()
-    assert observation.selected_total_cost == D("62.5")
+    assert observation.selected_total_cost == D("112.5")
     assert observation.raw_selected_total_cost == D("100")
     config.refresh_from_db()
     assert list(BillingUsageFact.objects.values()) == source
     assert list(ObservationBillingCapture.objects.values()) == captures
-    assert config_digest(config, account) != before_config_digest
     breakdown = FastCorrectionBreakdownPresenter(config, 7).for_observation(observation)
     assert breakdown["sub2api_cost_usd"] == 100
-    assert breakdown["correction_total_usd"] == -37.5
-    assert breakdown["total_cost_usd"] == 62.5
-    # Corrupt evidence must roll back configuration rather than reprice partial data.
-    BillingUsageFact.objects.all().delete()
-    failed = client.patch("/api/settings", data=json.dumps({"model_correction_enabled": True}), content_type="application/json", **headers)
-    assert failed.status_code == 409
-    config.refresh_from_db()
-    assert config.model_correction_enabled is False
-    observation.refresh_from_db()
-    assert observation.selected_total_cost == D("62.5")
+    assert breakdown["correction_total_usd"] == 12.5
+    assert breakdown["total_cost_usd"] == 112.5
 
 
 @pytest.mark.django_db
@@ -240,6 +231,11 @@ def test_api_key_repricing_uses_deduplicated_facts_and_no_credentials(monkeypatc
     observation, _ = captured_observation(config)
     now = observation.observed_at + timedelta(minutes=1)
     requests = [log(created_at=observation.observed_at - timedelta(minutes=1))]
+    from monitor.models import UpstreamPricingState
+    pricing = UpstreamPricingState.load()
+    pricing.legacy_policy = historical_pricing(config)["frozen_correction_policy"]
+    pricing.local_cutoff_at = now
+    pricing.save()
     class Upstream:
         def list_user_api_keys(self, user):
             return [{"id": 3, "name": "public name", "status": "active", "key": "SECRET-MUST-NOT-PERSIST"}]
@@ -256,12 +252,12 @@ def test_api_key_repricing_uses_deduplicated_facts_and_no_credentials(monkeypatc
     raw = list(APIUsageRequestFact.objects.values())
     config.model_correction_enabled = False
     cached = fresh_snapshot(participant=participant, observation=observation, config=config, now=now + timedelta(minutes=2))
-    assert cached.participant_total_usd == D("62.5")
-    assert cached.api_keys[0]["correction_total_usd"] == -37.5
+    assert cached.participant_total_usd == D("112.5")
+    assert cached.api_keys[0]["correction_total_usd"] == 12.5
     assert list(APIUsageRequestFact.objects.values()) == raw
     config.cost_basis = "standard"
     cached = fresh_snapshot(participant=participant, observation=observation, config=config, now=now + timedelta(minutes=2))
-    assert cached.participant_total_usd == 125
+    assert cached.participant_total_usd == 225
     requests[0] = replace(requests[0], actual_cost=D("101"))
     with pytest.raises(ValueError, match="冲突"):
         refresh_participant_api_usage(client=Upstream(), participant=participant, observation=observation, config=config, observed_to=now + timedelta(minutes=3))

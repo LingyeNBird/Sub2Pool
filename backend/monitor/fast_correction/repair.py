@@ -1,8 +1,4 @@
-"""Targeted upstream backfill for all corrections, including legacy FAST-only intervals.
-
-The historic module/function/route names remain compatibility aliases. Existing
-primary captures are validated and read, never replaced by a new upstream query.
-"""
+"""Backfill immutable request evidence for frozen historical local corrections."""
 
 from datetime import timedelta
 
@@ -10,7 +6,7 @@ from django.db import transaction
 from django.db.models import Q
 
 from ..billing_correction.observations import interval_corrections
-from ..billing_correction.rules import corrections_enabled
+from ..billing_correction.rules import corrections_enabled, observation_correction_config
 from ..accounting.boundaries import official_start, same_official_reset
 from ..accounting.replay import rebuild_observation_suffix
 from ..history_state import LeaseGuard, fenced_fact_write
@@ -105,8 +101,11 @@ def calculate_missing_fast_correction(
     config = config or AppSettings.load()
     if observation.account_id < 0:
         raise ValueError("CPA 请求不使用 Sub2API 修正补算")
-    if not corrections_enabled(config):
-        raise ValueError("修正当前未启用")
+    if observation.correction_source != "local":
+        raise ValueError("新观测不进行本地修正")
+    frozen = observation_correction_config(observation)
+    if not corrections_enabled(frozen):
+        raise ValueError("此历史观测没有启用本地修正")
     if _has_capture(observation):
         return _result(observation, config)
 
@@ -125,7 +124,7 @@ def calculate_missing_fast_correction(
                 started_at=started_at,
                 ended_at=current.observed_at,
                 timezone_name=config.timezone,
-                correction_rules=config.fast_correction_rules,
+                correction_rules=observation_correction_config(current).fast_correction_rules,
             )
         return _persist_interval(
             current,

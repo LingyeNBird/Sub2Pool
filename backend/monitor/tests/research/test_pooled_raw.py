@@ -21,6 +21,7 @@ from monitor.research.pooled import Interval, grid, group_evidence, groups, summ
 from monitor.research.pooled_data import collect_batches, normalized_cost
 from monitor.research.pooled_protocol import canonical, consent_digest, descriptor, method_digest, grid_digest, QUALITY_KEYS, STUDY
 from monitor.tests.research.test_data import enable, request
+from monitor.tests.helpers import historical_pricing
 
 pytestmark = pytest.mark.django_db
 
@@ -33,6 +34,7 @@ def raw_cycle(n=2, *, start=None, account=7, modes=None):
     for i in range(n+1):
         at = start + timedelta(hours=i)
         row = Observation.objects.create(account_id=account, observed_at=at, window_seconds=604800,
+            **historical_pricing(),
             upstream_resets_at=reset, upstream_used_percent=i, total_actual_cost=10*i,
             total_standard_cost=10*i, raw_selected_total_cost=10*i, selected_total_cost=10*i,
             effective_usd_per_percent=20, raw_window={'query_mode':'direct'})

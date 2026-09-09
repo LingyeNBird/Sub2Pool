@@ -5,10 +5,7 @@ from decimal import Decimal
 
 from ..fast_correction.domain import money
 from ..fast_correction.rules import FastCorrectionRuleSet
-from .rules import (
-    compile_rules, first_match, normalize_long_context_correction_rules,
-    normalize_model_correction_rules,
-)
+from .rules import compile_rules, correction_policy_values, first_match
 
 ZERO = Decimal("0")
 ONE = Decimal("1")
@@ -60,11 +57,20 @@ class BillingCorrectionRules:
     Each stage adjustment rounds to six decimals; differences telescope exactly.
     """
 
-    def __init__(self, config):
-        self.fast_enabled = config.fast_correction_enabled
-        self.fast = FastCorrectionRuleSet(config.fast_correction_rules)
-        self.long_rules = compile_rules(normalize_long_context_correction_rules(config.long_context_correction_rules)) if config.long_context_correction_enabled else ()
-        self.model_rules = compile_rules(normalize_model_correction_rules(config.model_correction_rules)) if config.model_correction_enabled else ()
+    def __init__(self, policy):
+        values = correction_policy_values(policy, allow_empty=True)
+        self.fast_enabled = values["fast_correction_enabled"]
+        self.fast = FastCorrectionRuleSet(values["fast_correction_rules"])
+        self.long_rules = (
+            compile_rules(values["long_context_correction_rules"])
+            if values["long_context_correction_enabled"]
+            else ()
+        )
+        self.model_rules = (
+            compile_rules(values["model_correction_rules"])
+            if values["model_correction_enabled"]
+            else ()
+        )
 
     def calculate(self, log, basis: str) -> RequestCorrection:
         raw = Decimal(str(log.selected(basis)))

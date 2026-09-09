@@ -14,11 +14,9 @@ from monitor.fast_correction.prefix import FastCorrectionPrefix
 from monitor.fast_correction.rules import FastCorrectionRuleSet
 from monitor.models import AppSettings, Observation, ObservationFastCorrection
 from monitor.tests.billing_correction.test_corrections import log
-from monitor.tests.helpers import (
-    create_monitored_account,
-    create_participant,
-    create_participant_snapshot,
-)
+from monitor.tests.helpers import (create_monitored_account,
+create_participant,
+create_participant_snapshot, historical_pricing)
 
 D = Decimal
 ZERO = D("0")
@@ -43,22 +41,20 @@ def _observation(
     selected=ZERO,
     resets_at=None,
 ) -> Observation:
-    return Observation.objects.create(
-        account_id=7,
-        observed_at=at,
-        window_seconds=604800,
-        upstream_resets_at=resets_at or started_at + timedelta(days=7),
-        attribution_started_at=started_at,
-        upstream_used_percent=D("10"),
-        interval_used_percent=D("10"),
-        total_actual_cost=D(actual),
-        total_standard_cost=D(standard),
-        normalized_actual_cost=D(actual),
-        normalized_standard_cost=D(standard),
-        raw_selected_total_cost=D(selected),
-        selected_total_cost=D(selected),
-        effective_usd_per_percent=D("10"),
-    )
+    return Observation.objects.create(account_id=7,
+    observed_at=at,
+    window_seconds=604800,
+    upstream_resets_at=resets_at or started_at + timedelta(days=7),
+    attribution_started_at=started_at,
+    upstream_used_percent=D("10"),
+    interval_used_percent=D("10"),
+    total_actual_cost=D(actual),
+    total_standard_cost=D(standard),
+    normalized_actual_cost=D(actual),
+    normalized_standard_cost=D(standard),
+    raw_selected_total_cost=D(selected),
+    selected_total_cost=D(selected),
+    effective_usd_per_percent=D("10"), **historical_pricing())
 
 
 def _capture(
@@ -68,6 +64,8 @@ def _capture(
     started_at,
     logs,
 ) -> None:
+    for name, value in historical_pricing(config).items():
+        setattr(observation, name, value)
     interval = aggregate_fast_logs(
         logs,
         started_at=started_at,
@@ -153,7 +151,7 @@ def test_personal_mix_and_new_participant_account_fallback():
     ) == D("0.7")
 
 
-def test_current_rules_and_observation_cutoff_reprice_request_samples():
+def test_frozen_rules_and_observation_cutoff_bound_request_samples():
     config = _config("actual")
     config.model_correction_enabled = True
     config.model_correction_rules = [
@@ -218,7 +216,7 @@ def test_current_rules_and_observation_cutoff_reprice_request_samples():
     config.model_correction_rules = [
         {"model_pattern": "discounted", "multiplier": "0.25"}
     ]
-    assert balance_conversion_factor(first_snapshot, config) == D("4")
+    assert balance_conversion_factor(first_snapshot, config) == D("2")
 
 
 def test_request_samples_do_not_cross_manual_attribution_start():

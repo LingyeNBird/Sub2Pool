@@ -90,6 +90,9 @@ def _persist_cpa_capture(
         },
     )
     observation = Observation.objects.create(
+        correction_source="none",
+        frozen_correction_policy={},
+        pricing_epoch="cpa",
         account_id=account.fact_key,
         sample_point=point,
         source=source,

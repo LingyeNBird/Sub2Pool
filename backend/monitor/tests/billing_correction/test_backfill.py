@@ -13,7 +13,7 @@ from monitor.billing_correction.observations import interval_corrections
 from monitor.fast_correction.repair import calculate_missing_fast_correction
 from monitor.integrations.sub2api import Sub2APIError
 from monitor.models import AppSettings, BillingUsageFact, Observation, ObservationBillingCapture, ObservationFastCorrection
-from monitor.tests.helpers import create_monitored_account, jwt_login
+from monitor.tests.helpers import create_monitored_account, jwt_login, historical_pricing
 from monitor.tests.billing_correction.test_corrections import captured_observation, log
 
 pytestmark = pytest.mark.django_db
@@ -32,14 +32,12 @@ def seed_interval(legacy=False):
     start = timezone.now().replace(microsecond=0) - timedelta(hours=4)
     observations = []
     for index in range(1, 4):
-        observations.append(Observation.objects.create(
-            account_id=account.fact_key, observed_at=start + timedelta(hours=index),
-            window_seconds=604800, upstream_resets_at=start + timedelta(days=7),
-            attribution_started_at=start, upstream_used_percent=D(10 * index),
-            total_standard_cost=D(200 * index), total_actual_cost=D(100 * index),
-            raw_selected_total_cost=D(100 * index), selected_total_cost=D(100 * index),
-            effective_usd_per_percent=D(10), raw_window={"query_mode": "passive"},
-        ))
+        observations.append(Observation.objects.create(account_id=account.fact_key, observed_at=start + timedelta(hours=index),
+        window_seconds=604800, upstream_resets_at=start + timedelta(days=7),
+        attribution_started_at=start, upstream_used_percent=D(10 * index),
+        total_standard_cost=D(200 * index), total_actual_cost=D(100 * index),
+        raw_selected_total_cost=D(100 * index), selected_total_cost=D(100 * index),
+        effective_usd_per_percent=D(10), raw_window={"query_mode": "passive"}, **historical_pricing()))
     previous, target, later = observations
     if legacy:
         target.fast_correction_started_at = previous.observed_at
@@ -129,10 +127,10 @@ def test_backfill_single_interval_all_three_corrections_and_replay_suffix(monkey
     assert list(BillingUsageFact.objects.values()) == facts
     calls.clear()
     changed = client.patch("/api/settings", data=json.dumps({"model_correction_enabled": False}), content_type="application/json", **headers)
-    assert changed.status_code == 200, changed.content
+    assert changed.status_code == 400, changed.content
     assert not calls
     target.refresh_from_db()
-    assert target.selected_total_cost == D("162.5") * scale
+    assert target.selected_total_cost == D("212.5") * scale
     assert list(BillingUsageFact.objects.values()) == facts
 
 

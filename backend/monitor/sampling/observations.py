@@ -1,5 +1,6 @@
-"""上游百分比证据、Sub2API 成本快照与可选 FAST 区间的采集持久化。"""
+"""上游百分比证据、Sub2API 成本快照与不可变请求事实的采集持久化。"""
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from django.db import transaction
@@ -7,9 +8,8 @@ from django.db import transaction
 from .local_usage import observation_interval_costs
 from .types import LocalBundle, WindowReference
 from ..accounting.boundaries import same_official_reset
-from ..fast_correction.domain import FastCorrectionInterval
-from ..fast_correction.persistence import apply_fast_interval
-from ..fast_correction.service import fetch_fast_interval
+from ..billing_correction.facts import validate_interval_logs
+from ..billing_correction.persistence import persist_capture
 from ..integrations.sub2api import (
     Sub2APIError,
     Sub2APIReader,
@@ -18,16 +18,28 @@ from ..integrations.sub2api import (
 )
 from ..models import (
     AppSettings,
+    MonitoredAccount,
     Observation,
     ParticipantSnapshot,
     UsageSamplePoint,
 )
 
 
+@dataclass(frozen=True)
+class BillingCaptureInterval:
+    """A complete half-open request-log interval attached to one observation."""
+
+    started_at: datetime
+    ended_at: datetime
+    request_count: int
+    logs: tuple[Sub2APIUsageLog, ...]
+
+
 @transaction.atomic
 def create_raw_observation(
     *,
     config: AppSettings,
+    account: MonitoredAccount,
     reference: WindowReference,
     quota_query_mode: str,
     window: WeeklyWindow,
@@ -36,8 +48,8 @@ def create_raw_observation(
     sample_point: UsageSamplePoint,
     latest_raw: Observation | None = None,
     interval_logs: list[Sub2APIUsageLog] | None = None,
-    fast_interval: FastCorrectionInterval | None = None,
-    fast_error: str = "",
+    billing_capture: BillingCaptureInterval | None = None,
+    billing_capture_error: str = "",
 ) -> Observation:
     """保存采样证据；历史维护不会根据后续请求日志替换来源成本。"""
 
@@ -54,6 +66,11 @@ def create_raw_observation(
         interval_logs,
     )
     observation = Observation.objects.create(
+        correction_source=(
+            "upstream" if account.upstream_pricing_applied else "none"
+        ),
+        frozen_correction_policy={},
+        pricing_epoch=account.pricing_epoch,
         account_id=reference.account_id,
         sample_point=sample_point,
         source=source,
@@ -83,7 +100,11 @@ def create_raw_observation(
             "cost_window_started_at": local.cost_window_started_at.isoformat(),
             "cost_window_ended_at": local.cost_window_ended_at.isoformat(),
             "interval_cost_source": interval_source,
-            **({"fast_correction_error": fast_error} if fast_error else {}),
+            **(
+                {"billing_capture_error": billing_capture_error}
+                if billing_capture_error
+                else {}
+            ),
         },
     )
     ParticipantSnapshot.objects.bulk_create(
@@ -105,30 +126,29 @@ def create_raw_observation(
             for row in local.participants
         ]
     )
-    if fast_interval is not None:
-        apply_fast_interval(observation, fast_interval)
-        observation.save(
-            update_fields=[
-                "fast_correction_started_at",
-                "fast_correction_standard_cost",
-                "fast_correction_actual_cost",
-                "fast_correction_request_count",
-            ]
-        )
+    if billing_capture is not None:
+        persist_capture(observation, billing_capture)
     return observation
 
 
-def fetch_fast_correction(
+def fetch_billing_capture(
     client: Sub2APIReader,
     config: AppSettings,
     reference: WindowReference,
     latest_raw: Observation | None,
     ended_at: datetime,
-) -> tuple[FastCorrectionInterval | None, str]:
-    """读取一个原始采样区间的 FAST 请求；失败不阻断核心百分比采样。"""
+    *,
+    prefetched_logs: list[Sub2APIUsageLog] | None = None,
+) -> tuple[BillingCaptureInterval | None, str]:
+    """Read and validate the immutable request facts for one observation.
 
-    # Capture all requests even while every correction is off: later edits are local.
-    if not callable(getattr(client, "usage_logs", None)):
+    ``prefetched_logs`` is the complete log superset already fetched to bridge a
+    cumulative-snapshot coordinate change. Reusing it avoids a second upstream
+    request while still persisting exactly this observation's half-open range.
+    """
+
+    fetch_logs = getattr(client, "usage_logs", None)
+    if not callable(fetch_logs):
         return None, ""
 
     official_start = reference.reset_at - timedelta(
@@ -142,14 +162,35 @@ def fetch_fast_correction(
         started_at = latest_raw.observed_at
     started_at = min(started_at, ended_at)
     try:
+        if prefetched_logs is None:
+            logs = (
+                []
+                if started_at == ended_at
+                else fetch_logs(
+                    account_id=reference.account_id,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    timezone_name=config.timezone,
+                )
+            )
+        else:
+            logs = [
+                log
+                for log in prefetched_logs
+                if started_at <= log.created_at < ended_at
+            ]
+        validate_interval_logs(
+            logs,
+            account_id=reference.account_id,
+            started_at=started_at,
+            ended_at=ended_at,
+        )
         return (
-            fetch_fast_interval(
-                client,
-                account_id=reference.account_id,
+            BillingCaptureInterval(
                 started_at=started_at,
                 ended_at=ended_at,
-                timezone_name=config.timezone,
-                correction_rules=config.fast_correction_rules,
+                request_count=len(logs),
+                logs=tuple(logs),
             ),
             "",
         )

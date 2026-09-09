@@ -6,7 +6,6 @@ from datetime import datetime
 import os
 from typing import Any
 
-from ..billing_correction.rules import CORRECTION_SETTINGS
 from ..accounting.contracts import ALGORITHM_VERSION
 from ..fact_utils import (
     canonical_digest,
@@ -55,12 +54,11 @@ def config_digest(
         "timezone",
         "cost_basis",
         "weekly_quota_model",
-        "fast_correction_enabled",
         "initial_usd_per_percent",
         "safety_factor",
         "daily_estimate_min_percent_span",
     )
-    values = {field: getattr(config, field) for field in set(fields) | CORRECTION_SETTINGS}
+    values = {field: getattr(config, field) for field in fields}
     values["account"] = {
         "external_account_id": account.external_account_id,
         "quota_query_mode": account.quota_query_mode,

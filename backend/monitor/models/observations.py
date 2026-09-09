@@ -36,6 +36,13 @@ class Observation(models.Model):
     upstream_resets_at = models.DateTimeField()
     # 这是按原始采样推导的边界，不是独立、可变的周期实体。
     attribution_started_at = models.DateTimeField(null=True, blank=True)
+    correction_source = models.CharField(
+        max_length=16,
+        choices=(("local", "历史本地修正"), ("upstream", "上游已修正"), ("none", "未修正")),
+        default="none",
+    )
+    frozen_correction_policy = models.JSONField(default=dict, blank=True)
+    pricing_epoch = models.CharField(max_length=80, default="upstream-v1:pending")
     upstream_used_percent = models.DecimalField(max_digits=8, decimal_places=4, validators=PERCENT_VALIDATORS)
     # 区间内有效进度是可重放派生值；官方窗口等于上游值，手动起点则扣除起点进度。
     interval_used_percent = models.DecimalField(

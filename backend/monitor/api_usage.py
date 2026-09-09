@@ -10,7 +10,7 @@ from django.db import transaction
 from .billing_correction.domain import BillingCorrectionRules, CorrectionAmounts
 from .billing_correction.facts import validate_interval_logs
 from .billing_correction.persistence import persist_api_usage_facts
-from .billing_correction.rules import corrections_digest, corrections_enabled
+from .billing_correction.rules import corrections_digest, corrections_enabled, disabled_correction_policy
 
 from .fast_correction.constants import COST_PRECISION
 from .integrations.sub2api import Sub2APIClient
@@ -21,6 +21,7 @@ from .models import (
     Observation,
     Participant,
     ParticipantAPIUsageSnapshot,
+    UpstreamPricingState,
 )
 
 ZERO = Decimal("0")
@@ -58,13 +59,14 @@ def _matching_snapshots(
     observation: Observation,
     config: AppSettings,
 ):
+    pricing = UpstreamPricingState.load()
     return ParticipantAPIUsageSnapshot.objects.filter(
         participant=participant,
         account_id=observation.account_id,
         attribution_started_at=observation.attribution_started_at,
         cost_basis=config.cost_basis,
-        fast_correction_enabled=config.fast_correction_enabled,
-        fast_correction_rules_hash=corrections_digest(config),
+        fast_correction_enabled=pricing.legacy_policy.get("fast_correction_enabled", False),
+        fast_correction_rules_hash=corrections_digest(pricing.legacy_policy, cutoff_at=pricing.local_cutoff_at),
     )
 
 
@@ -92,25 +94,30 @@ def fresh_snapshot(*, participant, observation, config, now):
 def project_snapshot(snapshot, *, logs, keys, observation, config):
     names = {int(item["id"]): str(item.get("name") or "").strip() for item in keys}
     statuses = {int(item["id"]): str(item.get("status") or "") for item in keys}
-    rules = BillingCorrectionRules(config)
+    pricing = UpstreamPricingState.load()
+    rules = BillingCorrectionRules(pricing.legacy_policy or disabled_correction_policy())
     costs = defaultdict(Decimal)
     corrections = {}
     total = CorrectionAmounts()
     unknown = 0
     for item in logs:
-        result = rules.calculate(item, config.cost_basis)
-        costs[item.api_key_id] += result.corrected_cost.quantize(COST_PRECISION, rounding=ROUND_HALF_UP)
-        corrections[item.api_key_id] = corrections.get(item.api_key_id, CorrectionAmounts()) + result.amounts
-        total += result.amounts
-        unknown += int(result.long_context_unknown)
+        if item.created_at < pricing.local_cutoff_at:
+            result = rules.calculate(item, config.cost_basis)
+            cost = result.corrected_cost
+            corrections[item.api_key_id] = corrections.get(item.api_key_id, CorrectionAmounts()) + result.amounts
+            total += result.amounts
+            unknown += int(result.long_context_unknown)
+        else:
+            cost = Decimal(item.actual_cost if config.cost_basis == "actual" else item.total_cost)
+        costs[item.api_key_id] += cost.quantize(COST_PRECISION, rounding=ROUND_HALF_UP)
         if item.api_key_id and item.api_key_name:
             names.setdefault(item.api_key_id, item.api_key_name)
     participant_total = sum(costs.values(), ZERO)
     weekly_total = observation.selected_total_cost * HUNDRED / observation.interval_used_percent if observation.interval_used_percent > ZERO else None
     key_ids = sorted(set(names) | set(costs), key=lambda key: (key == 0, names.get(key, "").casefold(), key))
     snapshot.cost_basis = config.cost_basis
-    snapshot.fast_correction_enabled = config.fast_correction_enabled
-    snapshot.fast_correction_rules_hash = corrections_digest(config)
+    snapshot.fast_correction_enabled = pricing.legacy_policy.get("fast_correction_enabled", False)
+    snapshot.fast_correction_rules_hash = corrections_digest(pricing.legacy_policy, cutoff_at=pricing.local_cutoff_at)
     snapshot.participant_total_usd = participant_total
     snapshot.weekly_total_estimate_usd = weekly_total
     snapshot.participant_weekly_percent = _percentage(participant_total, weekly_total)
@@ -122,7 +129,7 @@ def project_snapshot(snapshot, *, logs, keys, observation, config):
         "weekly_quota_percent": float(_percentage(costs[key], weekly_total)),
         **corrections.get(key, CorrectionAmounts()).payload(),
     } for key in key_ids]
-    snapshot._correction_payload = {**total.payload(), "correction_facts_complete": True, "unknown_long_context_request_count": unknown, "corrections_enabled": corrections_enabled(config)}
+    snapshot._correction_payload = {**total.payload(), "correction_facts_complete": True, "unknown_long_context_request_count": unknown, "corrections_enabled": corrections_enabled(pricing.legacy_policy)}
 
 
 def refresh_participant_api_usage(

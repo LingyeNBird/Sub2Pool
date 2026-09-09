@@ -265,7 +265,7 @@ def test_cpa_account_is_supported_only_on_cpa_account_pages():
     )
     assert observations.status_code == 200
     assert observations.json()["data"]["account"]["provider"] == "cpa"
-    assert observations.json()["data"]["fast_correction_enabled"] is False
+    assert observations.json()["data"]["corrections_available"] is False
 
     assert observations.json()["data"]["summary"]["total"] == 0
 

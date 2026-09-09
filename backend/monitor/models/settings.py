@@ -103,6 +103,8 @@ class MonitoredAccount(models.Model):
     last_success_at = models.DateTimeField(null=True, blank=True)
     next_local_check_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True)
+    upstream_pricing_applied = models.BooleanField(default=False)
+    pricing_epoch = models.CharField(max_length=80, default="upstream-v1:pending")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -271,7 +273,7 @@ class AppSettings(models.Model):
         ),
         default="time_varying",
     )
-    # Current rules replay saved request facts; legacy FAST-only evidence stays frozen.
+    # Upgrade freezes these archival rules on historical observations; new pricing is upstream.
     fast_correction_enabled = models.BooleanField(default=True)
     fast_correction_rules = models.JSONField(
         default=default_fast_correction_rules,

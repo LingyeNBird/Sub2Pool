@@ -51,12 +51,10 @@ from monitor.integrations.sub2api import (
 )
 from monitor import database_transfer
 from monitor.reporting.costs import FastCorrectionBreakdownPresenter
-from monitor.tests.helpers import (
-    create_monitored_account,
-    create_participant,
-    create_recommendation_snapshot,
-    jwt_login,
-)
+from monitor.tests.helpers import (create_monitored_account,
+create_participant,
+create_recommendation_snapshot,
+jwt_login, historical_pricing)
 
 
 @pytest.mark.django_db
@@ -66,22 +64,20 @@ def test_disabled_fast_mode_still_reports_saved_historical_correction():
     config.fast_correction_enabled = False
     config.save()
     now = timezone.now()
-    observation = Observation.objects.create(
-        account_id=7,
-        observed_at=now,
-        window_seconds=604800,
-        upstream_resets_at=now + timedelta(days=4),
-        attribution_started_at=now - timedelta(days=3),
-        upstream_used_percent=Decimal("20"),
-        interval_used_percent=Decimal("20"),
-        raw_selected_total_cost=Decimal("100"),
-        selected_total_cost=Decimal("125"),
-        total_standard_cost=Decimal("125"),
-        total_actual_cost=Decimal("125"),
-        fast_correction_standard_cost=Decimal("25"),
-        fast_correction_actual_cost=Decimal("25"),
-        effective_usd_per_percent=Decimal("6.25"),
-    )
+    observation = Observation.objects.create(account_id=7,
+    observed_at=now,
+    window_seconds=604800,
+    upstream_resets_at=now + timedelta(days=4),
+    attribution_started_at=now - timedelta(days=3),
+    upstream_used_percent=Decimal("20"),
+    interval_used_percent=Decimal("20"),
+    raw_selected_total_cost=Decimal("100"),
+    selected_total_cost=Decimal("125"),
+    total_standard_cost=Decimal("125"),
+    total_actual_cost=Decimal("125"),
+    fast_correction_standard_cost=Decimal("25"),
+    fast_correction_actual_cost=Decimal("25"),
+    effective_usd_per_percent=Decimal("6.25"), **historical_pricing())
 
     breakdown = FastCorrectionBreakdownPresenter(config, 7).for_observation(
         observation
@@ -124,21 +120,19 @@ def test_statistics_groups_capacity_and_participant_usage():
     attribution_started_at = base - timedelta(days=7)
 
     def observation(at, rate):
-        return Observation.objects.create(
-            account_id=7,
-            observed_at=at,
-            window_seconds=604800,
-            upstream_resets_at=reset_at,
-            attribution_started_at=attribution_started_at,
-            upstream_used_percent=10,
-            interval_used_percent=10,
-            raw_selected_total_cost=100,
-            selected_total_cost=100,
-            total_standard_cost=100,
-            total_actual_cost=100,
-            effective_usd_per_percent=Decimal(rate),
-            raw_window={"rate_method": RATE_METHOD},
-        )
+        return Observation.objects.create(account_id=7,
+        observed_at=at,
+        window_seconds=604800,
+        upstream_resets_at=reset_at,
+        attribution_started_at=attribution_started_at,
+        upstream_used_percent=10,
+        interval_used_percent=10,
+        raw_selected_total_cost=100,
+        selected_total_cost=100,
+        total_standard_cost=100,
+        total_actual_cost=100,
+        effective_usd_per_percent=Decimal(rate),
+        raw_window={"rate_method": RATE_METHOD}, **historical_pricing())
 
     observation(base, "10")
     observation(base + timedelta(hours=2), "12")
@@ -220,23 +214,21 @@ def test_statistics_separates_cycle_and_daily_capacity_estimates():
     attribution_started_at = now - timedelta(days=2)
 
     def observation(at, used_percent, cost):
-        Observation.objects.create(
-            account_id=7,
-            observed_at=at,
-            window_seconds=604800,
-            upstream_resets_at=reset_at,
-            attribution_started_at=attribution_started_at,
-            upstream_used_percent=used_percent,
-            interval_used_percent=used_percent,
-            raw_selected_total_cost=cost,
-            selected_total_cost=cost,
-            total_standard_cost=cost,
-            total_actual_cost=cost,
-            sample_usd_per_percent=Decimal(cost) / Decimal(used_percent),
-            effective_usd_per_percent=Decimal("20"),
-            valid_sample=True,
-            raw_window={"rate_method": RATE_METHOD},
-        )
+        Observation.objects.create(account_id=7,
+        observed_at=at,
+        window_seconds=604800,
+        upstream_resets_at=reset_at,
+        attribution_started_at=attribution_started_at,
+        upstream_used_percent=used_percent,
+        interval_used_percent=used_percent,
+        raw_selected_total_cost=cost,
+        selected_total_cost=cost,
+        total_standard_cost=cost,
+        total_actual_cost=cost,
+        sample_usd_per_percent=Decimal(cost) / Decimal(used_percent),
+        effective_usd_per_percent=Decimal("20"),
+        valid_sample=True,
+        raw_window={"rate_method": RATE_METHOD}, **historical_pricing())
 
     first_at = local_day_start + timedelta(minutes=5)
     last_at = local_day_start + timedelta(hours=20)
@@ -352,23 +344,21 @@ def test_statistics_endpoint_formula_is_independent_of_quota_model():
 
     now = timezone.now()
     attribution_started_at = now - timedelta(days=2)
-    Observation.objects.create(
-        account_id=7,
-        observed_at=now,
-        window_seconds=604800,
-        upstream_resets_at=now + timedelta(days=5),
-        attribution_started_at=attribution_started_at,
-        upstream_used_percent=Decimal("20"),
-        interval_used_percent=Decimal("20"),
-        raw_selected_total_cost=Decimal("600"),
-        selected_total_cost=Decimal("600"),
-        total_standard_cost=Decimal("600"),
-        total_actual_cost=Decimal("600"),
-        sample_usd_per_percent=Decimal("30"),
-        effective_usd_per_percent=Decimal("25"),
-        valid_sample=True,
-        raw_window={"rate_method": RATE_METHOD},
-    )
+    Observation.objects.create(account_id=7,
+    observed_at=now,
+    window_seconds=604800,
+    upstream_resets_at=now + timedelta(days=5),
+    attribution_started_at=attribution_started_at,
+    upstream_used_percent=Decimal("20"),
+    interval_used_percent=Decimal("20"),
+    raw_selected_total_cost=Decimal("600"),
+    selected_total_cost=Decimal("600"),
+    total_standard_cost=Decimal("600"),
+    total_actual_cost=Decimal("600"),
+    sample_usd_per_percent=Decimal("30"),
+    effective_usd_per_percent=Decimal("25"),
+    valid_sample=True,
+    raw_window={"rate_method": RATE_METHOD}, **historical_pricing())
 
     constant = client.get("/api/statistics", **headers).json()["data"]
 
@@ -437,21 +427,24 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
         page_code=PagePermission.STATISTICS,
     )
     now = timezone.now()
+    from monitor.models import UpstreamPricingState
+    pricing = UpstreamPricingState.load()
+    pricing.legacy_policy = historical_pricing(config)["frozen_correction_policy"]
+    pricing.local_cutoff_at = now
+    pricing.save()
     starts_at = now - timedelta(days=2)
-    Observation.objects.create(
-        account_id=7,
-        observed_at=now - timedelta(minutes=5),
-        window_seconds=604800,
-        upstream_resets_at=now + timedelta(days=5),
-        attribution_started_at=starts_at,
-        upstream_used_percent=Decimal("20"),
-        interval_used_percent=Decimal("20"),
-        raw_selected_total_cost=Decimal("400"),
-        selected_total_cost=Decimal("400"),
-        total_standard_cost=Decimal("500"),
-        total_actual_cost=Decimal("400"),
-        effective_usd_per_percent=Decimal("20"),
-    )
+    Observation.objects.create(account_id=7,
+    observed_at=now - timedelta(minutes=5),
+    window_seconds=604800,
+    upstream_resets_at=now + timedelta(days=5),
+    attribution_started_at=starts_at,
+    upstream_used_percent=Decimal("20"),
+    interval_used_percent=Decimal("20"),
+    raw_selected_total_cost=Decimal("400"),
+    selected_total_cost=Decimal("400"),
+    total_standard_cost=Decimal("500"),
+    total_actual_cost=Decimal("400"),
+    effective_usd_per_percent=Decimal("20"), **historical_pricing())
 
     calls = {"keys": 0, "logs": 0}
 
@@ -562,7 +555,7 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
         f"/api/statistics/participants/{participant.id}/api-usage",
         **headers,
     ).json()["data"]
-    assert model_specific["participant_total_usd"] == 100.0
+    assert model_specific["participant_total_usd"] == 115.0
     assert calls == {"keys": 1, "logs": 1}
     assert ParticipantAPIUsageSnapshot.objects.count() == 1
 
@@ -572,8 +565,8 @@ def test_api_key_usage_breakdown_uses_current_cycle_and_user_permissions(
         f"/api/statistics/participants/{participant.id}/api-usage",
         **headers,
     ).json()["data"]
-    assert uncorrected["fast_correction_enabled"] is False
-    assert uncorrected["participant_total_usd"] == 100.0
+    assert uncorrected["fast_correction_enabled"] is True
+    assert uncorrected["participant_total_usd"] == 115.0
     assert calls == {"keys": 1, "logs": 1}
     assert ParticipantAPIUsageSnapshot.objects.count() == 1
     assert (
@@ -597,20 +590,18 @@ def test_background_api_usage_refreshes_each_participant_at_most_hourly(
     sub2api_user_id=22,
     share_percent=50,)
     now = timezone.now()
-    Observation.objects.create(
-        account_id=7,
-        observed_at=now,
-        window_seconds=604800,
-        upstream_resets_at=now + timedelta(days=5),
-        attribution_started_at=now - timedelta(days=2),
-        upstream_used_percent=Decimal("20"),
-        interval_used_percent=Decimal("20"),
-        raw_selected_total_cost=Decimal("400"),
-        selected_total_cost=Decimal("400"),
-        total_standard_cost=Decimal("400"),
-        total_actual_cost=Decimal("400"),
-        effective_usd_per_percent=Decimal("20"),
-    )
+    Observation.objects.create(account_id=7,
+    observed_at=now,
+    window_seconds=604800,
+    upstream_resets_at=now + timedelta(days=5),
+    attribution_started_at=now - timedelta(days=2),
+    upstream_used_percent=Decimal("20"),
+    interval_used_percent=Decimal("20"),
+    raw_selected_total_cost=Decimal("400"),
+    selected_total_cost=Decimal("400"),
+    total_standard_cost=Decimal("400"),
+    total_actual_cost=Decimal("400"),
+    effective_usd_per_percent=Decimal("20"), **historical_pricing())
     calls = {"keys": 0, "logs": 0}
 
     class FakeClient:

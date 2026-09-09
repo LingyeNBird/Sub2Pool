@@ -1,7 +1,7 @@
-"""Current-policy correction prefixes over immutable local request evidence.
+"""Frozen-policy correction prefixes over immutable request evidence.
 
 The public class name is retained for internal compatibility. Its monetary
-methods now return ALL corrections, including signed long-context reductions.
+methods return all local corrections frozen on historical observations.
 """
 
 from bisect import bisect_right
@@ -9,7 +9,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from .constants import MAX_KEY_ID, ZERO
-from ..billing_correction.domain import BillingCorrectionRules, CorrectionAmounts
+from ..billing_correction.domain import CorrectionAmounts
 from ..billing_correction.observations import interval_corrections
 from ..models import AppSettings, Observation, Sub2APIUserUsageSample
 
@@ -17,10 +17,6 @@ from ..models import AppSettings, Observation, Sub2APIUserUsageSample
 class FastCorrectionPrefix:
     def __init__(self, account_id: int, basis: str, config: AppSettings | None = None):
         config = config or AppSettings.load()
-        # Callers may request a basis other than the singleton's current basis.
-        from copy import copy
-        config = copy(config)
-        config.cost_basis = basis
         self.account_id = account_id
         self.total_keys = []
         self.total_values = []
@@ -37,7 +33,7 @@ class FastCorrectionPrefix:
         self.user_raw_costs = None
         if account_id < 0:
             return
-        rules = BillingCorrectionRules(config)
+        rules_cache = {}
         observations = list(
             Observation.objects.filter(account_id=account_id)
             .select_related("billing_capture")
@@ -50,12 +46,19 @@ class FastCorrectionPrefix:
         sample_users = {}
         missing = unknown = 0
         for observation in observations:
-            interval = interval_corrections(observation, config, rules=rules)
+            interval = interval_corrections(
+                observation,
+                config,
+                rules_cache=rules_cache,
+            )
             key = (observation.observed_at, observation.id)
             total += interval.amounts
-            missing += int(not interval.facts_complete)
+            missing += int(
+                observation.correction_source == "local"
+                and not interval.facts_complete
+            )
             unknown += interval.unknown_long_context_request_count
-            if interval.facts_complete:
+            if interval.raw_cost is not None and interval.actual_cost is not None:
                 sample_total_actual += interval.actual_cost or ZERO
                 sample_total_selected += (
                     (interval.raw_cost or ZERO) + interval.amounts.total
@@ -106,7 +109,7 @@ class FastCorrectionPrefix:
     def sample_between(
         self, started_at: datetime, observation: Observation
     ) -> tuple[Decimal, Decimal]:
-        """Return actual wallet cost and current-policy selected request cost."""
+        """Return actual wallet cost and frozen-policy selected request cost."""
         start = (started_at, MAX_KEY_ID)
         end = (observation.observed_at, observation.id)
         return (

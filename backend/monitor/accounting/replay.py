@@ -112,6 +112,7 @@ def _replay_usage_samples(
             "manual_override",
             "official_zero_observation",
             "provider_collection_baseline",
+            "pricing_changed",
         }:
             baseline = normalized_by_key.get(
                 (

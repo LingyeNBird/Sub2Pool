@@ -45,6 +45,15 @@ def test_admin_announcements_have_persistent_per_user_read_state():
         f"/api/announcements/{announcement['code']}/read",
         **regular_headers,
     ).status_code == 403
+    assert regular_client.post(
+        "/api/settings/upstream-pricing/apply",
+        data={"confirm": True, "announcement": True, "group_ids": [7]},
+        content_type="application/json", **regular_headers,
+    ).status_code == 403
+    assert regular_client.patch(
+        "/api/settings", data={"auto_apply_recommendations": True},
+        content_type="application/json", **regular_headers,
+    ).status_code == 403
 
     marked = admin_client.post(
         f"/api/announcements/{announcement['code']}/read",

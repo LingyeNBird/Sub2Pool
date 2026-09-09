@@ -33,6 +33,8 @@ def apply_fast_interval(
     """在调用者的事务中覆盖一个观测区间的可重建 FAST 修正事实。"""
 
     from ..billing_correction.persistence import persist_capture
+    if observation.correction_source != "local":
+        raise ValueError("只能为冻结的历史观测保存本地修正")
 
     persist_capture(observation, interval)
     observation.fast_correction_started_at = interval.started_at

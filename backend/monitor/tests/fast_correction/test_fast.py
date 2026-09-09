@@ -44,15 +44,13 @@ from monitor.integrations.sub2api import (
     WeeklyWindow,
 )
 from monitor import database_transfer
-from monitor.tests.helpers import (
-    create_monitored_account,
-    create_participant,
-    create_recommendation_snapshot,
-    jwt_login,
-)
+from monitor.tests.helpers import (create_monitored_account,
+create_participant,
+create_recommendation_snapshot,
+jwt_login, historical_pricing)
 
 @pytest.mark.django_db
-def test_sampling_applies_ordered_model_fast_correction_rules(monkeypatch):
+def test_sampling_keeps_upstream_costs_without_applying_archived_rules(monkeypatch):
     get_user_model().objects.create_superuser(
         username="owner",
         password="very-strong-password",
@@ -150,23 +148,20 @@ def test_sampling_applies_ordered_model_fast_correction_rules(monkeypatch):
             ]
 
     monkeypatch.setattr("monitor.engine.Sub2APIClient", FakeClient)
-    result = run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
+    account = create_monitored_account(7)
+    account.upstream_pricing_applied = True
+    account.pricing_epoch = "upstream-v1:1:applied"
+    account.save()
+    result = run_monitor(account_id=account.id, force_upstream=True, source="manual")
 
     assert result["status"] == "calibrated"
     observation = Observation.objects.get()
-    assert observation.fast_correction_standard_cost == Decimal("5")
-    assert observation.fast_correction_actual_cost == Decimal("5")
-    assert observation.selected_total_cost == Decimal("205")
-    corrections = list(
-        ObservationFastCorrection.objects.order_by("sub2api_user_id")
-    )
-    assert [row.sub2api_user_id for row in corrections] == [51, 52]
-    assert [row.actual_correction_cost for row in corrections] == [
-        Decimal("0"),
-        Decimal("5"),
-    ]
-    assert observation.fast_correction_request_count == 3
-    assert [row.request_count for row in corrections] == [2, 1]
+    assert observation.correction_source == "upstream"
+    assert observation.fast_correction_standard_cost is None
+    assert observation.fast_correction_actual_cost is None
+    assert observation.selected_total_cost == Decimal("200")
+    assert not ObservationFastCorrection.objects.exists()
+    assert observation.billing_capture.request_count == 3
 
     client = Client()
     headers, _ = jwt_login(client)
@@ -176,51 +171,13 @@ def test_sampling_applies_ordered_model_fast_correction_rules(monkeypatch):
     )
     assert detail_response.status_code == 200
     detail = detail_response.json()["data"]
-    assert detail["request_count"] == 3
-    assert detail["fast_request_count"] == 2
-    assert detail["non_fast_request_count"] == 1
-    assert detail["fast_billed_cost_usd"] == 100.0
-    assert detail["correction_usd"] == 5.0
-    assert detail["corrected_fast_cost_usd"] == 105.0
-    assert detail["users"] == [
-        {
-            "sub2api_user_id": 51,
-            "username": "",
-            "email": "",
-            "display_name": "已配置参与者",
-            "request_count": 2,
-            "fast_request_count": 1,
-            "non_fast_request_count": 1,
-            "fast_billed_cost_usd": 80.0,
-            "correction_usd": 0.0,
-            "corrected_fast_cost_usd": 80.0,
-            "raw_cost_usd": 180.0, "corrected_cost_usd": 180.0,
-            "fast_correction_usd": 0.0, "long_context_correction_usd": 0.0,
-            "model_correction_usd": 0.0, "correction_total_usd": 0.0,
-            "unknown_long_context_request_count": 1,
-        },
-        {
-            "sub2api_user_id": 52,
-            "username": "",
-            "email": "",
-            "display_name": "用户 52",
-            "request_count": 1,
-            "fast_request_count": 1,
-            "non_fast_request_count": 0,
-            "fast_billed_cost_usd": 20.0,
-            "correction_usd": 5.0,
-            "corrected_fast_cost_usd": 25.0,
-            "raw_cost_usd": 20.0, "corrected_cost_usd": 25.0,
-            "fast_correction_usd": 5.0, "long_context_correction_usd": 0.0,
-            "model_correction_usd": 0.0, "correction_total_usd": 5.0,
-            "unknown_long_context_request_count": 0,
-        },
-    ]
+    assert detail["correction_source"] == "upstream"
+    assert "correction_usd" not in detail
     snapshot = ParticipantSnapshot.objects.get(participant=participant)
     assert snapshot.selected_cost == Decimal("150")
 
 @pytest.mark.django_db
-def test_disabled_fast_correction_still_captures_raw_requests_for_future_repricing(
+def test_unconfirmed_pricing_keeps_raw_capture_without_local_fallback(
     monkeypatch,
 ):
     config = AppSettings.load()
@@ -264,8 +221,9 @@ def test_disabled_fast_correction_still_captures_raw_requests_for_future_reprici
     run_monitor(account_id=create_monitored_account(7).id, force_upstream=True, source="manual")
 
     observation = Observation.objects.get()
-    assert observation.fast_correction_standard_cost == Decimal("0")
-    assert observation.fast_correction_actual_cost == Decimal("0")
+    assert observation.correction_source == "none"
+    assert observation.fast_correction_standard_cost is None
+    assert observation.fast_correction_actual_cost is None
     assert observation.billing_capture.request_count == 0
     assert observation.selected_total_cost == Decimal("100")
 
@@ -283,19 +241,17 @@ def test_unsafe_fast_rebuild_endpoint_is_removed_and_missing_facts_are_preserved
     cycle_start = timezone.now().replace(microsecond=0) - timedelta(days=2)
     reset_at = cycle_start + timedelta(days=7)
     observations = [
-        Observation.objects.create(
-            account_id=7,
-            observed_at=cycle_start + timedelta(hours=offset),
-            window_seconds=604800,
-            upstream_resets_at=reset_at,
-            attribution_started_at=cycle_start,
-            upstream_used_percent=Decimal(offset * 10),
-            raw_selected_total_cost=Decimal(offset * 100),
-            selected_total_cost=Decimal(offset * 100),
-            total_standard_cost=Decimal(offset * 100),
-            total_actual_cost=Decimal(offset * 100),
-            effective_usd_per_percent=Decimal("10"),
-        )
+        Observation.objects.create(account_id=7,
+        observed_at=cycle_start + timedelta(hours=offset),
+        window_seconds=604800,
+        upstream_resets_at=reset_at,
+        attribution_started_at=cycle_start,
+        upstream_used_percent=Decimal(offset * 10),
+        raw_selected_total_cost=Decimal(offset * 100),
+        selected_total_cost=Decimal(offset * 100),
+        total_standard_cost=Decimal(offset * 100),
+        total_actual_cost=Decimal(offset * 100),
+        effective_usd_per_percent=Decimal("10"), **historical_pricing())
         for offset in (1, 2)
     ]
     client = Client()
@@ -339,32 +295,28 @@ def test_admin_can_calculate_one_missing_fast_interval_without_bulk_rebuild(
     config.save()
     cycle_start = timezone.now().replace(microsecond=0) - timedelta(days=2)
     reset_at = cycle_start + timedelta(days=7)
-    previous = Observation.objects.create(
-        account_id=7,
-        observed_at=cycle_start + timedelta(hours=1),
-        window_seconds=604800,
-        upstream_resets_at=reset_at,
-        attribution_started_at=cycle_start,
-        upstream_used_percent=Decimal("10"),
-        raw_selected_total_cost=Decimal("100"),
-        selected_total_cost=Decimal("100"),
-        total_standard_cost=Decimal("100"),
-        total_actual_cost=Decimal("100"),
-        effective_usd_per_percent=Decimal("10"),
-    )
-    target = Observation.objects.create(
-        account_id=7,
-        observed_at=cycle_start + timedelta(hours=2),
-        window_seconds=604800,
-        upstream_resets_at=reset_at,
-        attribution_started_at=cycle_start,
-        upstream_used_percent=Decimal("20"),
-        raw_selected_total_cost=Decimal("200"),
-        selected_total_cost=Decimal("200"),
-        total_standard_cost=Decimal("200"),
-        total_actual_cost=Decimal("200"),
-        effective_usd_per_percent=Decimal("10"),
-    )
+    previous = Observation.objects.create(account_id=7,
+    observed_at=cycle_start + timedelta(hours=1),
+    window_seconds=604800,
+    upstream_resets_at=reset_at,
+    attribution_started_at=cycle_start,
+    upstream_used_percent=Decimal("10"),
+    raw_selected_total_cost=Decimal("100"),
+    selected_total_cost=Decimal("100"),
+    total_standard_cost=Decimal("100"),
+    total_actual_cost=Decimal("100"),
+    effective_usd_per_percent=Decimal("10"), **historical_pricing())
+    target = Observation.objects.create(account_id=7,
+    observed_at=cycle_start + timedelta(hours=2),
+    window_seconds=604800,
+    upstream_resets_at=reset_at,
+    attribution_started_at=cycle_start,
+    upstream_used_percent=Decimal("20"),
+    raw_selected_total_cost=Decimal("200"),
+    selected_total_cost=Decimal("200"),
+    total_standard_cost=Decimal("200"),
+    total_actual_cost=Decimal("200"),
+    effective_usd_per_percent=Decimal("10"), **historical_pricing())
     calls = []
 
     class FakeClient:

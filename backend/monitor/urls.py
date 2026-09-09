@@ -81,6 +81,11 @@ from .views.users import (
 )
 
 from .views.research import ResearchSettingsView, ResearchRunView
+from .views.upstream_pricing import (
+    UpstreamPricingView,
+    UpstreamPricingApplyView,
+    UpstreamPricingRevertView,
+)
 
 urlpatterns = [
     path("settings/research", ResearchSettingsView.as_view()),
@@ -172,6 +177,9 @@ urlpatterns = [
     path("particle-trajectory", ParticleTrajectoryView.as_view()),
     path("notifications", NotificationListView.as_view()),
     path("settings", SettingsView.as_view()),
+    path("settings/upstream-pricing", UpstreamPricingView.as_view()),
+    path("settings/upstream-pricing/apply", UpstreamPricingApplyView.as_view()),
+    path("settings/upstream-pricing/revert", UpstreamPricingRevertView.as_view()),
     path("settings/openai-accounts", OpenAIAccountListView.as_view()),
     path("settings/cpa-accounts", CPAAccountListView.as_view()),
     path(

@@ -11,6 +11,7 @@ from monitor.engine import run_monitor
 from monitor.api_usage import refresh_due_api_usage_snapshots
 from monitor.balance_operations import auto_apply_recommendations
 from monitor.models import AppSettings, MonitoredAccount
+from monitor.upstream_pricing.service import run_automatic_migration
 
 
 def schedule_next_run(
@@ -53,6 +54,13 @@ class Command(BaseCommand):
                 now=cycle_started_at,
                 cycle_started_at=cycle_started_at,
             )
+            try:
+                pricing = run_automatic_migration()
+                if pricing is not None:
+                    self.stdout.write(f"上游计费迁移：{pricing.status}")
+            except Exception as exc:
+                # Failed migration never enables local corrections or stops raw collection.
+                self.stderr.write(f"上游计费迁移失败：{exc}")
             try:
                 result = run_monitor(force_upstream=False, source="scheduled")
                 self.stdout.write(f"监控结果：{result}")

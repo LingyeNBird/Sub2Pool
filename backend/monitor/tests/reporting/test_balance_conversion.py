@@ -13,18 +13,16 @@ from monitor.replay import rebuild_account
 from monitor.reporting import aggregate_recommendation
 from monitor.reporting.recommendations import display_snapshot_data
 from monitor.tests.billing_correction.test_corrections import captured_observation, log
-from monitor.tests.helpers import (
-    create_monitored_account,
-    create_participant,
-    create_participant_snapshot,
-)
+from monitor.tests.helpers import (create_monitored_account,
+create_participant,
+create_participant_snapshot, historical_pricing)
 
 D = Decimal
 AT = datetime.fromisoformat("2026-09-07T12:00:00+00:00")
 
 
 @pytest.mark.django_db(transaction=True)
-def test_constant_recommendation_and_application_use_actual_wallet_dollars(monkeypatch):
+def test_frozen_history_keeps_wallet_recommendations_and_application_stable(monkeypatch):
     config = AppSettings.load()
     config.weekly_quota_model = "constant_average"
     config.safety_factor = D("1")
@@ -59,7 +57,7 @@ def test_constant_recommendation_and_application_use_actual_wallet_dollars(monke
     observation.refresh_from_db()
     converted, _ = aggregate_recommendation(participant, config)
     converted_display = display_snapshot_data(participant, config, account)
-    assert observation.selected_total_cost == D("225")
+    assert observation.selected_total_cost == D("100")
     assert observation.raw_selected_total_cost == D("100")
     for field in (
         "recommended_balance_usd", "recommended_balance_min_usd",
@@ -162,16 +160,14 @@ def test_pool_converts_each_signed_source_before_netting_and_applies_safety_once
     ):
         factor = D("2") if account == first else D("1")
         start = AT - timedelta(days=1)
-        observation = Observation.objects.create(
-            account_id=account.external_account_id, observed_at=AT,
-            upstream_resets_at=start+timedelta(days=7), attribution_started_at=start,
-            upstream_used_percent=40 if account == first else 80,
-            interval_used_percent=40 if account == first else 80,
-            raw_selected_total_cost=raw_total, selected_total_cost=raw_total*factor,
-            total_actual_cost=raw_total, total_standard_cost=raw_total,
-            effective_usd_per_percent=capacity/100,
-            capacity_lower_usd=capacity, capacity_upper_usd=capacity,
-        )
+        observation = Observation.objects.create(account_id=account.external_account_id, observed_at=AT,
+        upstream_resets_at=start+timedelta(days=7), attribution_started_at=start,
+        upstream_used_percent=40 if account == first else 80,
+        interval_used_percent=40 if account == first else 80,
+        raw_selected_total_cost=raw_total, selected_total_cost=raw_total*factor,
+        total_actual_cost=raw_total, total_standard_cost=raw_total,
+        effective_usd_per_percent=capacity/100,
+        capacity_lower_usd=capacity, capacity_upper_usd=capacity, **historical_pricing(config))
         request = log(
             account_id=account.external_account_id, created_at=AT-timedelta(seconds=1),
             model=model, service_tier="default", total_cost=raw_user,

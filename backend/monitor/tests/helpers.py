@@ -14,6 +14,17 @@ from monitor.models import (
     PoolParticipant,
     QuotaPool,
 )
+from monitor.billing_correction.rules import correction_policy_values
+from monitor.models import AppSettings
+
+
+def historical_pricing(config=None):
+    """Explicitly construct pre-cutover observations in historical regression fixtures."""
+    return {
+        "correction_source": "local",
+        "pricing_epoch": "local",
+        "frozen_correction_policy": correction_policy_values(config or AppSettings.load()),
+    }
 
 
 def jwt_login(

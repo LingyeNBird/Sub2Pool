@@ -11,7 +11,7 @@ from django.utils import timezone
 from monitor.integrations.sub2api import Sub2APIError, WeeklyWindow
 from monitor.models import AppSettings, MonitoredAccount, Observation, PagePermission, SystemUserPageAccess
 from monitor.secrets import encrypt_secret
-from monitor.tests.helpers import create_monitored_account, jwt_login
+from monitor.tests.helpers import create_monitored_account, jwt_login, historical_pricing
 from monitor.views.account_status import _fallback_usage
 
 
@@ -55,20 +55,18 @@ def test_account_status_returns_persisted_cycle_history_without_admin_token():
         used_percent,
         used_usd,
     ):
-        return Observation.objects.create(
-            account_id=account.external_account_id,
-            observed_at=observed_at,
-            window_seconds=604800,
-            upstream_resets_at=resets_at,
-            attribution_started_at=attribution_started_at,
-            upstream_used_percent=Decimal(used_percent),
-            estimated_used_percent=Decimal(used_percent),
-            raw_selected_total_cost=Decimal(used_usd),
-            selected_total_cost=Decimal(used_usd),
-            total_standard_cost=Decimal(used_usd),
-            total_actual_cost=Decimal(used_usd),
-            effective_usd_per_percent=Decimal("16"),
-        )
+        return Observation.objects.create(account_id=account.external_account_id,
+        observed_at=observed_at,
+        window_seconds=604800,
+        upstream_resets_at=resets_at,
+        attribution_started_at=attribution_started_at,
+        upstream_used_percent=Decimal(used_percent),
+        estimated_used_percent=Decimal(used_percent),
+        raw_selected_total_cost=Decimal(used_usd),
+        selected_total_cost=Decimal(used_usd),
+        total_standard_cost=Decimal(used_usd),
+        total_actual_cost=Decimal(used_usd),
+        effective_usd_per_percent=Decimal("16"), **historical_pricing())
 
     observation(
         observed_at=started_at + timedelta(days=1),
@@ -139,23 +137,21 @@ def test_account_status_returns_each_account_and_isolates_upstream_failures(
         (8, 3, "9", "12"),
     ):
         observed_at = now - timedelta(days=age_days)
-        Observation.objects.create(
-            account_id=account_id,
-            observed_at=observed_at,
-            window_seconds=604800,
-            upstream_resets_at=observed_at + timedelta(days=7),
-            attribution_started_at=observed_at - timedelta(days=1),
-            upstream_used_percent=Decimal("20"),
-            raw_selected_total_cost=Decimal("100"),
-            selected_total_cost=Decimal("100"),
-            total_standard_cost=Decimal("100"),
-            total_actual_cost=Decimal("100"),
-            fast_correction_started_at=observed_at,
-            fast_correction_request_count=1,
-            fast_correction_actual_cost=Decimal(actual),
-            fast_correction_standard_cost=Decimal(standard),
-            effective_usd_per_percent=Decimal("20"),
-        )
+        Observation.objects.create(account_id=account_id,
+        observed_at=observed_at,
+        window_seconds=604800,
+        upstream_resets_at=observed_at + timedelta(days=7),
+        attribution_started_at=observed_at - timedelta(days=1),
+        upstream_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("100"),
+        selected_total_cost=Decimal("100"),
+        total_standard_cost=Decimal("100"),
+        total_actual_cost=Decimal("100"),
+        fast_correction_started_at=observed_at,
+        fast_correction_request_count=1,
+        fast_correction_actual_cost=Decimal(actual),
+        fast_correction_standard_cost=Decimal(standard),
+        effective_usd_per_percent=Decimal("20"), **historical_pricing())
 
 
     class FakeClient:

@@ -21,11 +21,9 @@ from monitor.models import (
     SystemUserAPIKey,
     SystemUserPageAccess,
 )
-from monitor.tests.helpers import (
-    create_participant,
-    create_recommendation_snapshot,
-    jwt_login,
-)
+from monitor.tests.helpers import (create_participant,
+create_recommendation_snapshot,
+jwt_login, historical_pricing)
 
 
 @pytest.mark.django_db
@@ -58,20 +56,23 @@ def test_api_key_lifecycle_and_scope():
         participant=participant,
     )
     now = timezone.now()
-    observation = Observation.objects.create(
-        account_id=7,
-        observed_at=now,
-        window_seconds=604800,
-        upstream_resets_at=now + timedelta(days=3),
-        attribution_started_at=now - timedelta(days=4),
-        upstream_used_percent=Decimal("20"),
-        interval_used_percent=Decimal("20"),
-        raw_selected_total_cost=Decimal("400"),
-        selected_total_cost=Decimal("400"),
-        total_standard_cost=Decimal("400"),
-        total_actual_cost=Decimal("400"),
-        effective_usd_per_percent=Decimal("20"),
-    )
+    observation = Observation.objects.create(account_id=7,
+    observed_at=now,
+    window_seconds=604800,
+    upstream_resets_at=now + timedelta(days=3),
+    attribution_started_at=now - timedelta(days=4),
+    upstream_used_percent=Decimal("20"),
+    interval_used_percent=Decimal("20"),
+    raw_selected_total_cost=Decimal("400"),
+    selected_total_cost=Decimal("400"),
+    total_standard_cost=Decimal("400"),
+    total_actual_cost=Decimal("400"),
+    effective_usd_per_percent=Decimal("20"), **historical_pricing())
+    from monitor.models import UpstreamPricingState
+    pricing = UpstreamPricingState.load()
+    pricing.legacy_policy = historical_pricing(config)["frozen_correction_policy"]
+    pricing.local_cutoff_at = now
+    pricing.save()
     ParticipantAPIUsageSnapshot.objects.create(
         participant=participant,
         observation=observation,
@@ -80,7 +81,7 @@ def test_api_key_lifecycle_and_scope():
         observed_at=now,
         cost_basis="actual",
         fast_correction_enabled=config.fast_correction_enabled,
-        fast_correction_rules_hash=corrections_digest(config),
+        fast_correction_rules_hash=corrections_digest(pricing.legacy_policy, cutoff_at=pricing.local_cutoff_at),
         participant_total_usd=Decimal("120"),
         weekly_total_estimate_usd=Decimal("2000"),
         participant_weekly_percent=Decimal("6"),
@@ -471,20 +472,18 @@ def test_system_user_api_key_follows_live_page_and_data_permissions():
     now = timezone.now()
     observations = {}
     for offset, account in enumerate((allowed_account, hidden_account)):
-        observations[account.id] = Observation.objects.create(
-            account_id=account.external_account_id,
-            observed_at=now + timedelta(minutes=offset),
-            window_seconds=604800,
-            upstream_resets_at=now + timedelta(days=3),
-            attribution_started_at=now - timedelta(days=4),
-            upstream_used_percent=Decimal("20"),
-            interval_used_percent=Decimal("20"),
-            raw_selected_total_cost=Decimal("400"),
-            selected_total_cost=Decimal("400"),
-            total_standard_cost=Decimal("400"),
-            total_actual_cost=Decimal("400"),
-            effective_usd_per_percent=Decimal("20"),
-        )
+        observations[account.id] = Observation.objects.create(account_id=account.external_account_id,
+        observed_at=now + timedelta(minutes=offset),
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=3),
+        attribution_started_at=now - timedelta(days=4),
+        upstream_used_percent=Decimal("20"),
+        interval_used_percent=Decimal("20"),
+        raw_selected_total_cost=Decimal("400"),
+        selected_total_cost=Decimal("400"),
+        total_standard_cost=Decimal("400"),
+        total_actual_cost=Decimal("400"),
+        effective_usd_per_percent=Decimal("20"), **historical_pricing())
 
     client = Client()
     viewer_headers, _ = jwt_login(

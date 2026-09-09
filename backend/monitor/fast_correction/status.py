@@ -40,6 +40,7 @@ def _missing_for_account(account: MonitoredAccount) -> int:
         Observation.objects.filter(
             account_id=account.fact_key,
             observed_at__gte=start,
+            correction_source="local",
         )
         .filter(
             Q(fast_correction_standard_cost__isnull=True)
@@ -54,7 +55,7 @@ def missing_current_cycle_captures() -> int:
     for account in MonitoredAccount.objects.filter(enabled=True, provider="sub2api"):
         start = current_cycle_start(account)
         if start is not None:
-            total += Observation.objects.filter(account_id=account.fact_key, observed_at__gte=start, billing_capture__isnull=True).count()
+            total += Observation.objects.filter(account_id=account.fact_key, observed_at__gte=start, billing_capture__isnull=True, correction_source="local").count()
     return total
 
 

@@ -40,7 +40,7 @@ from .sampling.notifications import (
 )
 from .sampling.observations import (
     create_raw_observation as _create_raw_observation,
-    fetch_fast_correction as _fetch_fast_correction,
+    fetch_billing_capture as _fetch_billing_capture,
 )
 from .sampling.selectors import (
     has_pending_rollback as _has_pending_rollback,
@@ -95,8 +95,8 @@ def _persist_capture(
     interval_logs,
     window=None,
     source="scheduled",
-    fast_interval=None,
-    fast_error="",
+    billing_capture=None,
+    billing_capture_error="",
 ):
     guard.renew()
     state = HistoryMaintenanceState.objects.select_for_update().get(
@@ -113,10 +113,18 @@ def _persist_capture(
         capture_started_at=capture_started_at,
         capture_finished_at=timezone.now(),
     )
+    pricing_account = None
+    if window is not None:
+        pricing_account = (
+            MonitoredAccount.objects.select_for_update()
+            .only("id", "upstream_pricing_applied", "pricing_epoch")
+            .get(pk=account.pk)
+        )
     observation = None
     if window is not None:
         observation = _create_raw_observation(
             config=config,
+            account=pricing_account,
             reference=reference,
             quota_query_mode=account.quota_query_mode,
             window=window,
@@ -125,8 +133,8 @@ def _persist_capture(
             sample_point=point,
             latest_raw=latest_raw,
             interval_logs=interval_logs,
-            fast_interval=fast_interval,
-            fast_error=fast_error,
+            billing_capture=billing_capture,
+            billing_capture_error=billing_capture_error,
         )
     state.fact_revision += 1
     state.save(update_fields=["fact_revision", "updated_at"])
@@ -221,12 +229,13 @@ def _run_monitor_locked(
                 local,
                 None,
             )
-            fast_interval, fast_error = _fetch_fast_correction(
+            billing_capture, billing_capture_error = _fetch_billing_capture(
                 client,
                 config,
                 reference,
                 None,
                 local.checked_at,
+                prefetched_logs=interval_logs,
             )
             observation = _persist_capture(
                 config,
@@ -240,8 +249,8 @@ def _run_monitor_locked(
                 interval_logs=interval_logs,
                 window=window,
                 source=requested_source,
-                fast_interval=fast_interval,
-                fast_error=fast_error,
+                billing_capture=billing_capture,
+                billing_capture_error=billing_capture_error,
             )
             _rebuild_capture(account, window, observation, config, guard)
             observation.refresh_from_db()
@@ -360,12 +369,13 @@ def _run_monitor_locked(
             local,
             latest_raw,
         )
-        fast_interval, fast_error = _fetch_fast_correction(
+        billing_capture, billing_capture_error = _fetch_billing_capture(
             client,
             config,
             reference,
             latest_raw,
             local.checked_at,
+            prefetched_logs=interval_logs,
         )
         observation = _persist_capture(
             config,
@@ -379,8 +389,8 @@ def _run_monitor_locked(
             interval_logs=interval_logs,
             window=window,
             source=source,
-            fast_interval=fast_interval,
-            fast_error=fast_error,
+            billing_capture=billing_capture,
+            billing_capture_error=billing_capture_error,
         )
         _rebuild_capture(account, window, observation, config, guard)
         observation.refresh_from_db()

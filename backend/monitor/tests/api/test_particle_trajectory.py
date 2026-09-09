@@ -17,7 +17,7 @@ from monitor.models import (
 )
 from monitor.replay import RATE_METHOD, rebuild_account, rebuild_observation_suffix
 from monitor.particle_trajectory import _trajectory_periods
-from monitor.tests.helpers import create_monitored_account, jwt_login
+from monitor.tests.helpers import create_monitored_account, jwt_login, historical_pricing
 
 
 @pytest.mark.django_db
@@ -37,36 +37,32 @@ def test_particle_trajectory_reruns_current_segment_without_writes():
 
     started_at = timezone.now() - timedelta(hours=12)
     resets_at = started_at + timedelta(days=7)
-    first = Observation.objects.create(
-        account_id=7,
-        source="scheduled",
-        observed_at=started_at,
-        window_seconds=604800,
-        upstream_resets_at=resets_at,
-        upstream_used_percent=Decimal("0"),
-        raw_selected_total_cost=Decimal("10"),
-        selected_total_cost=Decimal("10"),
-        total_standard_cost=Decimal("10"),
-        total_actual_cost=Decimal("10"),
-        effective_usd_per_percent=Decimal("16"),
-    )
-    second = Observation.objects.create(
-        account_id=7,
-        source="scheduled",
-        observed_at=started_at + timedelta(hours=12),
-        window_seconds=604800,
-        upstream_resets_at=resets_at,
-        upstream_used_percent=Decimal("10"),
-        raw_selected_total_cost=Decimal("190"),
-        selected_total_cost=Decimal("190"),
-        total_standard_cost=Decimal("190"),
-        total_actual_cost=Decimal("190"),
-        effective_usd_per_percent=Decimal("16"),
-        fast_correction_started_at=started_at,
-        fast_correction_standard_cost=Decimal("20"),
-        fast_correction_actual_cost=Decimal("20"),
-        fast_correction_request_count=1,
-    )
+    first = Observation.objects.create(account_id=7,
+    source="scheduled",
+    observed_at=started_at,
+    window_seconds=604800,
+    upstream_resets_at=resets_at,
+    upstream_used_percent=Decimal("0"),
+    raw_selected_total_cost=Decimal("10"),
+    selected_total_cost=Decimal("10"),
+    total_standard_cost=Decimal("10"),
+    total_actual_cost=Decimal("10"),
+    effective_usd_per_percent=Decimal("16"), **historical_pricing())
+    second = Observation.objects.create(account_id=7,
+    source="scheduled",
+    observed_at=started_at + timedelta(hours=12),
+    window_seconds=604800,
+    upstream_resets_at=resets_at,
+    upstream_used_percent=Decimal("10"),
+    raw_selected_total_cost=Decimal("190"),
+    selected_total_cost=Decimal("190"),
+    total_standard_cost=Decimal("190"),
+    total_actual_cost=Decimal("190"),
+    effective_usd_per_percent=Decimal("16"),
+    fast_correction_started_at=started_at,
+    fast_correction_standard_cost=Decimal("20"),
+    fast_correction_actual_cost=Decimal("20"),
+    fast_correction_request_count=1, **historical_pricing())
     ParticipantSnapshot.objects.create(
         observation=first,
         participant=participant,
@@ -187,20 +183,18 @@ def test_particle_trajectory_hides_unauthorized_participant_usage():
 
     observed_at = timezone.now()
     started_at = observed_at - timedelta(days=1)
-    observation = Observation.objects.create(
-        account_id=7,
-        source="scheduled",
-        observed_at=observed_at,
-        window_seconds=604800,
-        upstream_resets_at=started_at + timedelta(days=7),
-        attribution_started_at=started_at,
-        upstream_used_percent=Decimal("10"),
-        raw_selected_total_cost=Decimal("100"),
-        selected_total_cost=Decimal("100"),
-        total_standard_cost=Decimal("100"),
-        total_actual_cost=Decimal("100"),
-        effective_usd_per_percent=Decimal("16"),
-    )
+    observation = Observation.objects.create(account_id=7,
+    source="scheduled",
+    observed_at=observed_at,
+    window_seconds=604800,
+    upstream_resets_at=started_at + timedelta(days=7),
+    attribution_started_at=started_at,
+    upstream_used_percent=Decimal("10"),
+    raw_selected_total_cost=Decimal("100"),
+    selected_total_cost=Decimal("100"),
+    total_standard_cost=Decimal("100"),
+    total_actual_cost=Decimal("100"),
+    effective_usd_per_percent=Decimal("16"), **historical_pricing())
     for participant, cost in (
         (visible, Decimal("30")),
         (hidden, Decimal("40")),
@@ -256,19 +250,17 @@ def test_particle_trajectory_selects_historical_period():
         used_percent,
         cost,
     ):
-        return Observation.objects.create(
-            account_id=7,
-            source="scheduled",
-            observed_at=observed_at,
-            window_seconds=604800,
-            upstream_resets_at=resets_at,
-            upstream_used_percent=Decimal(used_percent),
-            raw_selected_total_cost=Decimal(cost),
-            selected_total_cost=Decimal(cost),
-            total_standard_cost=Decimal(cost),
-            total_actual_cost=Decimal(cost),
-            effective_usd_per_percent=Decimal("16"),
-        )
+        return Observation.objects.create(account_id=7,
+        source="scheduled",
+        observed_at=observed_at,
+        window_seconds=604800,
+        upstream_resets_at=resets_at,
+        upstream_used_percent=Decimal(used_percent),
+        raw_selected_total_cost=Decimal(cost),
+        selected_total_cost=Decimal(cost),
+        total_standard_cost=Decimal(cost),
+        total_actual_cost=Decimal(cost),
+        effective_usd_per_percent=Decimal("16"), **historical_pricing())
 
     old_first = create_observation(
         old_start + timedelta(days=2),
@@ -361,20 +353,18 @@ def test_trajectory_periods_use_actual_observation_order_for_current():
         observed_at,
         attribution_started_at,
     ):
-        return Observation.objects.create(
-            account_id=7,
-            source="scheduled",
-            observed_at=observed_at,
-            window_seconds=604800,
-            upstream_resets_at=now + timedelta(days=5),
-            attribution_started_at=attribution_started_at,
-            upstream_used_percent=Decimal("10"),
-            raw_selected_total_cost=Decimal("100"),
-            selected_total_cost=Decimal("100"),
-            total_standard_cost=Decimal("100"),
-            total_actual_cost=Decimal("100"),
-            effective_usd_per_percent=Decimal("10"),
-        )
+        return Observation.objects.create(account_id=7,
+        source="scheduled",
+        observed_at=observed_at,
+        window_seconds=604800,
+        upstream_resets_at=now + timedelta(days=5),
+        attribution_started_at=attribution_started_at,
+        upstream_used_percent=Decimal("10"),
+        raw_selected_total_cost=Decimal("100"),
+        selected_total_cost=Decimal("100"),
+        total_standard_cost=Decimal("100"),
+        total_actual_cost=Decimal("100"),
+        effective_usd_per_percent=Decimal("10"), **historical_pricing())
 
     older_observation = observation(
         now - timedelta(hours=2),
@@ -414,19 +404,17 @@ def test_particle_trajectory_keeps_first_zero_baseline_until_usage():
         used_percent,
         cost,
     ):
-        observation = Observation.objects.create(
-            account_id=7,
-            source="scheduled",
-            observed_at=observed_at,
-            window_seconds=604800,
-            upstream_resets_at=resets_at,
-            upstream_used_percent=Decimal(used_percent),
-            raw_selected_total_cost=Decimal(cost),
-            selected_total_cost=Decimal(cost),
-            total_standard_cost=Decimal(cost),
-            total_actual_cost=Decimal(cost),
-            effective_usd_per_percent=Decimal("16"),
-        )
+        observation = Observation.objects.create(account_id=7,
+        source="scheduled",
+        observed_at=observed_at,
+        window_seconds=604800,
+        upstream_resets_at=resets_at,
+        upstream_used_percent=Decimal(used_percent),
+        raw_selected_total_cost=Decimal(cost),
+        selected_total_cost=Decimal(cost),
+        total_standard_cost=Decimal(cost),
+        total_actual_cost=Decimal(cost),
+        effective_usd_per_percent=Decimal("16"), **historical_pricing())
         rebuild_observation_suffix(observation, config)
         observation.refresh_from_db()
         return observation

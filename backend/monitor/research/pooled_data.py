@@ -10,8 +10,8 @@ import numpy as np
 from django.db import transaction
 from ..accounting.boundaries import same_official_reset
 from ..billing_correction.facts import validate_capture
-from ..billing_correction.rules import compile_rules, first_match
-from ..models import AppSettings, Observation, ObservationBillingCapture
+from ..billing_correction.rules import compile_rules, first_match, observation_correction_config
+from ..models import Observation, ObservationBillingCapture
 from ..models.research import ResearchEvidenceBatch
 from .data import TARGET, BASELINE, quota_time, Ineligible
 from .pooled import Interval, summarize
@@ -20,7 +20,9 @@ from .pooled_protocol import canonical, QUALITY_KEYS
 
 RAW_OBSERVATION_FIELDS = (
     "id", "account_id", "observed_at", "upstream_resets_at", "window_seconds",
-    "upstream_used_percent", "raw_window", "exclusion_source", "excluded_at",
+    "pricing_epoch", "correction_source", "frozen_correction_policy",
+    "upstream_used_percent", "raw_window", "exclusion_source",
+    "excluded_at",
 )
 
 
@@ -99,14 +101,17 @@ def _coverage(captures, start, end):
     return cursor >= end
 
 
-def _cycle(account, observations, config, gateway_only):
+def _cycle(account, observations, gateway_only):
     end = observations[0].upstream_resets_at
     start = end - timedelta(seconds=observations[0].window_seconds)
     quality = dict.fromkeys(QUALITY_KEYS, 0)
     observation_map = {o.pk: o for o in observations}
     captures = ObservationBillingCapture.objects.filter(observation_id__in=observation_map).prefetch_related("facts__research_components")
     facts, fingerprints, coverage, conflicts = {}, {}, [], set()
+    source_configs = {}
     for capture in captures:
+        observation = observation_map[capture.observation_id]
+        source_config = observation_correction_config(observation) if observation.correction_source == "local" else None
         rows = list(capture.facts.all())
         try:
             validate_capture(capture, observation_map[capture.observation_id], rows)
@@ -121,6 +126,7 @@ def _cycle(account, observations, config, gateway_only):
                 conflicts.add(key)
             else:
                 facts[key], fingerprints[key] = fact, digest
+                source_configs.setdefault(key, source_config)
     ordered = sorted(facts.values(), key=lambda f: (f.created_at, f.source_log_id))
     normalized = {}
     total, target_total, target_count = Decimal(0), Decimal(0), 0
@@ -135,7 +141,11 @@ def _cycle(account, observations, config, gateway_only):
                 target_total += raw
             if key in conflicts:
                 raise UnknownControl("invalid_fact")
-            normalized[key] = normalized_cost(fact, config)
+            if source_configs[key] is None:
+                # Upstream totals do not describe their complete reference-price
+                # controls. Keep raw evidence, never normalize it with archived rules.
+                raise UnknownControl("unknown_control")
+            normalized[key] = normalized_cost(fact, source_configs[key])
         except UnknownControl as exc:
             normalized[key] = str(exc)
             quality[str(exc)] += 1
@@ -197,16 +207,21 @@ def collect_batches(now, *, gateway_only):
     Existing batch evidence is never overwritten with a smaller/mutated raw
     history after local pruning. Every batch remains independently retryable.
     """
-    config = AppSettings.load()
     account_ids = Observation.objects.filter(account_id__gte=0).order_by().values_list("account_id", flat=True).distinct()
     for account in account_ids:
         cycles = []
         for observation in Observation.objects.filter(account_id=account, observed_at__lte=now).only(*RAW_OBSERVATION_FIELDS).order_by("observed_at", "pk").iterator(chunk_size=500):
-            if not cycles or not same_official_reset(cycles[-1][0].upstream_resets_at, observation.upstream_resets_at):
+            if (
+                not cycles
+                or not same_official_reset(
+                    cycles[-1][0].upstream_resets_at,
+                    observation.upstream_resets_at,
+                )
+            ):
                 cycles.append([])
             cycles[-1].append(observation)
         for observations in cycles:
-            end, fingerprints, summary = _cycle(account, observations, config, gateway_only)
+            end, fingerprints, summary = _cycle(account, observations, gateway_only)
             with transaction.atomic():
                 batch = ResearchEvidenceBatch.objects.filter(account_id=account, resets_at__gte=end-timedelta(minutes=10), resets_at__lte=end+timedelta(minutes=10)).order_by("created_at").first()
                 if batch is None:
