@@ -15,15 +15,6 @@ const saving = ref(false);
 const loading = ref(false);
 const confirmation = ref<ConfirmDialogHandle | null>(null);
 const dateTime = useDateTime();
-const carryoverEnabled = ref(true);
-watch(
-  () => data.value?.carryover_enabled,
-  (value) => {
-    if (typeof value === "boolean" && !data.value?.can_start)
-      carryoverEnabled.value = value;
-  },
-  { immediate: true },
-);
 let disposed = false;
 
 async function toggleReminder() {
@@ -64,12 +55,11 @@ async function refresh() {
   }
 }
 
-async function start() {
+async function start(carryover: boolean) {
   if (saving.value || !data.value?.can_start) return;
-  const carryover = carryoverEnabled.value;
   if (
     !(await confirmation.value?.open({
-      title: "开启临时爽蹬？",
+      title: carryover ? "开启结转爽蹬？" : "开启不结转爽蹬？",
       message: `所有启用的 Sub2API 账号参与本轮，余额建议统一为 9999，不增加套餐容量。${data.value.auto_apply ? "系统会尝试自动应用余额。" : "开启后请手动应用余额建议。"}\n\n${carryover ? "结转模式：按借用权益在后续周期补偿、扣除，不看账号是否用满。无需逐一通知；未被借用的闲置额度不会保留。" : "不结转模式：本轮多用不追账、少用不补偿，可能提前耗尽其他车友计划使用的额度。请先告知所有车友。"}\n\n${data.value.enabled_account_count > 1 ? `当前有 ${data.value.enabled_account_count} 个账号，共享钱包不能按账号隔离消费。\n\n` : ""}首个账号换周期后退出爽蹬，各账号按选定模式结束本轮。本轮模式不能中途切换；提前使用重置卡仍建议沟通使用安排。`,
       confirmLabel:
         data.value.enabled_account_count > 1
@@ -192,32 +182,6 @@ defineExpose({ refresh });
         <strong>9999</strong
         >，按需使用，照常记账。结转模式下借用的权益会在后续周期补偿或扣除；不结转模式下多用不追账、少用不补偿。
       </p>
-      <fieldset
-        class="fieldset"
-        :disabled="saving || loading || !data?.can_start"
-      >
-        <legend class="fieldset-legend">爽蹬结算方式</legend>
-        <div class="flex flex-wrap gap-5">
-          <label class="label cursor-pointer"
-            ><input
-              v-model="carryoverEnabled"
-              type="radio"
-              name="burst-mode"
-              class="radio radio-sm"
-              :value="true"
-            />结转：借用的权益以后还</label
-          >
-          <label class="label cursor-pointer"
-            ><input
-              v-model="carryoverEnabled"
-              type="radio"
-              name="burst-mode"
-              class="radio radio-sm"
-              :value="false"
-            />不结转：本轮多用不追账</label
-          >
-        </div>
-      </fieldset>
       <p v-if="data?.session_id" class="text-sm font-medium">
         本轮模式：{{ data.carryover_enabled ? "结转" : "不结转"
         }}{{ data.terminated_at ? " · 已提前终止" : "" }}
@@ -270,10 +234,17 @@ defineExpose({ refresh });
           type="button"
           class="btn btn-primary btn-sm"
           :disabled="saving || loading || !data?.can_start"
-          @click="start"
+          @click="start(true)"
         >
-          <span v-if="saving" class="loading loading-xs loading-spinner"></span
-          >{{ data?.active ? "临时爽蹬已开启" : "开启临时爽蹬" }}
+          开启结转爽蹬
+        </button>
+        <button
+          type="button"
+          class="btn btn-sm btn-warning"
+          :disabled="saving || loading || !data?.can_start"
+          @click="start(false)"
+        >
+          开启不结转爽蹬
         </button>
         <button
           v-if="data?.can_stop"

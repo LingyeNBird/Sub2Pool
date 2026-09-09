@@ -148,15 +148,14 @@ def verify(account, people, old):
             page.wait_for_url(harness.FRONTEND_URL + "/")
             card = page.get_by_role("region", name="临时爽蹬", exact=True)
             expect(card).to_be_visible()
-            card.get_by_role("button", name="开启临时爽蹬", exact=True).click()
+            card.get_by_role("button", name="开启结转爽蹬", exact=True).click()
             dialog = page.locator("dialog[open]").last
             expect(dialog.get_by_role("checkbox")).to_have_count(0)
             expect(dialog.get_by_role("button", name="确认开启临时爽蹬", exact=True)).to_be_enabled()
             dialog.screenshot(path=str(harness.OUTPUT / "burst-carry-confirm.png"))
             dialog.get_by_role("button", name="取消", exact=True).first.click()
             assert WRITES == []
-            card.get_by_role("radio", name="不结转：本轮多用不追账", exact=True).check()
-            card.get_by_role("button", name="开启临时爽蹬", exact=True).click()
+            card.get_by_role("button", name="开启不结转爽蹬", exact=True).click()
             dialog = page.locator("dialog[open]").last
             expect(dialog.get_by_role("button", name="确认开启临时爽蹬", exact=True)).to_be_disabled()
             dialog.get_by_role("checkbox").check()
@@ -348,8 +347,7 @@ def verify(account, people, old):
             in_database(add_second_account)
             page.goto(harness.FRONTEND_URL + "/")
             expect(card).to_be_visible()
-            card.get_by_role("radio", name="不结转：本轮多用不追账", exact=True).check()
-            card.get_by_role("button", name="开启临时爽蹬", exact=True).click()
+            card.get_by_role("button", name="开启不结转爽蹬", exact=True).click()
             dialog = page.locator("dialog[open]").last
             expect(dialog.get_by_role("button", name="了解共享余额影响，开启爽蹬")).to_be_disabled()
             expect(dialog.get_by_text(re.compile("当前有 2 个账号"))).to_be_visible()
@@ -407,9 +405,8 @@ def verify(account, people, old):
             expect(card.get_by_role("button", name="提前终止爽蹬", exact=True)).to_have_count(0)
             expect(page.get_by_role("complementary", name="爽蹬全局状态")).to_have_count(0)
             card.screenshot(path=str(harness.OUTPUT / "burst-stopped-desktop.png"))
-            expect(card.get_by_role("button", name="开启临时爽蹬", exact=True)).to_be_enabled()
-            card.get_by_role("radio", name="不结转：本轮多用不追账", exact=True).check()
-            card.get_by_role("button", name="开启临时爽蹬", exact=True).click()
+            expect(card.get_by_role("button", name="开启结转爽蹬", exact=True)).to_be_enabled()
+            card.get_by_role("button", name="开启不结转爽蹬", exact=True).click()
             restart_dialog = page.locator("dialog[open]").last
             restart_dialog.get_by_role("checkbox").check()
             restart_dialog.get_by_role("button", name="了解共享余额影响，开启爽蹬", exact=True).click()
@@ -417,7 +414,7 @@ def verify(account, people, old):
             card.screenshot(path=str(harness.OUTPUT / "burst-same-cycle-restarted.png"), animations="disabled")
             card.get_by_role("button", name="提前终止爽蹬", exact=True).click()
             page.locator("dialog[open]").last.get_by_role("button", name="确认提前终止", exact=True).click()
-            expect(card.get_by_role("button", name="开启临时爽蹬", exact=True)).to_be_enabled()
+            expect(card.get_by_role("button", name="开启结转爽蹬", exact=True)).to_be_enabled()
             def verify_stopped():
                 from monitor.models.temporary_burst import TemporaryBurstSession
                 from monitor.temporary_burst import reconcile_account
