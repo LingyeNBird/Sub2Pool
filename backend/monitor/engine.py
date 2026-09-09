@@ -48,6 +48,7 @@ from .sampling.selectors import (
     latest_raw as _latest_raw,
 )
 from .sampling.triggers import evaluate_sampling_trigger
+from .temporary_burst import sampling_policy
 from .sampling.types import (
     observation_reference as _observation_reference,
     window_reference as _window_reference,
@@ -291,7 +292,7 @@ def _run_monitor_locked(
             latest_raw=latest_raw,
             previous=previous,
             now=now,
-            force_upstream=force_upstream,
+            force_upstream=force_upstream or sampling_policy(account, config, now)[1],
             has_pending_rollback=_has_pending_rollback(account_id),
         )
         cost_progress = trigger.cost_progress
@@ -482,6 +483,15 @@ def run_monitor(
 
     results = []
     for account in account_rows:
+        interval, _accelerated = sampling_policy(account, config)
+        if (
+            source == "scheduled"
+            and not force_upstream
+            and account.last_local_check_at
+            and (timezone.now() - account.last_local_check_at).total_seconds() < interval
+        ):
+            results.append({"account_id": account.id, "status": "not_due"})
+            continue
         try:
             results.append(
                 _run_account_monitor(

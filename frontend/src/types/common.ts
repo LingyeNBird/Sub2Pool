@@ -38,6 +38,7 @@ export interface ConfirmDialogOptions {
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: ConfirmDialogTone;
+  acknowledgement?: string;
 }
 export interface ConfirmDialogHandle {
   open: (options: ConfirmDialogOptions) => Promise<boolean>;

@@ -8,12 +8,14 @@ import type {
 } from "@/types/common";
 
 const dialog = ref<HTMLDialogElement | null>(null);
+const acknowledged = ref(false);
 const options = ref<Required<ConfirmDialogOptions>>({
   title: "请确认操作",
   message: "",
   confirmLabel: "确认",
   cancelLabel: "取消",
   tone: "primary",
+  acknowledgement: "",
 });
 let resolvePending: ((confirmed: boolean) => void) | null = null;
 
@@ -27,6 +29,7 @@ const confirmClass = computed(() => {
 });
 
 function settle(confirmed: boolean) {
+  if (confirmed && options.value.acknowledgement && !acknowledged.value) return;
   const resolve = resolvePending;
   resolvePending = null;
   if (dialog.value?.open) dialog.value.close();
@@ -35,12 +38,14 @@ function settle(confirmed: boolean) {
 
 function open(value: ConfirmDialogOptions): Promise<boolean> {
   if (resolvePending) settle(false);
+  acknowledged.value = false;
   options.value = {
     title: value.title,
     message: value.message,
     confirmLabel: value.confirmLabel ?? "确认",
     cancelLabel: value.cancelLabel ?? "取消",
     tone: value.tone ?? "primary",
+    acknowledgement: value.acknowledgement ?? "",
   };
   dialog.value?.showModal();
   return new Promise((resolve) => {
@@ -91,6 +96,17 @@ defineExpose<ConfirmDialogHandle>({ open, close });
           </p>
         </div>
       </div>
+      <label
+        v-if="options.acknowledgement"
+        class="mt-5 flex cursor-pointer items-start gap-3 rounded-box border border-warning/40 bg-warning/10 p-3 text-sm leading-6"
+      >
+        <input
+          v-model="acknowledged"
+          type="checkbox"
+          class="checkbox mt-1 shrink-0 checkbox-warning"
+        />
+        <span>{{ options.acknowledgement }}</span>
+      </label>
       <div class="modal-action">
         <button type="button" class="btn" @click="settle(false)">
           {{ options.cancelLabel }}
@@ -99,6 +115,7 @@ defineExpose<ConfirmDialogHandle>({ open, close });
           type="button"
           class="btn"
           :class="confirmClass"
+          :disabled="Boolean(options.acknowledgement) && !acknowledged"
           @click="settle(true)"
         >
           {{ options.confirmLabel }}

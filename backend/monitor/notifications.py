@@ -113,14 +113,16 @@ def send_notification(
     participant: Participant | None = None,
     severity: str = "warning",
     ignore_cooldown: bool = False,
+    cooldown_minutes: int | None = None,
 ) -> NotificationEvent | None:
     """发送一封通知，并把每次尝试持久化。
 
     相同 dedupe_key 在冷却期内返回 None，避免后台轮询反复轰炸邮箱。
     """
     if not ignore_cooldown:
-        cutoff = timezone.now() - timedelta(minutes=config.notification_cooldown_minutes)
-        if NotificationEvent.objects.filter(dedupe_key=dedupe_key, created_at__gte=cutoff).exists():
+        minutes = config.notification_cooldown_minutes if cooldown_minutes is None else cooldown_minutes
+        cutoff = timezone.now() - timedelta(minutes=minutes)
+        if NotificationEvent.objects.filter(dedupe_key=dedupe_key, created_at__gt=cutoff).exists():
             return None
 
     recipient = config.notification_email.strip()

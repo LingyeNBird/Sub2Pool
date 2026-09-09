@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import TemporaryBurstComic from "./TemporaryBurstComic.vue";
+import TemporaryBurstExampleComic from "./TemporaryBurstExampleComic.vue";
+import TemporaryBurstNoticeComic from "./TemporaryBurstNoticeComic.vue";
 const examples = [
   {
     title: "整轮用满",
@@ -8,8 +11,8 @@ const examples = [
   },
   {
     title: "B 超用 5 个百分点",
-    usage: [20, 30, 10],
-    note: "A 剩余 30、C 剩余 15，比例 2∶1；只把 B 超用的 5 个百分点按此比例补偿，而不是结转所有剩余。",
+    usage: [20, 30, 5],
+    note: "全账号还剩 45%，没有接近耗尽。B 使用的是闲置容量，不扣下期权益；所有人的调整为 0。",
   },
   {
     title: "有人用满，但没人超用",
@@ -20,6 +23,11 @@ const examples = [
     title: "所有人都没用满",
     usage: [30, 20, 20],
     note: "没有超用，也就没有借用。剩余 30 个百分点当期过期，不凭空增加下一周期总权益。",
+  },
+  {
+    title: "恰好剩余 5%",
+    usage: [30, 32, 33],
+    note: "账号已用 95%，恰好剩余 5%，不满足严格小于 5% 的条件；本轮不扣、不补。",
   },
 ];
 const selected = ref(0);
@@ -34,7 +42,9 @@ const rows = computed(() => {
   );
   const spare = unused.reduce((sum, value) => sum + value, 0);
   const excess = over.reduce((sum, value) => sum + value, 0);
-  const borrowed = Math.min(spare, excess);
+  const remaining =
+    100 - example.value.usage.reduce((sum, value) => sum + value, 0);
+  const borrowed = remaining < 5 ? Math.min(spare, excess) : 0;
   return base.map((share, index) => {
     const change =
       (spare ? (borrowed * unused[index]!) / spare : 0) -
@@ -48,24 +58,11 @@ const rows = computed(() => {
     };
   });
 });
-const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
 </script>
 
 <template>
   <div class="space-y-8 py-7">
-    <section>
-      <h3 class="text-lg font-semibold">先放开使用，再结算借用</h3>
-      <p class="mt-3 text-sm leading-7 opacity-75">
-        “爽蹬”只放开本期钱包余额限制，不改变合同份额，也不会增加套餐总容量。多人暂时按需使用，期末用百分比权益结算，避免把不同模型的美元价格直接当作公平分配比例。
-      </p>
-      <ul class="steps steps-vertical mt-5 w-full lg:steps-horizontal">
-        <li class="step step-primary">管理员开启</li>
-        <li class="step step-primary">建议余额 9999</li>
-        <li class="step step-primary">正常记录消耗</li>
-        <li class="step step-primary">首个换周期统一退出</li>
-        <li class="step step-primary">各账号分别结转</li>
-      </ul>
-    </section>
+    <TemporaryBurstComic />
     <section>
       <h3 class="text-lg font-semibold">从首页开启</h3>
       <ol class="mt-3 list-inside list-decimal space-y-3 text-sm leading-7">
@@ -73,7 +70,9 @@ const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
           进入“额度总览”，在“当前额度建议”下方找到“临时爽蹬”。确保所有启用的
           Sub2API 账号都有当前周期的有效观测和完整参与者归属。
         </li>
-        <li>点击“开启临时爽蹬”，阅读全局影响并确认。仅管理员可以开启。</li>
+        <li>
+          点击“开启临时爽蹬”，阅读全局影响，告知所有车友后主动勾选确认。仅管理员可以开启。
+        </li>
         <li>
           已开启自动应用建议时，立即尝试设置所有参与者余额为
           9999；未开启时，余额不会直接变化，需要从额度建议手动应用。
@@ -86,6 +85,48 @@ const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
       <p class="mt-4 alert text-sm alert-warning">
         9999 是余额，不是 9999%
         权益。它可能让一个人迅速耗尽全组订阅额度；上游自身的限速、余额权限和套餐限制仍然有效。
+      </p>
+      <div
+        class="mt-4 rounded-box border border-warning/40 bg-warning/10 p-5 text-sm leading-7"
+      >
+        <h4 class="font-semibold">为什么必须提前告知所有车友？</h4>
+        <TemporaryBurstNoticeComic />
+        <p>
+          比如账号周一自然重置，有位车友打算前两天不用，后五天再用完，等下周一重置后继续用。但其他车友在临时爽蹬期间两天就把账号用满，周三使用重置卡，下次重置便改成下周三。这位车友在爽蹬期间没用额度，却要承担下次重置平白延后两天的影响。
+        </p>
+        <p>
+          因此不能只通知正在爽蹬的人，应提前告知所有用户并协商用卡安排。权益补偿不能消除使用时间变化的影响。
+        </p>
+        <p class="mt-3 font-medium">
+          临时爽蹬不会自动使用重置卡，也不会自动充值。建议在大家已协商、计划使用重置卡（充值卡补充额度），或者周期快结束、希望利用剩余额度时开启；是否用卡仍需管理员手动决定。
+        </p>
+      </div>
+    </section>
+    <section>
+      <h3 class="text-lg font-semibold">本轮用满提醒</h3>
+      <p class="mt-3 text-sm leading-7">
+        先在系统设置中配置邮件服务和管理员接收邮箱，建议发送测试邮件确认可达。开启爽蹬后，可在卡片切换“用满提醒”；默认关闭，只对本轮有效。
+        本轮原周期账号的最新有效观测达到 95%
+        时开始提醒，以后仍达阈值则每半小时最多发一封该账号的邮件。95%
+        表示接近用满，并不等于已经耗尽。
+        每个账号换周期后停止自己的提醒，关闭开关停止整轮提醒；其他尚未换周期的账号继续检查。监控暂停时不自动发送，投递失败可在通知记录查看；本提醒不会替你使用重置卡。
+      </p>
+    </section>
+    <section>
+      <h3 class="text-lg font-semibold">管理员手动调整当前周期结转</h3>
+      <p class="mt-3 text-sm leading-7">
+        在“额度分配”页面，有非零结转的单元格会在合同份额输入框右侧显示“结转权益”。这是当前周期的独立加减项，不是新的合同份额。
+        例如合同 50%、结转 +17 个百分点，本期可用权益为 67%；把结转改为
+        10，本期变为 60%；改为 0 则清除结转，保存后额外输入框隐藏。
+      </p>
+      <p class="mt-3 text-sm leading-7">
+        支持 −100 至 100，最多 5
+        位小数；正数为补偿，负数为扣除。点击“保存分配”才生效。
+        同池多个账号的结转分别标明账号，不能把不同账号的百分点直接合并。手动调整不会自动修改他人的结转，因此可能打破原本零和的分配，需要管理员自行协调。
+      </p>
+      <p class="mt-3 text-sm leading-7 opacity-75">
+        仅管理员可修改当前周期，已结算历史不会重写。周期切换、绑定变化或其他管理员先修改后，旧页面的保存会被拒绝，需要刷新重试。
+        修改会更新余额建议，不直接修改上游余额；仍按原来的自动或手动应用方式执行。爽蹬卡片的周期详情中可查看管理员、时间和修改前后数值。
       </p>
     </section>
     <section>
@@ -103,112 +144,33 @@ const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
           {{ item.title }}
         </button>
       </div>
-      <p class="mt-4 text-sm leading-7">{{ example.note }}</p>
-      <div
-        class="mt-4 overflow-x-auto rounded-box border border-base-300 bg-base-100 p-3"
-      >
-        <svg
-          viewBox="0 0 760 260"
-          role="img"
-          :aria-label="`${example.title}：本期消耗与下期权益对比`"
-          class="w-full min-w-[570px] text-base-content"
-        >
-          <text x="95" y="25" fill="currentColor" font-size="15">
-            本期实际使用
-          </text>
-          <text x="445" y="25" fill="currentColor" font-size="15">
-            下一周期可用权益
-          </text>
-          <g
-            v-for="(row, index) in rows"
-            :key="row.name"
-            :transform="`translate(0 ${55 + index * 65})`"
-          >
-            <text
-              x="15"
-              y="23"
-              fill="currentColor"
-              font-size="18"
-              font-weight="600"
-            >
-              {{ row.name }}
-            </text>
-            <rect
-              x="70"
-              y="0"
-              width="240"
-              height="34"
-              rx="5"
-              fill="currentColor"
-              opacity=".08"
-            />
-            <rect
-              x="70"
-              y="0"
-              :width="row.used * 2.4"
-              height="34"
-              rx="5"
-              fill="var(--color-info)"
-            />
-            <text x="78" y="23" fill="currentColor" font-size="15">
-              {{ row.used }}%
-            </text>
-            <text x="333" y="23" fill="currentColor" font-size="15">
-              {{ signed(row.change) }} →
-            </text>
-            <rect
-              x="445"
-              y="0"
-              width="240"
-              height="34"
-              rx="5"
-              fill="currentColor"
-              opacity=".08"
-            />
-            <rect
-              x="445"
-              y="0"
-              :width="row.next * 2.4"
-              height="34"
-              rx="5"
-              fill="var(--color-primary)"
-              opacity=".7"
-            />
-            <text x="453" y="23" fill="currentColor" font-size="15">
-              {{ row.next.toFixed(2) }}%
-            </text>
-          </g>
-          <text x="70" y="250" fill="currentColor" font-size="13">
-            固定合同 A 50% / B 25% / C 25%；箭头是权益百分点调整，不是美元。
-          </text>
-        </svg>
-      </div>
-      <div class="mt-4 overflow-x-auto">
-        <table class="table table-sm">
-          <thead>
-            <tr>
-              <th>参与者</th>
-              <th>合同权益</th>
-              <th>本期使用</th>
-              <th>下期调整</th>
-              <th>下期权益</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in rows" :key="row.name">
-              <td>{{ row.name }}</td>
-              <td>{{ row.share }}%</td>
-              <td>{{ row.used }}%</td>
-              <td>{{ signed(row.change) }} 个百分点</td>
-              <td>{{ row.next.toFixed(2) }}%</td>
-            </tr>
-          </tbody>
-        </table>
+      <TemporaryBurstExampleComic :rows="rows" :note="example.note" />
+    </section>
+    <section>
+      <h3 class="text-lg font-semibold">为什么剩余不足 5% 才结转？</h3>
+      <div class="mt-4 space-y-3 text-sm leading-7">
+        <p>
+          结转是补偿可能被挤占的使用机会，不是奖励“这周没用完”。因此要先看整个账号是否接近耗尽，不能只看某个人超过了自己的合同。
+        </p>
+        <p>
+          <strong>剩余 ≥ 5%：还有可用容量，不扣、不补。</strong>
+          少用的人仍有机会继续使用，我们更倾向于把少用视为个人需求不足或主动没用，而不是别人把额度抢光了。超用的人是在利用闲置容量，不因此欠下周的权益。
+        </p>
+        <p>
+          <strong>剩余 &lt; 5%：接近耗尽，才结算借用。</strong>
+          此时可能出现“有人用超了，其他人想用却已没有足够额度”的情况，所以把实际借用的权益从超用者下期扣回，补给少用者。即使触发阈值，没有人超用也不会凭空产生补偿。
+        </p>
+        <p class="opacity-75">
+          5%
+          是接近耗尽的容差，不是对用户意愿的证明，也不代表剩余一点就足够满足需求。系统无法仅凭用量知道谁原本想用多少；这是统一的结算约定。恰好剩余
+          5% 不结转，剩余闲置额度不累计到下期。
+        </p>
       </div>
     </section>
     <section>
       <h3 class="text-lg font-semibold">结算规则：只结转借用，不结转闲置</h3>
       <div class="mt-4 rounded-box bg-base-100 p-5 font-mono text-sm leading-8">
+        <p>前提：旧周期账号剩余 &lt; 5%；否则本轮下期调整全部为 0。</p>
         <p>本期可用权益 = 固定合同权益 + 上期结转调整</p>
         <p>未用份额 = max(本期可用权益 − 实际归属, 0)</p>
         <p>超用份额 = max(实际归属 − 本期可用权益, 0)</p>
@@ -216,7 +178,8 @@ const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
         <p>补偿按各人的未用份额比例分摊；扣除按超用份额比例分摊。</p>
       </div>
       <p class="mt-3 text-sm leading-7 opacity-75">
-        加减始终守恒。数据以 5 位小数的百分点记账，展示保留 2
+        自动结算的加减始终守恒，管理员手动调整不受此约束。数据以 5
+        位小数的百分点记账，展示保留 2
         位；未分配或无法归属的额度不会被虚构成某人的借出份额。周期记录独立保存，合同和真实用量不被改写。
       </p>
     </section>
@@ -241,6 +204,13 @@ const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
           用户只有一个全局钱包，涉及所有启用的 Sub2API 账号；CPA 不参与。
         </li>
         <li>
+          多账号开启前会额外警告：共享余额无法按账号隔离。按账号分别记账结算，不代表某个账号的消费被单独限制。
+        </li>
+        <li>
+          爽蹬原周期内采样间隔减半；最后观测已用 ≥ 90% 或距原定重置 ≤ 30
+          分钟时，每分钟采样。各账号确认换周期后分别恢复常规间隔；全局退出不提前取消其他旧周期账号的加速。
+        </li>
+        <li>
           任何账号首次确认换周期，或到达开启时最早的重置时间，就停止统一建议
           9999。其他账号仍在各自原周期结束后结算；不会为了等待较晚账号而让新周期继续爽蹬。
         </li>
@@ -251,7 +221,7 @@ const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
           开启时冻结本期合同和参与者绑定，以有效观测的归属百分比结算整轮，而不是只算开启后的请求。人工测算起点、价格时期变化不当成订阅换周期。
         </li>
         <li>
-          结算使用旧周期最后保留的有效证据，不猜测未采样的尾部消费；卡片显示证据时间。缺失参与者证据、欠账身份变化或跨过多个周期时保留待结算错误，不静默丢账。
+          结算使用旧周期最后保留的有效证据，不猜测未采样的尾部消费；卡片分别显示归属证据时间、账号剩余及额度观测距重置的时间。阈值以整个上游账号为准，不使用车友消耗之和替代。缺失参与者证据、欠账身份变化或跨过多个周期时保留待结算错误，不静默丢账。
         </li>
         <li>
           请保持监控运行。后台暂停或上游写入失败时，建议变化不等于余额已修改；需要恢复采样并核对实际应用结果。上一轮仍有原周期待结算时不能重复开启。

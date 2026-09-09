@@ -12,6 +12,7 @@ from monitor.api_usage import refresh_due_api_usage_snapshots
 from monitor.balance_operations import auto_apply_recommendations
 from monitor.models import AppSettings, MonitoredAccount
 from monitor.upstream_pricing.service import run_automatic_migration
+from monitor.temporary_burst import sampling_policy
 
 
 def schedule_next_run(
@@ -20,7 +21,7 @@ def schedule_next_run(
     now=None,
     cycle_started_at=None,
 ) -> int:
-    """记录下一次唤醒时间；按本轮开始时间对齐，避免把执行耗时叠加到间隔。"""
+    """Publish per-account deadlines; only the earliest due account wakes the worker."""
     current = now or timezone.now()
     interval_seconds = max(2, config.local_poll_minutes) * 60
     anchor = cycle_started_at or current
@@ -32,10 +33,21 @@ def schedule_next_run(
             seconds=elapsed_intervals * interval_seconds
         )
     sleep_seconds = math.ceil(max(0, (next_run - current).total_seconds()))
+    deadlines = []
+    for account in MonitoredAccount.objects.filter(enabled=True):
+        seconds, _accelerated = sampling_policy(account, config, current)
+        last_check = account.last_local_check_at if config.monitoring_enabled else None
+        account_anchor = last_check or anchor
+        deadline = account_anchor + timedelta(seconds=seconds)
+        if not last_check and deadline < current:
+            elapsed = (current - account_anchor).total_seconds()
+            deadline = account_anchor + timedelta(seconds=math.ceil(elapsed / seconds) * seconds)
+        MonitoredAccount.objects.filter(pk=account.pk).update(next_local_check_at=deadline)
+        deadlines.append(deadline)
+    if deadlines:
+        next_run = min(deadlines)
+        sleep_seconds = math.ceil(max(0, (next_run - current).total_seconds()))
     AppSettings.objects.filter(pk=config.pk).update(next_local_check_at=next_run)
-    MonitoredAccount.objects.filter(enabled=True).update(
-        next_local_check_at=next_run
-    )
     return sleep_seconds
 
 
@@ -98,4 +110,12 @@ class Command(BaseCommand):
                 cycle_started_at=cycle_started_at,
             )
             close_old_connections()
-            time.sleep(sleep_seconds)
+            sleep_seconds = max(2, sleep_seconds)
+            # Re-evaluate while idle so activation and per-account rollover change
+            # cadence without waiting through the previous full polling interval.
+            while sleep_seconds > 0:
+                time.sleep(min(5, sleep_seconds))
+                close_old_connections()
+                sleep_seconds = schedule_next_run(
+                    AppSettings.load(), cycle_started_at=cycle_started_at,
+                )

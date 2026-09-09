@@ -9,6 +9,7 @@ class TemporaryBurstSession(models.Model):
     ended_at = models.DateTimeField(null=True, blank=True)
     participant_users = models.JSONField(default=dict)
     base_url = models.CharField(max_length=500)
+    exhaustion_reminder_enabled = models.BooleanField(default=False)
 
 
 class TemporaryBurstCycle(models.Model):
@@ -26,6 +27,8 @@ class TemporaryBurstCycle(models.Model):
     settled_at = models.DateTimeField(null=True, blank=True)
     settlement = models.JSONField(default=list)
     evidence_at = models.DateTimeField(null=True, blank=True)
+    settlement_context = models.JSONField(default=dict)
+    carry_edits = models.JSONField(default=list)
     error = models.TextField(blank=True)
 
     class Meta:

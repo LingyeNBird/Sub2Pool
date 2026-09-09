@@ -345,7 +345,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 19,
+    version: 21,
     clock: iso(DEMO_ANCHOR),
     temporaryBurst: null,
     nextParticipantId: 4,

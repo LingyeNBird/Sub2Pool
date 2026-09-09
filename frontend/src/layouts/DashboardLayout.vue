@@ -4,6 +4,11 @@ import { useRoute } from "vue-router";
 
 import AppHeader from "./components/AppHeader.vue";
 import AppSidebar from "./components/AppSidebar.vue";
+import TemporaryBurstStatus from "./components/TemporaryBurstStatus.vue";
+import { temporaryBurstState } from "@/stores/temporaryBurst";
+import { useAuthStore } from "@/stores/auth";
+
+const auth = useAuthStore();
 
 const route = useRoute();
 const drawerOpen = ref(false);
@@ -33,6 +38,10 @@ watch(
     />
     <main
       class="drawer-content min-w-0 bg-base-100 lg:mt-2 lg:rounded-ss-4xl lg:border-s lg:border-t lg:border-base-300 lg:bg-[radial-gradient(ellipse_50rem_30rem_at_50%_0%,color-mix(oklch(96%_0.008_68)_3%,transparent)_0%,transparent_80%)] lg:[corner-start-start-shape:squircle]"
+      :class="{
+        'shadow-[inset_0_0_28px_0_rgba(249,115,22,0.09)] ring-2 ring-orange-500/70 ring-inset':
+          auth.isStaff && temporaryBurstState?.active,
+      }"
     >
       <div
         v-if="demoMode"
@@ -47,6 +56,7 @@ watch(
       </div>
       <div class="grid min-w-0 grid-cols-12 gap-6 p-4 lg:p-10">
         <AppHeader />
+        <TemporaryBurstStatus v-if="auth.isStaff" />
         <RouterView />
       </div>
     </main>

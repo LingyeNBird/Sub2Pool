@@ -1,6 +1,7 @@
-import { refreshDemoBurst } from "./temporaryBurst";
+import { refreshDemoBurst, demoCarryRows } from "./temporaryBurst";
 import type {
   QuotaAllocationData,
+  CarryAdjustment,
   QuotaAllocationWritePool,
   QuotaPoolAllocation,
 } from "@/types/participants";
@@ -8,6 +9,7 @@ import type {
 import type { DemoRequestContext } from "../backend";
 import {
   aggregateParticipant,
+  demoIdentity,
   dashboardData,
   saveDemoState,
   type DemoState,
@@ -28,6 +30,7 @@ function quotaAllocationData(state: DemoState): QuotaAllocationData {
       enabled: participant.enabled,
     })),
     pools: state.quotaPools,
+    carry_adjustments: demoCarryRows(state),
   };
 }
 
@@ -296,11 +299,78 @@ export function handleDashboard({
     return ok({ applied: true });
   }
   if (method === "GET" && pathname === "quota-allocation") {
+    refreshDemoBurst(state);
     return ok(quotaAllocationData(state));
   }
   if (method === "PUT" && pathname === "quota-allocation") {
+    if (!demoIdentity()?.is_staff) return fail("没有管理员权限", 403);
+    const changes = payload.carry_adjustments ?? [];
+    if (!Array.isArray(changes)) return fail("结转调整格式无效", 400);
+    const current = demoCarryRows(state);
+    const seen = new Set<string>();
+    const prepared: Array<{ row: CarryAdjustment; value: string }> = [];
+    for (const change of changes) {
+      if (!change || typeof change !== "object")
+        return fail("结转调整格式无效", 400);
+      const row = current.find(
+        (item) =>
+          item.cycle_id === change.cycle_id &&
+          item.participant_id === change.participant_id,
+      );
+      const key = `${change.cycle_id}:${change.participant_id}`;
+      const value = String(change.adjustment_percent);
+      if (
+        !row ||
+        seen.has(key) ||
+        row.revision !== change.revision ||
+        row.user_id !== change.user_id ||
+        row.account_id !== change.account_id
+      )
+        return fail("结转周期、绑定或数值已变化，请刷新后重试", 400);
+      if (
+        !/^[+-]?\d+(?:\.\d{1,5})?$/.test(value) ||
+        !Number.isFinite(Number(value)) ||
+        Math.abs(Number(value)) > 100
+      )
+        return fail("结转必须为 −100 至 100 的百分比，最多 5 位小数", 400);
+      if (
+        !Array.isArray(payload.pools) ||
+        !payload.pools.some(
+          (pool) =>
+            pool &&
+            Array.isArray(pool.account_ids) &&
+            pool.account_ids.includes(row.account_id) &&
+            Array.isArray(pool.allocations) &&
+            pool.allocations.some(
+              (allocation: { participant_id: number; share_percent: number }) =>
+                allocation.participant_id === row.participant_id &&
+                Number(allocation.share_percent) > 0,
+            ),
+        )
+      )
+        return fail("该账号的新合同中已没有此参与者，请刷新后重试", 400);
+      seen.add(key);
+      if (Number(value) !== Number(row.adjustment_percent))
+        prepared.push({ row, value });
+    }
     const validationError = applyQuotaAllocation(state, payload.pools);
     if (validationError) return fail(validationError);
+    for (const { row, value } of prepared) {
+      const cycle = state.temporaryBurst!.cycles.find(
+        (item) => item.cycle_id === row.cycle_id,
+      )!;
+      cycle.carry_edits ??= [];
+      cycle.carry_edits.push({
+        participant_id: row.participant_id,
+        user_id: row.user_id,
+        before: row.adjustment_percent,
+        after: value,
+        edited_at: state.clock,
+        admin_id: 0,
+        admin_username: demoIdentity()?.username ?? "演示管理员",
+      });
+    }
+    refreshDemoBurst(state);
     saveDemoState(state);
     return ok(quotaAllocationData(state));
   }

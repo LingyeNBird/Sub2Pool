@@ -9,7 +9,7 @@ class NotificationEvent(models.Model):
     """邮件发送审计与去重依据。未配置 SMTP 时也保留 skipped 记录。"""
 
     STATUS_CHOICES = (("sent", "已发送"), ("skipped", "已跳过"), ("failed", "失败"))
-    TYPE_CHOICES = (("limit_exhausted", "额度耗尽"), ("recommendation_changed", "建议变化"), ("rate_changed", "汇率变化"), ("collection_error", "采集失败"), ("test", "测试"))
+    TYPE_CHOICES = (("limit_exhausted", "额度耗尽"), ("recommendation_changed", "建议变化"), ("rate_changed", "汇率变化"), ("collection_error", "采集失败"), ("temporary_burst_exhaustion", "爽蹬用满提醒"), ("test", "测试"))
     event_type = models.CharField(max_length=32, choices=TYPE_CHOICES)
     severity = models.CharField(max_length=16, default="warning")
     participant = models.ForeignKey(Participant, null=True, blank=True, on_delete=models.SET_NULL)

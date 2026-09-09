@@ -19,6 +19,7 @@ from ..models import (
     QuotaPool,
 )
 from ..reporting import participant_data
+from ..temporary_burst import current_carry_rows, apply_carry_edits
 from ..serializers import (
     MonitoredAccountSerializer,
     ParticipantWriteSerializer,
@@ -62,6 +63,7 @@ def quota_allocation_data(user) -> dict:
     }
     return {
         "accounts": MonitoredAccountSerializer(accounts, many=True).data,
+        "carry_adjustments": current_carry_rows(accounts, participants),
         "participants": [
             {
                 "id": participant.id,
@@ -144,6 +146,10 @@ class QuotaAllocationView(PageAccessAPIView):
             with fenced_fact_write(external_account_ids):
                 AppSettings.objects.select_for_update().get(pk=settings_id)
                 serializer.apply()
+                apply_carry_edits(
+                    serializer.validated_data.get("carry_adjustments", []),
+                    request.user,
+                )
         except serializers.ValidationError as exc:
             return error("分配方案已过期", details=exc.detail)
         return ok(quota_allocation_data(request.user))

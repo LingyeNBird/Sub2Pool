@@ -6,6 +6,9 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from email import policy
+from email.parser import BytesParser
+from socketserver import StreamRequestHandler, ThreadingTCPServer
 from datetime import timedelta
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,6 +32,30 @@ from playwright.sync_api import expect, sync_playwright
 
 BALANCES = {51: 80.0, 52: 80.0, 53: 80.0}
 WRITES = []
+MAILS = []
+SMTP_PORT = 0
+
+
+class Mailbox(StreamRequestHandler):
+    """Loopback-only SMTP sink exercising the application's real SMTP transport."""
+    def handle(self):
+        self.wfile.write(b"220 synthetic.local ESMTP\r\n")
+        while line := self.rfile.readline():
+            command = line.split(b" ", 1)[0].strip().upper()
+            if command == b"DATA":
+                self.wfile.write(b"354 End with dot\r\n")
+                lines = []
+                while (part := self.rfile.readline()) not in (b".\r\n", b""):
+                    lines.append(part[1:] if part.startswith(b"..") else part)
+                message = BytesParser(policy=policy.default).parsebytes(b"".join(lines))
+                assert message["To"] == "admin@example.test"
+                MAILS.append(message)
+                self.wfile.write(b"250 queued\r\n")
+            elif command == b"QUIT":
+                self.wfile.write(b"221 bye\r\n")
+                return
+            else:
+                self.wfile.write(b"250 OK\r\n")
 
 
 class Wallet(BaseHTTPRequestHandler):
@@ -126,8 +153,66 @@ def verify(account, people, old):
             dialog.get_by_role("button", name="取消", exact=True).first.click()
             assert WRITES == []
             card.get_by_role("button", name="开启临时爽蹬", exact=True).click()
+            dialog = page.locator("dialog[open]").last
+            expect(dialog.get_by_role("button", name="确认开启临时爽蹬", exact=True)).to_be_disabled()
+            expect(dialog.get_by_text(re.compile("周三用卡后下次变为下周三"))).to_be_visible()
+            dialog.get_by_role("checkbox").check()
+            dialog.screenshot(path=str(harness.OUTPUT / "burst-warning-desktop.png"))
             page.get_by_role("button", name="确认开启临时爽蹬", exact=True).click()
             expect(card.get_by_text("本周期生效中", exact=True)).to_be_visible()
+            expect(page.get_by_role("complementary", name="爽蹬全局状态")).to_be_visible()
+            page.screenshot(path=str(harness.OUTPUT / "burst-atmosphere-desktop.png"), animations="disabled")
+            page.goto(harness.FRONTEND_URL + "/tutorial?page=temporary-burst")
+            expect(page.get_by_role("complementary", name="爽蹬全局状态")).to_be_visible()
+            page.set_viewport_size({"width": 390, "height": 844})
+            page.wait_for_timeout(350)
+            page.screenshot(path=str(harness.OUTPUT / "burst-atmosphere-390.png"), animations="disabled")
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            page.set_viewport_size({"width": 1440, "height": 1100})
+            page.goto(harness.FRONTEND_URL + "/")
+            expect(card).to_be_visible()
+            reminder = card.get_by_role("switch", name="本轮用满提醒")
+            expect(reminder).to_be_disabled()
+
+            def configure_mail():
+                config = AppSettings.load()
+                config.smtp_host = "127.0.0.1"
+                config.smtp_port = SMTP_PORT
+                config.smtp_from_email = "sender@example.test"
+                config.notification_email = "admin@example.test"
+                config.smtp_use_tls = config.smtp_use_ssl = False
+                config.notify_on_rate_change = config.notify_on_recommendation_change = False
+                config.save()
+
+            in_database(configure_mail)
+            card.get_by_role("button", name="刷新状态", exact=True).click()
+            expect(reminder).to_be_enabled()
+            reminder.click()
+            expect(reminder).to_have_attribute("aria-checked", "true")
+
+            def exercise_reminder():
+                from monitor.models import NotificationEvent
+                from monitor.sampling.notifications import send_observation_notifications
+                config = AppSettings.load()
+                original = old.upstream_used_percent
+                old.upstream_used_percent = Decimal("95")
+                send_observation_notifications(config, old, None)
+                send_observation_notifications(config, old, None)
+                assert len(MAILS) == 1
+                NotificationEvent.objects.filter(event_type="temporary_burst_exhaustion").update(
+                    created_at=timezone.now() - timedelta(minutes=31)
+                )
+                send_observation_notifications(config, old, None)
+                assert len(MAILS) == 2
+                assert "接近用满" in str(MAILS[0]["Subject"])
+                assert "不会自动使用重置卡" in MAILS[0].get_body().get_content()
+                old.upstream_used_percent = original
+
+            in_database(exercise_reminder)
+            page.reload()
+            expect(reminder).to_have_attribute("aria-checked", "true")
+            reminder.click()
+            expect(reminder).to_have_attribute("aria-checked", "false")
             assert WRITES == []
             page.get_by_role(
                 "button", name="处理参与者 A 的额度建议", exact=True
@@ -172,7 +257,8 @@ def verify(account, people, old):
                 cycle = TemporaryBurstCycle.objects.get(is_burst_cycle=True)
                 assert [
                     Decimal(row["next_adjustment"]) for row in cycle.settlement
-                ] == [Decimal("3.33333"), -5, Decimal("1.66667")]
+                ] == [0, 0, 0]
+                assert cycle.settlement_context["eligible"] is False
                 return auto_apply_recommendations()
 
             assert in_database(rollover)["applied"] == 3
@@ -181,8 +267,9 @@ def verify(account, people, old):
             expect(card.get_by_text("已退出", exact=True)).to_be_visible()
             card.locator("summary").first.click()
             expect(
-                card.locator("details").first.get_by_text("+3.33 个百分点", exact=True)
+                card.locator("details").first.get_by_text(re.compile("上周期剩余大于或等于 5%"))
             ).to_be_visible()
+            expect(page.get_by_role("complementary", name="爽蹬全局状态")).to_have_count(0)
             card.screenshot(
                 path=str(harness.OUTPUT / "burst-settled-desktop.png"),
                 animations="disabled",
@@ -196,8 +283,28 @@ def verify(account, people, old):
             expect(
                 page.get_by_role("heading", name="临时爽蹬", exact=True)
             ).to_be_visible()
-            page.get_by_role("button", name="B 超用 5 个百分点", exact=True).click()
-            expect(page.get_by_role("cell", name="53.33%", exact=True)).to_be_visible()
+            example_comic = page.locator("[aria-label='本期消耗与下期权益漫画']")
+            next_cycle = example_comic.get_by_role("region", name="下一周期可用权益", exact=True)
+            for title, expected in (
+                ("整轮用满", ["67.00%", "17.00%", "16.00%"]),
+                ("B 超用 5 个百分点", ["50.00%", "25.00%", "25.00%"]),
+                ("有人用满，但没人超用", ["50.00%", "25.00%", "25.00%"]),
+                ("所有人都没用满", ["50.00%", "25.00%", "25.00%"]),
+                ("恰好剩余 5%", ["50.00%", "25.00%", "25.00%"]),
+            ):
+                page.get_by_role("button", name=title, exact=True).click()
+                expect(next_cycle.locator(".actor-value")).to_have_text(expected)
+            for width in (390, 768, 1440):
+                page.set_viewport_size({"width": width, "height": 1100})
+                notice_comic = page.locator("[aria-label='重置卡改变车友时间安排的小漫画']")
+                notice_comic.screenshot(path=str(harness.OUTPUT / f"notice-comic-{width}.png"), animations="disabled")
+                assert notice_comic.evaluate("(element) => element.scrollWidth <= element.clientWidth")
+                for title in ("整轮用满", "有人用满，但没人超用"):
+                    page.get_by_role("button", name=title, exact=True).click()
+                    example_comic.screenshot(path=str(harness.OUTPUT / f"example-comic-{width}-{title}.png"), animations="disabled")
+                    assert example_comic.evaluate("(element) => element.scrollWidth <= element.clientWidth")
+                    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            page.set_viewport_size({"width": 390, "height": 844})
             page.screenshot(
                 path=str(harness.OUTPUT / "burst-tutorial-390.png"),
                 full_page=True,
@@ -209,6 +316,77 @@ def verify(account, people, old):
                 full_page=True,
                 animations="disabled",
             )
+            comic = page.get_by_role("figure", name="一轮爽蹬，两个结局", exact=True)
+            original_theme = page.locator("html").get_attribute("data-theme")
+            for width in (390, 768, 1440):
+                page.set_viewport_size({"width": width, "height": 1100})
+                comic.scroll_into_view_if_needed()
+                assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                assert comic.evaluate("(element) => element.scrollWidth <= element.clientWidth")
+                comic.screenshot(
+                    path=str(harness.OUTPUT / f"burst-comic-{width}.png"),
+                    animations="disabled",
+                )
+            for theme in ("light", "dark"):
+                page.locator("html").evaluate("(element, theme) => element.setAttribute('data-theme', theme)", theme)
+                comic.screenshot(
+                    path=str(harness.OUTPUT / f"burst-comic-{theme}.png"),
+                    animations="disabled",
+                )
+            page.locator("html").evaluate(
+                "(element, theme) => theme === null ? element.removeAttribute('data-theme') : element.setAttribute('data-theme', theme)",
+                original_theme,
+            )
+            def add_second_account():
+                second = create_monitored_account(8, pool=account.pool, name="Synthetic second account")
+                now = timezone.now()
+                record(second, people, now, now + timedelta(days=2), [20, 30, 10])
+
+            in_database(add_second_account)
+            page.goto(harness.FRONTEND_URL + "/")
+            expect(card).to_be_visible()
+            card.get_by_role("button", name="开启临时爽蹬", exact=True).click()
+            dialog = page.locator("dialog[open]").last
+            expect(dialog.get_by_role("button", name="了解共享余额影响，开启爽蹬")).to_be_disabled()
+            expect(dialog.get_by_text(re.compile("当前有 2 个账号"))).to_be_visible()
+            page.set_viewport_size({"width": 390, "height": 844})
+            dialog.get_by_role("checkbox").scroll_into_view_if_needed()
+            page.screenshot(path=str(harness.OUTPUT / "burst-multi-warning-390.png"))
+            dialog.get_by_role("checkbox").check()
+            expect(dialog.get_by_role("button", name="了解共享余额影响，开启爽蹬")).to_be_enabled()
+            dialog.get_by_role("button", name="取消", exact=True).click()
+            def create_current_carry():
+                from monitor.temporary_burst import start_session, reconcile_account
+                config = AppSettings.load()
+                config.weekly_quota_model = "time_varying"
+                config.save()
+                reset = old.upstream_resets_at + timedelta(days=7)
+                record(account, people, reset - timedelta(minutes=1), reset, [33, 33, 34])
+                start_session()
+                next_observation = record(account, people, reset + timedelta(minutes=1),
+                                          reset + timedelta(days=7), [0, 0, 0])
+                reconcile_account(account, next_observation, config)
+
+            in_database(create_current_carry)
+            page.set_viewport_size({"width": 1568, "height": 1000})
+            page.goto(harness.FRONTEND_URL + "/allocation")
+            carry_input = page.get_by_role("spinbutton", name="Synthetic burst account A 的结转权益百分比", exact=True)
+            expect(carry_input).to_have_value("17")
+            expect(page.get_by_role("spinbutton", name="Synthetic burst account B 的结转权益百分比", exact=True)).to_have_value("-8")
+            expect(page.get_by_role("spinbutton", name="Synthetic second account A 的结转权益百分比", exact=True)).to_have_count(0)
+            page.screenshot(path=str(harness.OUTPUT / "carry-allocation-desktop.png"), full_page=True, animations="disabled")
+            carry_input.fill("7.5")
+            page.get_by_role("button", name="保存分配", exact=True).click()
+            expect(carry_input).to_have_value("7.5")
+            page.reload()
+            expect(carry_input).to_have_value("7.5")
+            carry_input.fill("0")
+            page.get_by_role("button", name="保存分配", exact=True).click()
+            expect(carry_input).to_have_count(0)
+            expect(page.get_by_role("spinbutton", name="Synthetic burst account B 的结转权益百分比", exact=True)).to_have_value("-8")
+            page.set_viewport_size({"width": 390, "height": 844})
+            page.wait_for_timeout(350)
+            page.screenshot(path=str(harness.OUTPUT / "carry-allocation-390.png"), full_page=True, animations="disabled")
             assert not errors, errors
             (harness.OUTPUT / "burst-results.json").write_text(
                 json.dumps(
@@ -220,12 +398,19 @@ def verify(account, people, old):
                             "automatic 9999",
                             "refresh persistence",
                             "live engine rollover",
-                            "conserved 3.33333/-5/1.66667 settlement",
+                            "spare capacity produces zero settlement",
+                            "mandatory rider notification acknowledgement",
+                            "global atmosphere survives navigation and clears on rollover",
                             "automatic ordinary balance restoration",
+                            "real SMTP delivery to loopback sink with half-hour throttling",
+                            "reminder configuration gate and persisted toggle",
                             "desktop/mobile card",
                             "illustrated tutorial example",
+                            "editable carry persists and zero hides only its own input",
+                            "ordinary account without carry has no extra input",
                         ],
                         "wallet_writes": WRITES,
+                        "synthetic_mail_count": len(MAILS),
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -244,6 +429,10 @@ def verify(account, people, old):
 if __name__ == "__main__":
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), Wallet)
     worker = Thread(target=upstream.serve_forever, daemon=True)
+    mail_server = ThreadingTCPServer(("127.0.0.1", 0), Mailbox)
+    SMTP_PORT = mail_server.server_address[1]
+    mail_worker = Thread(target=mail_server.serve_forever, daemon=True)
+    mail_worker.start()
     worker.start()
     processes = []
     try:
@@ -283,6 +472,9 @@ if __name__ == "__main__":
         harness.wait_for_server(harness.FRONTEND_URL + "/login")
         verify(*seeded)
     finally:
+        mail_server.shutdown()
+        mail_server.server_close()
+        mail_worker.join(timeout=5)
         upstream.shutdown()
         upstream.server_close()
         worker.join(timeout=5)

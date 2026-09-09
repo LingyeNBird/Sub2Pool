@@ -1,33 +1,51 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import { api, jsonBody } from "@/services/api";
 import type { ConfirmDialogHandle } from "@/types/common";
 import type { TemporaryBurstData } from "@/types/temporaryBurst";
+import { temporaryBurstState } from "@/stores/temporaryBurst";
 
 const emit = defineEmits<{ changed: [] }>();
-const data = ref<TemporaryBurstData | null>(null);
+const data = temporaryBurstState;
 const error = ref("");
 const notice = ref("");
 const saving = ref(false);
 const loading = ref(false);
 const confirmation = ref<ConfirmDialogHandle | null>(null);
 const dateTime = useDateTime();
-let timer: ReturnType<typeof setInterval> | undefined;
 let disposed = false;
 
+async function toggleReminder() {
+  if (!data.value || saving.value) return;
+  saving.value = true;
+  error.value = "";
+  try {
+    data.value = await api<TemporaryBurstData>("dashboard/temporary-burst", {
+      method: "PATCH",
+      body: jsonBody({
+        session_id: data.value.session_id,
+        reminder_enabled: !data.value.reminder_enabled,
+      }),
+    });
+    notice.value = data.value.reminder_enabled
+      ? "本轮用满提醒已开启：账号达到 95% 后，每半小时最多邮件提醒管理员一次；换周期后停止该账号提醒。"
+      : "本轮用满提醒已关闭。";
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "提醒设置失败";
+  } finally {
+    saving.value = false;
+  }
+}
 async function refresh() {
   if (loading.value || saving.value) return;
   loading.value = true;
   try {
     const next = await api<TemporaryBurstData>("dashboard/temporary-burst");
     if (disposed) return;
-    const changed =
-      data.value?.active !== undefined && data.value.active !== next.active;
     data.value = next;
     error.value = "";
-    if (changed) emit("changed");
   } catch (cause) {
     if (!disposed)
       error.value =
@@ -42,8 +60,13 @@ async function start() {
   if (
     !(await confirmation.value?.open({
       title: "开启临时爽蹬？",
-      message: `所有启用的 Sub2API 账号参与本轮，所有已分配参与者的建议余额将设为 9999。${data.value.auto_apply ? "已开启自动应用，将立即尝试写入这些余额。" : "未开启自动应用，需要从额度建议手动应用。"}\n首个账号换周期即统一退出，各账号分别结算借用权益。9999 是美元余额，不是新增订阅容量；高用量可能很快耗尽套餐。`,
-      confirmLabel: "确认开启临时爽蹬",
+      message: `所有启用的 Sub2API 账号参与本轮，已分配参与者的建议余额将设为 9999 美元，不会增加订阅容量。${data.value.auto_apply ? "自动应用已开启，将立即尝试写入余额。" : "需要手动应用余额建议。"}\n\n${data.value.enabled_account_count > 1 ? `多账号共享余额提醒：当前有 ${data.value.enabled_account_count} 个账号。参与者余额在有权使用且被路由到的账号间共享，无法只对某个账号放开。按账号结算不代表消费额度隔离。\n\n` : ""}首个账号换周期即全局退出；余额恢复取决于自动或手动应用。其他账号继续观测，分别换周期后按旧周期剩余小于 5% 的条件结算。\n\n开启前，请告知所有车友：爽蹬可能提前耗尽额度。若使用重置卡，下次重置将改为用卡后的 7 天。例如原定周一重置，周三用卡后下次变为下周三；前两天未使用的车友也会受影响。\n\n爽蹬本身不会修改重置时间。用卡前请与所有车友协商，权益结算不能弥补使用时间安排的变化。`,
+      confirmLabel:
+        data.value.enabled_account_count > 1
+          ? "了解共享余额影响，开启爽蹬"
+          : "确认开启临时爽蹬",
+      acknowledgement:
+        "我已告知所有车友：共享余额、爽蹬可能提前耗尽额度，使用重置卡会改变后续重置时间。",
       tone: "warning",
     }))
   )
@@ -53,7 +76,7 @@ async function start() {
   try {
     data.value = await api<TemporaryBurstData>("dashboard/temporary-burst", {
       method: "POST",
-      body: jsonBody({ confirm: true }),
+      body: jsonBody({ confirm: true, riders_notified: true }),
     });
     const result = data.value.application;
     notice.value = data.value.auto_apply
@@ -75,19 +98,35 @@ function adjustment(value: string | undefined) {
   const amount = Number(value);
   return `${amount > 0 ? "+" : ""}${amount.toFixed(2)} 个百分点`;
 }
-onMounted(() => {
-  void refresh();
-  timer = setInterval(() => void refresh(), 30000);
-});
+watch(
+  () => data.value?.active,
+  (active, previous) => {
+    if (
+      previous !== undefined &&
+      active !== undefined &&
+      active !== previous &&
+      !saving.value
+    ) {
+      notice.value = "";
+      emit("changed");
+    }
+  },
+  { flush: "sync" },
+);
+onMounted(() => void refresh());
 onBeforeUnmount(() => {
   disposed = true;
-  clearInterval(timer);
 });
 defineExpose({ refresh });
 </script>
 
 <template>
-  <section class="card col-span-12 bg-base-200 shadow-xs" aria-label="临时爽蹬">
+  <section
+    id="temporary-burst"
+    class="card col-span-12 bg-base-200 shadow-xs"
+    :class="{ 'ring-1 ring-orange-500/60': data?.active }"
+    aria-label="临时爽蹬"
+  >
     <div class="card-body gap-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <h2 class="card-title">
@@ -105,12 +144,38 @@ defineExpose({ refresh });
       <p class="text-sm leading-6 opacity-70">
         临时把所有参与者的建议余额设为
         <strong>9999</strong
-        >，按需使用，但不停止记账。超用多少，就在下周期扣多少；补偿按其他人的未用份额分配，未被借用的剩余额度到期作废。
+        >，按需使用，但不停止记账。各账号换周期后，只有上周期最终观测剩余小于 5%
+        才结算借用权益；剩余大于或等于 5% 时不扣、不补，未用额度到期作废。
       </p>
       <p v-if="data?.active" class="text-sm">
-        最迟退出：{{
+        本轮预计结束：{{
           dateTime(data.expires_at)
         }}。任一账号提前换周期也会统一退出，其他账号按各自原周期结束时间结算。
+      </p>
+      <div
+        v-if="data?.sampling.some((row) => row.accelerated)"
+        class="flex flex-wrap gap-2 text-xs"
+      >
+        <span
+          v-for="row in data.sampling"
+          :key="row.account_id"
+          class="badge badge-outline"
+        >
+          {{ row.account_name }} ·
+          {{
+            !data.monitoring_enabled
+              ? "监控暂停"
+              : `${row.accelerated ? "加速" : "常规"} ${row.interval_seconds / 60} 分钟一次`
+          }}
+        </span>
+      </div>
+      <p
+        v-if="data && data.enabled_account_count > 1"
+        class="text-sm text-warning"
+      >
+        全局共享余额 ·
+        {{ data.enabled_account_count }}
+        个启用账号。不能按账号隔离消费额度；请提前告知所有车友，并在使用重置卡前协商周期变化。
       </p>
       <p
         v-if="data && !data.monitoring_enabled"
@@ -137,6 +202,25 @@ defineExpose({ refresh });
         </button>
         <button
           type="button"
+          class="btn btn-sm"
+          :class="data?.reminder_enabled ? 'btn-warning' : 'btn-outline'"
+          role="switch"
+          aria-label="本轮用满提醒"
+          :aria-checked="Boolean(data?.reminder_enabled)"
+          :disabled="
+            loading ||
+            saving ||
+            (!data?.reminder_enabled &&
+              (!data?.reminder_email_ready ||
+                !data?.session_id ||
+                data.can_start))
+          "
+          @click="toggleReminder"
+        >
+          用满提醒：{{ data?.reminder_enabled ? "已开启" : "已关闭" }}
+        </button>
+        <button
+          type="button"
           class="btn btn-ghost btn-sm"
           :disabled="loading || saving"
           @click="refresh"
@@ -152,6 +236,17 @@ defineExpose({ refresh });
           data.auto_apply ? "自动应用建议已开启" : "需要手动应用建议"
         }}</span>
       </div>
+      <p class="text-xs leading-6 opacity-70">
+        用满提醒仅对本轮生效：原周期账号最新观测达到 95%
+        后，每半小时最多向管理员接收邮箱发送一次，换周期后停止。监控暂停时不会自动发送；失败详情见通知记录。本功能不会自动使用重置卡。
+        <RouterLink
+          v-if="data && !data.reminder_email_ready"
+          to="/settings"
+          class="link link-primary"
+          >请先配置邮件服务和管理员接收邮箱，并发送测试邮件。</RouterLink
+        >
+        <span v-else-if="data?.can_start">开启爽蹬后可启用本轮提醒。</span>
+      </p>
       <p
         v-if="data && !data.active && !data.can_start"
         class="text-sm text-warning"
@@ -175,6 +270,15 @@ defineExpose({ refresh });
         </summary>
         <p v-if="cycle.error" role="alert" class="mt-3 text-sm text-error">
           {{ cycle.error }}
+        </p>
+        <p v-if="cycle.settlement_context" class="mt-3 text-sm">
+          {{ cycle.settlement_context.reason }}（剩余
+          {{ percent(cycle.settlement_context.remaining_percent) }}）。
+          额度观测：{{
+            dateTime(cycle.settlement_context.quota_observed_at)
+          }}，距原定重置
+          {{ Math.round(cycle.settlement_context.seconds_before_reset / 60) }}
+          分钟；不是重置瞬间的精确终值。
         </p>
         <div class="mt-3 overflow-x-auto">
           <table class="table table-sm">
@@ -217,6 +321,19 @@ defineExpose({ refresh });
           结算依据截至
           {{ dateTime(cycle.evidence_at) }} 的有效观测；不改写合同或真实用量。
         </p>
+        <details v-if="cycle.carry_edits?.length" class="mt-3 text-xs">
+          <summary class="cursor-pointer">管理员结转调整记录</summary>
+          <ul class="mt-2 space-y-2">
+            <li v-for="(edit, index) in cycle.carry_edits" :key="index">
+              {{ dateTime(edit.edited_at) }} · {{ edit.admin_username }} ·
+              {{
+                cycle.members.find(
+                  (member) => member.participant_id === edit.participant_id,
+                )?.name ?? `参与者 ${edit.participant_id}`
+              }}： {{ adjustment(edit.before) }} → {{ adjustment(edit.after) }}
+            </li>
+          </ul>
+        </details>
       </details>
     </div>
     <ConfirmDialog ref="confirmation" />

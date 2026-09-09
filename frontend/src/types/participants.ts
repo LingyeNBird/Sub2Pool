@@ -141,10 +141,20 @@ export interface QuotaPoolAllocation {
   allocations: QuotaPoolAllocationEntry[];
   total_share_percent: number;
 }
+export interface CarryAdjustment {
+  cycle_id: number;
+  account_id: number;
+  participant_id: number;
+  user_id: number;
+  resets_at: string;
+  adjustment_percent: string;
+  revision: number;
+}
 export interface QuotaAllocationData {
   accounts: MonitoredAccount[];
   participants: QuotaAllocationParticipant[];
   pools: QuotaPoolAllocation[];
+  carry_adjustments: CarryAdjustment[];
 }
 export interface QuotaAllocationWritePool {
   id?: number;
@@ -154,6 +164,7 @@ export interface QuotaAllocationWritePool {
 }
 export interface QuotaAllocationWrite {
   pools: QuotaAllocationWritePool[];
+  carry_adjustments?: Omit<CarryAdjustment, "resets_at">[];
 }
 export interface Sub2APIUserOption {
   id: number;

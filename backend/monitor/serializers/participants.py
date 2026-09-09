@@ -129,10 +129,23 @@ class QuotaPoolWriteSerializer(serializers.Serializer):
     allocations = PoolAllocationEntrySerializer(many=True, required=False)
 
 
+class CarryAdjustmentWriteSerializer(serializers.Serializer):
+    cycle_id = serializers.IntegerField(min_value=1)
+    account_id = serializers.IntegerField(min_value=1)
+    participant_id = serializers.IntegerField(min_value=1)
+    user_id = serializers.IntegerField(min_value=1)
+    revision = serializers.IntegerField(min_value=0)
+    adjustment_percent = serializers.DecimalField(
+        max_digits=8, decimal_places=5,
+        min_value=Decimal("-100"), max_value=Decimal("100"),
+    )
+
+
 class QuotaAllocationWriteSerializer(serializers.Serializer):
     """Atomically replace the complete account partition and pool contracts."""
 
     pools = QuotaPoolWriteSerializer(many=True)
+    carry_adjustments = CarryAdjustmentWriteSerializer(many=True, required=False)
 
     def validate(self, attrs):
         pools = attrs["pools"]

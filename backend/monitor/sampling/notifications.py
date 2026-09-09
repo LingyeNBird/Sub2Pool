@@ -21,6 +21,10 @@ def send_observation_notifications(
         external_account_id=observation.account_id
     ).first()
     account_label = account.name if account is not None else str(observation.account_id)
+    if account is not None:
+        from ..temporary_burst import send_exhaustion_reminder
+
+        send_exhaustion_reminder(account, observation, config)
     interval_key = (
         observation.attribution_started_at.isoformat()
         if observation.attribution_started_at
