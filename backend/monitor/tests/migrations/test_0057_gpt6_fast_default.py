@@ -13,6 +13,13 @@ FROM = [("monitor", "0056_pricing_announcement_action")]
 TO = [("monitor", "0057_gpt6_fast_default")]
 
 
+@pytest.fixture(autouse=True)
+def restore_latest_schema(transactional_db):
+    targets = MigrationExecutor(connection).loader.graph.leaf_nodes()
+    yield
+    MigrationExecutor(connection).migrate(targets)
+
+
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("rules,expected", [
     ([{"model_pattern": "*", "multiplier": "2.5"}], ("2", "2", "2.5")),

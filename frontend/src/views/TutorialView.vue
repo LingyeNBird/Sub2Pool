@@ -7,6 +7,7 @@ import { useAuthStore } from "@/stores/auth";
 import ConstantAverageAlgorithmTutorial from "./tutorial/components/ConstantAverageAlgorithmTutorial.vue";
 import ParticleFilterAlgorithmTutorial from "./tutorial/components/ParticleFilterAlgorithmTutorial.vue";
 import TutorialCodeBlock from "./tutorial/components/TutorialCodeBlock.vue";
+import TemporaryBurstTutorial from "./tutorial/components/TemporaryBurstTutorial.vue";
 
 import { tutorialPages, type TutorialNoteTone } from "./tutorial/tutorialPages";
 
@@ -102,6 +103,9 @@ watch(activePageId, async () => {
         />
         <ConstantAverageAlgorithmTutorial
           v-else-if="activePage.interactive === 'constant-average'"
+        />
+        <TemporaryBurstTutorial
+          v-else-if="activePage.interactive === 'temporary-burst'"
         />
         <div v-else class="divide-y divide-base-300">
           <section

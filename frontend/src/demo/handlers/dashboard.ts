@@ -1,3 +1,4 @@
+import { refreshDemoBurst } from "./temporaryBurst";
 import type {
   QuotaAllocationData,
   QuotaAllocationWritePool,
@@ -220,6 +221,7 @@ export function handleDashboard({
   fail,
 }: DemoRequestContext): Response | null {
   if (method === "GET" && pathname === "dashboard") {
+    refreshDemoBurst(state);
     const accountId = Number(url.searchParams.get("account_id"));
     return ok(dashboardData(state, accountId));
   }
@@ -266,6 +268,7 @@ export function handleDashboard({
       account.last_error = "";
     }
     latest.sample_note = "演示：已执行一次本地测算，状态已在当前标签页更新";
+    refreshDemoBurst(state, true);
     saveDemoState(state);
     return ok({ scheduled: true });
   }

@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views.announcements import AnnouncementListView, AnnouncementReadView
+from .views.temporary_burst import TemporaryBurstView
 from .views.auth import (
     LoginView,
     LogoutView,
@@ -107,6 +108,7 @@ urlpatterns = [
     path("ip-blocks", BlockedIPAddressListView.as_view()),
     path("ip-blocks/<int:block_id>", BlockedIPAddressDetailView.as_view()),
     path("dashboard", DashboardView.as_view()),
+    path("dashboard/temporary-burst", TemporaryBurstView.as_view()),
     path("account-status", AccountStatusView.as_view()),
     path(
         "dashboard/participants/<int:participant_id>/apply-recommendation",

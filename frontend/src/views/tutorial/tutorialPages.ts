@@ -28,7 +28,7 @@ export interface TutorialPage {
   summary: string;
   icon: string;
   sections: TutorialSection[];
-  interactive?: "particle-filter" | "constant-average";
+  interactive?: "particle-filter" | "constant-average" | "temporary-burst";
   action?: {
     label: string;
     to: string;
@@ -248,6 +248,17 @@ export const tutorialGroups: TutorialGroup[] = [
           },
         ],
         action: { label: "查看当前建议", to: "/" },
+      },
+      {
+        id: "temporary-burst",
+        group: "日常使用",
+        title: "临时爽蹬",
+        summary:
+          "本周期临时放开余额，按需使用；借用的权益跨周期归还，闲置但未被借用的额度不结转。",
+        icon: "bolt",
+        interactive: "temporary-burst",
+        sections: [],
+        action: { label: "进入额度总览", to: "/" },
       },
       {
         id: "collection",

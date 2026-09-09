@@ -8,6 +8,7 @@ import { handleReporting } from "./handlers/reporting";
 import { handleSecurity } from "./handlers/security";
 import { handleSettings } from "./handlers/settings";
 import { handleSystemUsers } from "./handlers/systemUsers";
+import { handleTemporaryBurst } from "./handlers/temporaryBurst";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const DEMO_DELAY_MS = 140;
@@ -42,6 +43,7 @@ type DemoRequestHandler = (context: DemoRequestContext) => Response | null;
 const protectedHandlers: DemoRequestHandler[] = [
   handleProtectedAuth,
   handleSecurity,
+  handleTemporaryBurst,
   handleDashboard,
   handleParticipants,
   handleSystemUsers,

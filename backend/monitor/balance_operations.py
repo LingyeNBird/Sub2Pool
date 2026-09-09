@@ -396,11 +396,11 @@ def apply_participant_recommendation(participant_id: int) -> ParticipantBalanceO
             guard.release()
 
 
-def auto_apply_recommendations() -> dict:
+def auto_apply_recommendations(*, explicit=False) -> dict:
     """Apply only actionable aggregate recommendations once per sampling cycle."""
     result = {"applied": 0, "failed": 0}
     config = AppSettings.load()
-    if not config.auto_apply_recommendations or not config.monitoring_enabled:
+    if not config.auto_apply_recommendations or (not config.monitoring_enabled and not explicit):
         return result
     for participant in Participant.objects.filter(enabled=True):
         aggregate, _ = aggregate_recommendation(participant, config)

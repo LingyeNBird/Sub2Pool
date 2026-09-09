@@ -231,6 +231,8 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "pool_name": {"type": "string"},
                 "pool_contract_revision": {"type": "integer"},
                 "contract_share_percent": {"type": "number"},
+                "carry_adjustment_percent": {"type": "number", "description": "本周期借用结转调整，单位为百分点，不改写合同份额。"},
+                "effective_share_percent": {"type": "number", "description": "合同份额加本周期结转后的可用权益。"},
                 "net_position_usd": nullable_number,
                 "net_position_min_usd": nullable_number,
                 "net_position_max_usd": nullable_number,
@@ -257,6 +259,7 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
             "description": (
                 "recommended_balance 及其范围、差额是预计应设置的 Sub2API 全局余额，"
                 "不是追加充值金额；展示、通知及写入方不得再次应用计费修正倍率。"
+                "临时爽蹬生效时完整建议固定为 9999，退出后恢复普通建议并计入周期权益调整。"
             ),
             "required": [
                 "participant_id",
@@ -284,6 +287,8 @@ def participant_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "sources",
             ],
             "properties": {
+                "temporary_burst": {"type": "boolean", "description": "当前是否处于临时统一余额模式。"},
+                "temporary_burst_expires_at": nullable_string,
                 "participant_id": {"type": "integer"},
                 "participant_name": {"type": "string"},
                 "pool_allocations": {

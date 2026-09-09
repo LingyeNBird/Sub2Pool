@@ -27,6 +27,7 @@ from .cpa_collector import CPACollectorState
 from .cpa_collection import CPAAccountCollectionInterval
 from .audit import AnnouncementRead, BlockedIPAddress, LoginEvent, NotificationEvent
 from .upstream_pricing import UpstreamPricingState
+from .temporary_burst import TemporaryBurstSession, TemporaryBurstCycle
 from .history_maintenance import (
     HistoricalRebuildRun,
     HistoryMaintenanceState,
@@ -43,6 +44,8 @@ __all__ = [
     "AnnouncementRead",
     "AppSettings",
     "UpstreamPricingState",
+    "TemporaryBurstSession",
+    "TemporaryBurstCycle",
     "BlockedIPAddress",
     "CPAUsageEvent",
     "CPAAccountCollectionInterval",

@@ -51,7 +51,10 @@ export function snapshot(
   };
 }
 
-export function aggregateParticipant(participant: Participant): void {
+export function aggregateParticipant(
+  participant: Participant,
+  adjustments: Record<number, number> = {},
+): void {
   const breakdowns = participant.account_breakdowns.filter(
     (item) =>
       item.account_enabled && item.allocated && item.contract_share_percent > 0,
@@ -68,7 +71,8 @@ export function aggregateParticipant(participant: Participant): void {
     const chargedUpper = sourceSnapshot?.charged_percent_upper ?? charged;
     const selected = sourceSnapshot?.selected_cost ?? 0;
     const capacity = charged > 0 ? (selected * 100) / charged : 440;
-    const contractShare = breakdown.contract_share_percent;
+    const carry = adjustments[breakdown.account_id] ?? 0;
+    const contractShare = breakdown.contract_share_percent + carry;
     const expectedEntitlement = sourceSnapshot
       ? (contractShare * capacity) / 100
       : null;
@@ -86,7 +90,9 @@ export function aggregateParticipant(participant: Participant): void {
       pool_id: breakdown.pool_id,
       pool_name: breakdown.pool_name,
       pool_contract_revision: sourceSnapshot?.pool_contract_revision ?? 1,
-      contract_share_percent: contractShare,
+      contract_share_percent: breakdown.contract_share_percent,
+      carry_adjustment_percent: carry,
+      effective_share_percent: contractShare,
       snapshot: sourceSnapshot,
       net_position_usd: sourceSnapshot
         ? ((contractShare - charged) * capacity) / 100
