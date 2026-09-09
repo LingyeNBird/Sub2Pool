@@ -24,7 +24,6 @@ from .models.temporary_burst import TemporaryBurstCycle, TemporaryBurstSession
 ZERO = Decimal("0")
 PRECISION = Decimal("0.00001")
 BURST_BALANCE = Decimal("9999.00")
-SETTLEMENT_REMAINING_THRESHOLD = Decimal("5")
 
 
 def reminder_email_ready(config):
@@ -171,7 +170,7 @@ def active_session(config=None):
 
 def cycle_for(account, observation):
     return (
-        TemporaryBurstCycle.objects.filter(
+        TemporaryBurstCycle.objects.select_related("session").filter(
             account=account,
             resets_at__gte=observation.upstream_resets_at - RESET_TIME_TOLERANCE,
             resets_at__lte=observation.upstream_resets_at + RESET_TIME_TOLERANCE,
@@ -182,7 +181,7 @@ def cycle_for(account, observation):
 
 
 def adjustment_for(cycle, participant):
-    if cycle is None:
+    if cycle is None or cycle.session.terminated_at is not None:
         return ZERO
     member = next(
         (
@@ -395,6 +394,15 @@ def reconcile_account(account, observation, config):
             TemporaryBurstSession.objects.filter(
                 pk=cycle.session_id, ended_at__isnull=True
             ).update(ended_at=timezone.now())
+        if not cycle.session.carryover_enabled:
+            cycle.settled_at = timezone.now()
+            cycle.error = ""
+            cycle.settlement_context = {
+                "eligible": False,
+                "reason": "不结转模式：本轮不产生补偿或扣除",
+            }
+            cycle.save(update_fields=["settled_at", "error", "settlement_context"])
+            continue
         if cycle.session.base_url != config.sub2api_base_url.rstrip("/"):
             cycle.error = "Sub2API 连接已变化，不能跨服务结算旧权益"
             cycle.save(update_fields=["error"])
@@ -423,20 +431,15 @@ def reconcile_account(account, observation, config):
             for row in cycle.members
         }
         remaining = max(ZERO, Decimal("100") - final_observation.upstream_used_percent)
-        eligible = remaining < SETTLEMENT_REMAINING_THRESHOLD
-        credits = settle_percentages(rights, usage) if eligible else dict.fromkeys(rights, ZERO)
+        credits = settle_percentages(rights, usage)
         cycle.settlement_context = {
             "remaining_percent": str(remaining),
-            "threshold_percent": str(SETTLEMENT_REMAINING_THRESHOLD),
-            "eligible": eligible,
+            "eligible": True,
             "quota_observed_at": final_observation.observed_at.isoformat(),
             "seconds_before_reset": max(
                 0, int((cycle.resets_at - final_observation.observed_at).total_seconds())
             ),
-            "reason": (
-                "上周期剩余小于 5%，按借用情况结算"
-                if eligible else "上周期剩余大于或等于 5%，本轮调整为 0"
-            ),
+            "reason": "结转模式：按借用情况结算",
         }
         next_members = _members(account, credits)
         next_users = {row["participant_id"]: row["user_id"] for row in next_members}
@@ -484,7 +487,9 @@ def reconcile_account(account, observation, config):
             )
 
 
-def start_session():
+def start_session(carryover_enabled):
+    if type(carryover_enabled) is not bool:
+        raise ValueError("请选择结转或不结转模式")
     guard = LeaseGuard.acquire(0)
     try:
         with transaction.atomic():
@@ -544,6 +549,7 @@ def start_session():
                 expires_at=min(row[1].upstream_resets_at for row in captured),
                 participant_users=participant_users,
                 base_url=config.sub2api_base_url.rstrip("/"),
+                carryover_enabled=carryover_enabled,
             )
             for account, observation, members, existing in captured:
                 if existing:
@@ -580,6 +586,38 @@ def start_session():
         guard.release()
 
 
+def stop_session(session_id):
+    """Cancel every pending settlement in this round under the global lease."""
+    guard = LeaseGuard.acquire(0)
+    try:
+        with transaction.atomic():
+            guard.assert_owned()
+            session = TemporaryBurstSession.objects.select_for_update().order_by("-id").first()
+            if session is None or session.pk != session_id:
+                raise ValueError("本轮爽蹬状态已变化，请刷新后重试")
+            if session.terminated_at is not None:
+                raise ValueError("本轮爽蹬已经提前终止")
+            if active_session() is None and not session.cycles.filter(
+                is_burst_cycle=True, settled_at__isnull=True,
+            ).exists():
+                raise ValueError("本轮爽蹬已结束")
+            now = timezone.now()
+            session.ended_at = session.ended_at or now
+            session.terminated_at = now
+            session.exhaustion_reminder_enabled = False
+            session.save(update_fields=["ended_at", "terminated_at", "exhaustion_reminder_enabled"])
+            session.cycles.filter(settled_at__isnull=True).update(
+                settled_at=now,
+                error="",
+                settlement_context={
+                    "eligible": False,
+                    "reason": "提前终止：取消本轮后续结转，超用不追账",
+                },
+            )
+    finally:
+        guard.release()
+
+
 def burst_payload():
     config = AppSettings.load()
     session = TemporaryBurstSession.objects.order_by("-id").first()
@@ -605,7 +643,16 @@ def burst_payload():
             "interval_seconds": seconds,
             "accelerated": accelerated,
         })
+    original_cycle_open = any(
+        cycle.is_burst_cycle
+        and (latest := _latest(cycle.account)) is not None
+        and not official_reset_advanced(latest.upstream_resets_at, cycle.resets_at)
+        for cycle in cycles
+    )
     return {
+        "carryover_enabled": session.carryover_enabled if session else None,
+        "terminated_at": session.terminated_at if session else None,
+        "can_stop": bool(session and not session.terminated_at and (active or pending)),
         "active": active is not None,
         "session_id": session.pk if session else None,
         "started_at": session.started_at if session else None,
@@ -619,7 +666,7 @@ def burst_payload():
         "auto_apply": config.auto_apply_recommendations,
         "monitoring_enabled": config.monitoring_enabled,
         "recommended_balance_usd": float(BURST_BALANCE),
-        "can_start": active is None and not pending,
+        "can_start": active is None and not pending and not original_cycle_open,
         "enabled_account_count": len(accounts),
         "sampling": sampling,
         "reminder_enabled": bool(session and session.exhaustion_reminder_enabled and pending),

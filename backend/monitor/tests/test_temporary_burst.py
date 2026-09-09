@@ -108,7 +108,7 @@ def riders(db):
 @pytest.mark.django_db
 def test_mode_overrides_wallet_then_settles_once_and_returns_to_contract(riders):
     config, account, people, old = riders
-    session = start_session()
+    session = start_session(True)
     for person in people:
         aggregate, _ = aggregate_recommendation(person, config)
         assert aggregate["recommended_balance_usd"] == 9999
@@ -169,7 +169,7 @@ def test_first_account_reset_exits_globally_but_other_account_waits(riders):
         old.upstream_resets_at + timedelta(days=2),
         [20, 30, 10],
     )
-    session = start_session()
+    session = start_session(True)
     new = record(
         first,
         people,
@@ -184,7 +184,7 @@ def test_first_account_reset_exits_globally_but_other_account_waits(riders):
         is None
     )
     with pytest.raises(ValueError, match="周期|一轮"):
-        start_session()
+        start_session(True)
     later = record(
         second,
         people,
@@ -198,7 +198,7 @@ def test_first_account_reset_exits_globally_but_other_account_waits(riders):
         for row in TemporaryBurstCycle.objects.get(
             session=session, account=second, is_burst_cycle=True
         ).settlement
-    ] == [0, 0, 0]
+    ] == [D("3.33333"), -5, D("1.66667")]
 
 
 @pytest.mark.django_db
@@ -206,7 +206,7 @@ def test_manual_segment_does_not_exit_and_settlement_does_not_duplicate_segments
     riders,
 ):
     config, account, people, old = riders
-    start_session()
+    start_session(True)
     # Two observations in the same segment must not both count toward the cycle total.
     updated = record(
         account,
@@ -251,7 +251,7 @@ def test_manual_and_automatic_application_share_9999_then_restore(riders, monkey
             return balance
 
     monkeypatch.setattr("monitor.balance_operations.Sub2APIClient", Remote)
-    start_session()
+    start_session(True)
     assert auto_apply_recommendations() == {"applied": 0, "failed": 0}
     assert writes == []
     apply_participant_recommendation(people[0].id)
@@ -281,7 +281,7 @@ def test_segment_restart_keeps_previous_usage_and_ends_only_at_official_reset(ri
     ):
         snapshot.charged_cycle_percent = used
         snapshot.save(update_fields=["charged_cycle_percent"])
-    session = start_session()
+    session = start_session(True)
     second = record(
         account,
         people,
@@ -311,7 +311,7 @@ def test_segment_restart_keeps_previous_usage_and_ends_only_at_official_reset(ri
 @pytest.mark.django_db
 def test_expired_mode_never_keeps_recommending_9999_without_new_sample(riders):
     config, account, people, old = riders
-    session = start_session()
+    session = start_session(True)
     session.expires_at = timezone.now() - timedelta(seconds=1)
     session.save(update_fields=["expires_at"])
     aggregate, _ = aggregate_recommendation(people[0], config)
@@ -349,13 +349,13 @@ def test_activation_requires_admin_and_explicit_confirmation(riders):
     assert not TemporaryBurstSession.objects.exists()
     assert (
         client.post(
-            "/api/dashboard/temporary-burst", {"confirm": True, "riders_notified": True}, format="json"
+            "/api/dashboard/temporary-burst", {"confirm": True, "carryover_enabled": True}, format="json"
         ).status_code
         == 200
     )
     assert (
         client.post(
-            "/api/dashboard/temporary-burst", {"confirm": True, "riders_notified": True}, format="json"
+            "/api/dashboard/temporary-burst", {"confirm": True, "carryover_enabled": True}, format="json"
         ).status_code
         == 400
     )
@@ -365,7 +365,7 @@ def test_activation_requires_admin_and_explicit_confirmation(riders):
 @pytest.mark.django_db
 def test_credit_identity_changes_do_not_silently_destroy_one_side_of_debt(riders):
     config, account, people, old = riders
-    start_session()
+    start_session(True)
     people[0].sub2api_user_id = 999
     people[0].save()
     new = record(
@@ -383,25 +383,23 @@ def test_credit_identity_changes_do_not_silently_destroy_one_side_of_debt(riders
     assert active_session(config) is None
 
 
-@pytest.mark.parametrize("account_used, expected", [
-    ("95", [0, 0, 0]),
-    ("95.0001", [D("3.33333"), -5, D("1.66667")]),
+@pytest.mark.parametrize("carryover, account_used", [
+    (True, 55), (True, 100), (False, 55), (False, 100),
 ])
-def test_settlement_gate_uses_account_quota_not_sum_of_rider_usage(riders, account_used, expected):
+def test_selected_mode_not_account_exhaustion_controls_future_rights(riders, carryover, account_used):
     config, account, people, old = riders
     final = record(account, people, old.observed_at + timedelta(minutes=1),
-                   old.upstream_resets_at, [20, 30, 10])
+                   old.upstream_resets_at, [20, 30, 5])
     final.upstream_used_percent = D(account_used)
     final.save(update_fields=["upstream_used_percent"])
-    start_session()
+    start_session(carryover)
     new = record(account, people, old.upstream_resets_at + timedelta(minutes=1),
                  old.upstream_resets_at + timedelta(days=7), [0, 0, 0])
     reconcile_account(account, new, config)
-    cycle = TemporaryBurstCycle.objects.get(is_burst_cycle=True)
-    assert [D(row["next_adjustment"]) for row in cycle.settlement] == expected
-    assert cycle.settled_at is not None
-    assert D(cycle.settlement_context["remaining_percent"]) == 100 - D(account_used)
-    assert cycle.settlement_context["quota_observed_at"] == final.observed_at.isoformat()
+    expected = [53, 20, 27] if carryover else [50, 25, 25]
+    for person, share in zip(people, expected):
+        aggregate, _ = aggregate_recommendation(person, config)
+        assert aggregate["sources"][0]["effective_share_percent"] == share
     reconcile_account(account, new, config)
     assert TemporaryBurstCycle.objects.filter(is_burst_cycle=True).count() == 1
 
@@ -419,7 +417,7 @@ def test_sampling_acceleration_follows_each_original_cycle_even_after_global_exi
     second = create_monitored_account(8, pool=first.pool)
     second_old = record(second, people, old.observed_at,
                         old.upstream_resets_at + timedelta(days=2), [20, 30, 10])
-    start_session()
+    start_session(True)
     assert sampling_policy(first, config, old.observed_at) == (300, True)
     assert sampling_policy(first, config, old.upstream_resets_at - timedelta(minutes=30)) == (60, True)
     second_old.upstream_used_percent = 90
@@ -449,7 +447,7 @@ def test_reminder_requires_mail_configuration_and_current_session(riders):
     from monitor.temporary_burst import set_exhaustion_reminder
 
     config, _account, _people, _old = riders
-    session = start_session()
+    session = start_session(True)
     with pytest.raises(ValueError, match="邮件"):
         set_exhaustion_reminder(True, session.pk)
     config.notification_email = "admin@example.test"
@@ -480,7 +478,7 @@ def test_reminder_threshold_half_hour_cooldown_disable_and_account_rollover(ride
     second = create_monitored_account(8, pool=account.pool)
     second_old = record(second, people, old.observed_at,
                         old.upstream_resets_at + timedelta(days=2), [33, 33, 34])
-    session = start_session()
+    session = start_session(True)
     set_exhaustion_reminder(True, session.pk)
     deliveries = []
     monkeypatch.setattr("monitor.notifications._send_smtp", lambda *args: deliveries.append(args))
@@ -517,7 +515,7 @@ def editable_carry(riders):
     from rest_framework.test import APIClient
 
     config, account, people, old = riders
-    start_session()
+    start_session(True)
     new = record(account, people, old.upstream_resets_at + timedelta(minutes=1),
                  old.upstream_resets_at + timedelta(days=7), [0, 0, 0])
     reconcile_account(account, new, config)
@@ -607,7 +605,7 @@ def test_manual_carry_value_is_used_by_the_following_settlement(riders, editable
     assert client.put("/api/quota-allocation", {
         "pools": data["pools"], "carry_adjustments": [{**row, "adjustment_percent": "7.5"}],
     }, format="json").status_code == 200
-    start_session()
+    start_session(True)
     cycle.refresh_from_db()
     assert D(cycle.members[0]["opening_adjustment"]) == 17
     assert D(cycle.carry_edits[0]["after"]) == D("7.5")
@@ -619,3 +617,103 @@ def test_manual_carry_value_is_used_by_the_following_settlement(riders, editable
     cycle.refresh_from_db()
     assert [D(item["next_adjustment"]) for item in cycle.settlement] == [0, 0, 0]
     assert D(cycle.settlement[0]["effective_share"]) == D("57.5")
+
+
+def test_no_carry_requires_notification_but_carry_does_not(riders):
+    from django.contrib.auth import get_user_model
+    from rest_framework.test import APIClient
+    from monitor.models.temporary_burst import TemporaryBurstSession
+
+    client = APIClient()
+    client.force_authenticate(get_user_model().objects.create_user("owner", is_staff=True))
+    url = "/api/dashboard/temporary-burst"
+    assert client.post(url, {"confirm": True, "carryover_enabled": False}, format="json").status_code == 400
+    assert not TemporaryBurstSession.objects.exists()
+    response = client.post(url, {
+        "confirm": True, "carryover_enabled": False, "riders_notified": True,
+    }, format="json")
+    assert response.status_code == 200
+    assert TemporaryBurstSession.objects.get().carryover_enabled is False
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+def test_manual_stop_restores_normal_suggestions_and_never_carries_later(riders, monkeypatch, automatic):
+    from unittest.mock import MagicMock
+    from django.contrib.auth import get_user_model
+    from rest_framework.test import APIClient
+    from monitor.temporary_burst import burst_payload, sampling_policy
+
+    config, account, people, old = riders
+    normal = [aggregate_recommendation(person, config)[0]["recommended_balance_usd"] for person in people]
+    writes = []
+    remote = MagicMock()
+    remote.__enter__.return_value = remote
+    def set_balance(user_id, amount):
+        writes.append((user_id, amount))
+        return amount
+    remote.set_user_balance_from_recommendation.side_effect = set_balance
+    monkeypatch.setattr("monitor.balance_operations.Sub2APIClient", lambda config: remote)
+    session = start_session(True)
+    for person in people:
+        apply_participant_recommendation(person.pk)
+    writes.clear()
+    config.auto_apply_recommendations = automatic
+    config.save()
+    client = APIClient()
+    owner = get_user_model().objects.create_user("stop-owner", is_staff=False)
+    client.force_authenticate(owner)
+    url = "/api/dashboard/temporary-burst"
+    body = {"confirm": True, "session_id": session.pk}
+    assert client.delete(url, body, format="json").status_code == 403
+    owner.is_staff = True
+    owner.save()
+    assert client.delete(url, {"session_id": session.pk}, format="json").status_code == 400
+    assert client.delete(url, {**body, "session_id": session.pk + 1}, format="json").status_code == 400
+    assert active_session(config) is not None
+    assert writes == []
+    assert client.delete(url, body, format="json").status_code == 200
+    assert active_session(config) is None
+    assert not burst_payload()["can_stop"]
+    assert not burst_payload()["can_start"]
+    assert sampling_policy(account, config)[1] is False
+    actual = [aggregate_recommendation(person, config)[0]["recommended_balance_usd"] for person in people]
+    assert actual == normal
+    if automatic:
+        assert [float(amount) for _, amount in writes] == normal
+    else:
+        assert writes == []
+    assert client.delete(url, body, format="json").status_code == 400
+    new = record(account, people, old.upstream_resets_at + timedelta(minutes=1),
+                 old.upstream_resets_at + timedelta(days=7), [0, 0, 0])
+    reconcile_account(account, new, config)
+    for person, share in zip(people, [50, 25, 25]):
+        aggregate, _ = aggregate_recommendation(person, config)
+        assert aggregate["sources"][0]["effective_share_percent"] == share
+    assert not TemporaryBurstCycle.objects.filter(settled_at__isnull=True).exists()
+
+
+def test_stop_after_first_rollover_cancels_other_accounts_and_open_credits(riders):
+    from monitor.temporary_burst import stop_session, burst_payload, sampling_policy
+
+    config, first, people, old = riders
+    second = create_monitored_account(8, pool=first.pool)
+    second_old = record(second, people, old.observed_at,
+                        old.upstream_resets_at + timedelta(days=2), [33, 33, 34])
+    session = start_session(True)
+    session.exhaustion_reminder_enabled = True
+    session.save()
+    new = record(first, people, old.upstream_resets_at + timedelta(minutes=1),
+                 old.upstream_resets_at + timedelta(days=7), [0, 0, 0])
+    reconcile_account(first, new, config)
+    assert burst_payload()["can_stop"]
+    stop_session(session.pk)
+    assert not TemporaryBurstCycle.objects.filter(session=session, settled_at__isnull=True).exists()
+    assert not burst_payload()["reminder_enabled"]
+    assert sampling_policy(second, config)[1] is False
+    for person, share in zip(people, [50, 25, 25]):
+        aggregate, _ = aggregate_recommendation(person, config)
+        assert all(source["effective_share_percent"] == share for source in aggregate["sources"])
+    later = record(second, people, second_old.upstream_resets_at + timedelta(minutes=1),
+                   second_old.upstream_resets_at + timedelta(days=7), [0, 0, 0])
+    reconcile_account(second, later, config)
+    assert not TemporaryBurstCycle.objects.filter(session=session, settled_at__isnull=True).exists()

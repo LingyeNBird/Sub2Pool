@@ -1,9 +1,9 @@
-"""Administrator-only global burst activation; GET never changes balances."""
+"""Administrator-only burst mode controls; GET never changes balances."""
 
 from .base import AdminAPIView, error, ok
 from ..balance_operations import auto_apply_recommendations
 from ..history_state import LeaseBusyError, LeaseLostError
-from ..temporary_burst import burst_payload, start_session, set_exhaustion_reminder
+from ..temporary_burst import burst_payload, start_session, stop_session, set_exhaustion_reminder
 
 
 class TemporaryBurstView(AdminAPIView):
@@ -24,17 +24,28 @@ class TemporaryBurstView(AdminAPIView):
         return ok(burst_payload())
 
     def post(self, request):
-        if (
-            not isinstance(request.data, dict)
-            or request.data.get("confirm") is not True
-        ):
-            return error(
-                "请确认将所有参与者建议余额临时设为 9999，并在换周期时结算借用权益"
-            )
-        if request.data.get("riders_notified") is not True:
-            return error("请先告知所有车友：共享余额、提前耗尽及重置卡改变后续重置时间的影响")
+        if not isinstance(request.data, dict) or request.data.get("confirm") is not True:
+            return error("请确认开启临时爽蹬")
+        carryover = request.data.get("carryover_enabled")
+        if type(carryover) is not bool:
+            return error("请选择结转或不结转模式")
+        if not carryover and request.data.get("riders_notified") is not True:
+            return error("不结转模式需先告知所有车友：本轮多用不追账、少用不补偿")
         try:
-            start_session()
+            start_session(carryover)
+        except (LeaseBusyError, LeaseLostError) as exc:
+            return error(str(exc), 409)
+        except ValueError as exc:
+            return error(str(exc), 400)
+        result = burst_payload()
+        result["application"] = auto_apply_recommendations(explicit=True)
+        return ok(result)
+
+    def delete(self, request):
+        if not isinstance(request.data, dict) or request.data.get("confirm") is not True:
+            return error("请确认提前终止爽蹬")
+        try:
+            stop_session(request.data.get("session_id"))
         except (LeaseBusyError, LeaseLostError) as exc:
             return error(str(exc), 409)
         except ValueError as exc:

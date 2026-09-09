@@ -369,7 +369,7 @@
   padding: 20px 18px 15px;
   border-color: color-mix(in oklch, var(--ending-color) 65%, var(--comic-line));
 }
-.ending-spare {
+.ending-no-carry {
   --ending-color: #508c75;
 }
 .ending-heading {

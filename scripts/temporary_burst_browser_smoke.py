@@ -150,12 +150,15 @@ def verify(account, people, old):
             expect(card).to_be_visible()
             card.get_by_role("button", name="开启临时爽蹬", exact=True).click()
             dialog = page.locator("dialog[open]").last
+            expect(dialog.get_by_role("checkbox")).to_have_count(0)
+            expect(dialog.get_by_role("button", name="确认开启临时爽蹬", exact=True)).to_be_enabled()
+            dialog.screenshot(path=str(harness.OUTPUT / "burst-carry-confirm.png"))
             dialog.get_by_role("button", name="取消", exact=True).first.click()
             assert WRITES == []
+            card.get_by_role("radio", name="不结转：本轮多用不追账", exact=True).check()
             card.get_by_role("button", name="开启临时爽蹬", exact=True).click()
             dialog = page.locator("dialog[open]").last
             expect(dialog.get_by_role("button", name="确认开启临时爽蹬", exact=True)).to_be_disabled()
-            expect(dialog.get_by_text(re.compile("周三用卡后下次变为下周三"))).to_be_visible()
             dialog.get_by_role("checkbox").check()
             dialog.screenshot(path=str(harness.OUTPUT / "burst-warning-desktop.png"))
             page.get_by_role("button", name="确认开启临时爽蹬", exact=True).click()
@@ -255,9 +258,9 @@ def verify(account, people, old):
                 finally:
                     guard.release()
                 cycle = TemporaryBurstCycle.objects.get(is_burst_cycle=True)
-                assert [
-                    Decimal(row["next_adjustment"]) for row in cycle.settlement
-                ] == [0, 0, 0]
+                for person, share in zip(people, [50, 25, 25]):
+                    from monitor.reporting import aggregate_recommendation
+                    assert aggregate_recommendation(person, config)[0]["sources"][0]["effective_share_percent"] == share
                 assert cycle.settlement_context["eligible"] is False
                 return auto_apply_recommendations()
 
@@ -266,9 +269,6 @@ def verify(account, people, old):
             card.get_by_role("button", name="刷新状态", exact=True).click()
             expect(card.get_by_text("已退出", exact=True)).to_be_visible()
             card.locator("summary").first.click()
-            expect(
-                card.locator("details").first.get_by_text(re.compile("上周期剩余大于或等于 5%"))
-            ).to_be_visible()
             expect(page.get_by_role("complementary", name="爽蹬全局状态")).to_have_count(0)
             card.screenshot(
                 path=str(harness.OUTPUT / "burst-settled-desktop.png"),
@@ -287,13 +287,16 @@ def verify(account, people, old):
             next_cycle = example_comic.get_by_role("region", name="下一周期可用权益", exact=True)
             for title, expected in (
                 ("整轮用满", ["67.00%", "17.00%", "16.00%"]),
-                ("B 超用 5 个百分点", ["50.00%", "25.00%", "25.00%"]),
+                ("B 超用 5 个百分点", ["53.00%", "20.00%", "27.00%"]),
                 ("有人用满，但没人超用", ["50.00%", "25.00%", "25.00%"]),
                 ("所有人都没用满", ["50.00%", "25.00%", "25.00%"]),
-                ("恰好剩余 5%", ["50.00%", "25.00%", "25.00%"]),
+                ("A 本轮没有使用", ["100.00%", "0.00%", "0.00%"]),
             ):
                 page.get_by_role("button", name=title, exact=True).click()
                 expect(next_cycle.locator(".actor-value")).to_have_text(expected)
+            page.get_by_role("radio", name="不结转模式", exact=True).check()
+            expect(next_cycle.locator(".actor-value")).to_have_text(["50.00%", "25.00%", "25.00%"])
+            page.get_by_role("radio", name="结转模式", exact=True).check()
             for width in (390, 768, 1440):
                 page.set_viewport_size({"width": width, "height": 1100})
                 notice_comic = page.locator("[aria-label='重置卡改变车友时间安排的小漫画']")
@@ -345,6 +348,7 @@ def verify(account, people, old):
             in_database(add_second_account)
             page.goto(harness.FRONTEND_URL + "/")
             expect(card).to_be_visible()
+            card.get_by_role("radio", name="不结转：本轮多用不追账", exact=True).check()
             card.get_by_role("button", name="开启临时爽蹬", exact=True).click()
             dialog = page.locator("dialog[open]").last
             expect(dialog.get_by_role("button", name="了解共享余额影响，开启爽蹬")).to_be_disabled()
@@ -362,7 +366,7 @@ def verify(account, people, old):
                 config.save()
                 reset = old.upstream_resets_at + timedelta(days=7)
                 record(account, people, reset - timedelta(minutes=1), reset, [33, 33, 34])
-                start_session()
+                start_session(True)
                 next_observation = record(account, people, reset + timedelta(minutes=1),
                                           reset + timedelta(days=7), [0, 0, 0])
                 reconcile_account(account, next_observation, config)
@@ -387,6 +391,36 @@ def verify(account, people, old):
             page.set_viewport_size({"width": 390, "height": 844})
             page.wait_for_timeout(350)
             page.screenshot(path=str(harness.OUTPUT / "carry-allocation-390.png"), full_page=True, animations="disabled")
+            page.goto(harness.FRONTEND_URL + "/")
+            expect(card.get_by_role("button", name="提前终止爽蹬", exact=True)).to_be_visible()
+            writes_before_cancel = list(WRITES)
+            card.get_by_role("button", name="提前终止爽蹬", exact=True).click()
+            stop_dialog = page.locator("dialog[open]").last
+            expect(stop_dialog.get_by_role("heading", name="你确定提前终止爽蹬吗？", exact=True)).to_be_visible()
+            stop_dialog.locator(".modal-box").screenshot(path=str(harness.OUTPUT / "burst-stop-confirm-390.png"), animations="disabled")
+            stop_dialog.get_by_role("button", name="取消", exact=True).click()
+            assert WRITES == writes_before_cancel
+            page.set_viewport_size({"width": 1440, "height": 1100})
+            card.get_by_role("button", name="提前终止爽蹬", exact=True).click()
+            stop_dialog.locator(".modal-box").screenshot(path=str(harness.OUTPUT / "burst-stop-confirm-desktop.png"), animations="disabled")
+            stop_dialog.get_by_role("button", name="确认提前终止", exact=True).click()
+            expect(card.get_by_role("button", name="提前终止爽蹬", exact=True)).to_have_count(0)
+            expect(page.get_by_role("complementary", name="爽蹬全局状态")).to_have_count(0)
+            card.screenshot(path=str(harness.OUTPUT / "burst-stopped-desktop.png"))
+            def verify_stopped():
+                from monitor.models.temporary_burst import TemporaryBurstSession
+                from monitor.temporary_burst import reconcile_account
+                session = TemporaryBurstSession.objects.latest("id")
+                assert session.terminated_at is not None
+                assert not session.exhaustion_reminder_enabled
+                assert not session.cycles.filter(settled_at__isnull=True).exists()
+                config = AppSettings.load()
+                for cycle in list(session.cycles.filter(is_burst_cycle=True)):
+                    next_reset = cycle.resets_at + timedelta(days=14)
+                    observed = record(cycle.account, people, next_reset - timedelta(days=6), next_reset, [0, 0, 0])
+                    reconcile_account(cycle.account, observed, config)
+                assert not session.cycles.filter(settled_at__isnull=True).exists()
+            in_database(verify_stopped)
             assert not errors, errors
             (harness.OUTPUT / "burst-results.json").write_text(
                 json.dumps(
@@ -398,14 +432,17 @@ def verify(account, people, old):
                             "automatic 9999",
                             "refresh persistence",
                             "live engine rollover",
-                            "spare capacity produces zero settlement",
-                            "mandatory rider notification acknowledgement",
+                            "no-carry mode preserves original next-cycle rights",
+                            "notification acknowledgement required only for no-carry mode",
                             "global atmosphere survives navigation and clears on rollover",
                             "automatic ordinary balance restoration",
                             "real SMTP delivery to loopback sink with half-hour throttling",
                             "reminder configuration gate and persisted toggle",
                             "desktop/mobile card",
                             "illustrated tutorial example",
+                            "both tutorial modes produce the selected settlement",
+                            "red stop confirmation cancel causes no writes",
+                            "manual termination restores normal suggestions and cancels all future cycle credits",
                             "editable carry persists and zero hides only its own input",
                             "ordinary account without carry has no extra input",
                         ],

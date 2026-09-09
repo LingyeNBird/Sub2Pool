@@ -10,6 +10,8 @@ class TemporaryBurstSession(models.Model):
     participant_users = models.JSONField(default=dict)
     base_url = models.CharField(max_length=500)
     exhaustion_reminder_enabled = models.BooleanField(default=False)
+    carryover_enabled = models.BooleanField(default=True)
+    terminated_at = models.DateTimeField(null=True, blank=True)
 
 
 class TemporaryBurstCycle(models.Model):

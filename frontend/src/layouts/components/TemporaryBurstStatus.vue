@@ -91,6 +91,9 @@ onBeforeUnmount(() => {
             data.active ? "爽蹬中" : "爽蹬已退出 · 待结算"
           }}</strong
         >
+        <span class="badge badge-outline">{{
+          data.carryover_enabled ? "权益结转" : "不结转"
+        }}</span>
         <span v-if="data.active"
           >全局共享余额 · 涉及
           {{ data.cycles.filter((row) => row.is_burst_cycle).length }}
@@ -121,7 +124,11 @@ onBeforeUnmount(() => {
         >查看状态与结算</RouterLink
       >
       <p v-if="data.active" class="w-full text-xs opacity-70">
-        任一账号提前重置会提前结束本轮爽蹬。模式开启不代表余额已全部应用；实际结果请查看额度建议。使用重置卡前，请与所有车友协商新的重置时间。
+        任一账号提前重置会提前结束本轮爽蹬。{{
+          data.carryover_enabled
+            ? "借用的权益会在后续周期结转。"
+            : "本轮不结转，开启前需告知所有车友。"
+        }}模式开启不代表余额已全部应用；使用重置卡仍建议沟通时间安排。
       </p>
     </aside>
   </Transition>

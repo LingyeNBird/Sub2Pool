@@ -9,9 +9,9 @@ const riders = [
 ] as const;
 const endings = [
   {
-    key: "full",
-    title: "这一周，账号用满了",
-    threshold: "账号已用 > 95%",
+    key: "carry",
+    title: "选择结转：借用的权益下周还",
+    mode: "结转模式",
     total: 100,
     usage: [33, 33, 34],
     next: [67, 17, 16],
@@ -22,15 +22,15 @@ const endings = [
     icon: "arrows-right-left",
   },
   {
-    key: "spare",
-    title: "这一周，账号只用了 55%",
-    threshold: "账号已用 ≤ 95%",
-    total: 55,
-    usage: [20, 30, 5],
+    key: "no-carry",
+    title: "选择不结转：本轮多用不追账",
+    mode: "不结转模式",
+    total: 100,
+    usage: [33, 33, 34],
     next: [50, 25, 25],
     changes: ["不变", "不变", "不变"],
-    bubble: "用的是闲置额度，不欠下周。",
-    explanation: "B 虽然多用了 5，但全组还剩 45%，不扣、不补。",
+    bubble: "说好了，这轮不追账！",
+    explanation: "同样用了 33 / 33 / 34，A 不获补偿，B、C 不扣下期权益。",
     result: "下周仍按原合同",
     icon: "check-circle",
   },
@@ -49,13 +49,13 @@ const endings = [
 
     <section
       class="comic-panel opening-scene"
-      aria-label="管理员告知车友并开启模式"
+      aria-label="管理员选择模式后开启爽蹬"
     >
-      <div class="panel-caption"><span>1</span>先说好，再开蹬</div>
+      <div class="panel-caption"><span>1</span>先选模式，再开蹬</div>
       <div class="opening-cast">
         <div class="admin-scene">
           <div class="speech speech-admin">
-            这轮一起用！<br />用重置卡前，我们再商量。
+            结转，还是不结转？<br />不结转，先通知大家！
           </div>
           <TemporaryBurstActor name="管理员" tone="admin" />
           <span class="activation-stamp"
@@ -64,7 +64,9 @@ const endings = [
         </div>
         <div class="riders-contract">
           <p class="scene-label">
-            <AppIcon name="chat-bubble-left-right" />先告知所有车友
+            <AppIcon
+              name="chat-bubble-left-right"
+            />不结转须通知；结转无需逐一通知
           </p>
           <div class="rider-line">
             <TemporaryBurstActor
@@ -144,19 +146,19 @@ const endings = [
       </section>
     </div>
 
-    <section class="turning-page" aria-label="换周期后判断旧周期总用量">
+    <section class="turning-page" aria-label="换周期后按所选模式处理">
       <div class="calendar-art">
         <AppIcon name="calendar-days" /><span>新周期</span>
       </div>
       <div>
-        <h4>翻到下一周，再看上一周用了多少</h4>
-        <p>先退出爽蹬、恢复普通余额建议，再按账号分别结算。</p>
+        <h4>翻到下一周，按开启时选定的模式处理</h4>
+        <p>恢复普通余额建议；是否结转不取决于账号用了多少。</p>
       </div>
       <AppIcon name="arrow-path" class="page-turn-icon" />
     </section>
 
     <div class="story-fork" aria-hidden="true">
-      <span></span><b>同一账号的两种结局</b><span></span>
+      <span></span><b>同样的消费，两种模式</b><span></span>
     </div>
     <div class="comic-endings">
       <section
@@ -167,7 +169,7 @@ const endings = [
         :aria-label="ending.title"
       >
         <div class="ending-heading">
-          <span class="condition-tag">{{ ending.threshold }}</span>
+          <span class="condition-tag">{{ ending.mode }}</span>
           <h4>{{ ending.title }}</h4>
         </div>
         <div class="consumption-summary">
@@ -202,9 +204,9 @@ const endings = [
           >
             <span
               class="adjustment-ticket"
-              :class="{ 'ticket-unchanged': ending.key === 'spare' }"
+              :class="{ 'ticket-unchanged': ending.key === 'no-carry' }"
               >{{ ending.changes[index]
-              }}<small v-if="ending.key === 'full'"> 个百分点</small></span
+              }}<small v-if="ending.key === 'carry'"> 个百分点</small></span
             >
             <TemporaryBurstActor
               :name="rider.name"
@@ -215,8 +217,8 @@ const endings = [
             />
           </div>
         </div>
-        <p v-if="ending.key === 'spare'" class="ending-footer">
-          <AppIcon name="clock" />剩余 45% 到期作废，不累计到下周。
+        <p v-if="ending.key === 'no-carry'" class="ending-footer">
+          <AppIcon name="check-circle" />开启前，所有车友都应知道本轮不结转。
         </p>
         <p v-else class="ending-footer">
           <AppIcon name="scale" />补偿 17，扣除 8 + 9，彼此相抵。
@@ -232,8 +234,8 @@ const endings = [
       </p>
     </div>
     <p class="comic-boundary">
-      图中按 A 50% / B 25% / C 25% 的合同、无旧结转举例。恰好用到 95%
-      不结转；判断看账号总量，不看某一个人的用量。
+      图中按 A 50% / B 25% / C 25%
+      的合同、无旧结转举例。结转的是借用的权益，不是储存上游流量；手动提前终止后，本轮不再产生后续结转。
     </p>
   </figure>
 </template>

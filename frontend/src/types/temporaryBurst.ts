@@ -27,17 +27,19 @@ export interface BurstCycle {
     admin_username: string;
   }[];
   settlement_context?: {
-    remaining_percent: string;
-    threshold_percent: string;
+    remaining_percent?: string;
     eligible: boolean;
-    quota_observed_at: string;
-    seconds_before_reset: number;
+    quota_observed_at?: string;
+    seconds_before_reset?: number;
     reason: string;
   };
   members: BurstMember[];
   settlement: BurstMember[];
 }
 export interface TemporaryBurstData {
+  carryover_enabled: boolean | null;
+  terminated_at: string | null;
+  can_stop: boolean;
   active: boolean;
   session_id: number | null;
   started_at: string | null;

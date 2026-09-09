@@ -254,7 +254,7 @@ export const tutorialGroups: TutorialGroup[] = [
         group: "日常使用",
         title: "临时爽蹬",
         summary:
-          "本周期临时放开余额并加速采样；换周期后剩余不足 5% 才结算借用，开启前需告知所有车友共享余额和重置卡的影响。",
+          "车主选择结转或不结转：不结转需告知所有车友，结转无需逐一通知。可提前终止并恢复普通建议，取消本轮后续结转。",
         icon: "bolt",
         interactive: "temporary-burst",
         sections: [],

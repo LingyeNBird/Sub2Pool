@@ -15,6 +15,15 @@ const saving = ref(false);
 const loading = ref(false);
 const confirmation = ref<ConfirmDialogHandle | null>(null);
 const dateTime = useDateTime();
+const carryoverEnabled = ref(true);
+watch(
+  () => data.value?.carryover_enabled,
+  (value) => {
+    if (typeof value === "boolean" && !data.value?.can_start)
+      carryoverEnabled.value = value;
+  },
+  { immediate: true },
+);
 let disposed = false;
 
 async function toggleReminder() {
@@ -57,16 +66,18 @@ async function refresh() {
 
 async function start() {
   if (saving.value || !data.value?.can_start) return;
+  const carryover = carryoverEnabled.value;
   if (
     !(await confirmation.value?.open({
       title: "开启临时爽蹬？",
-      message: `所有启用的 Sub2API 账号参与本轮，已分配参与者的建议余额将设为 9999 美元，不会增加订阅容量。${data.value.auto_apply ? "自动应用已开启，将立即尝试写入余额。" : "需要手动应用余额建议。"}\n\n${data.value.enabled_account_count > 1 ? `多账号共享余额提醒：当前有 ${data.value.enabled_account_count} 个账号。参与者余额在有权使用且被路由到的账号间共享，无法只对某个账号放开。按账号结算不代表消费额度隔离。\n\n` : ""}首个账号换周期即全局退出；余额恢复取决于自动或手动应用。其他账号继续观测，分别换周期后按旧周期剩余小于 5% 的条件结算。\n\n开启前，请告知所有车友：爽蹬可能提前耗尽额度。若使用重置卡，下次重置将改为用卡后的 7 天。例如原定周一重置，周三用卡后下次变为下周三；前两天未使用的车友也会受影响。\n\n爽蹬本身不会修改重置时间。用卡前请与所有车友协商，权益结算不能弥补使用时间安排的变化。`,
+      message: `所有启用的 Sub2API 账号参与本轮，余额建议统一为 9999，不增加套餐容量。${data.value.auto_apply ? "系统会尝试自动应用余额。" : "开启后请手动应用余额建议。"}\n\n${carryover ? "结转模式：按借用权益在后续周期补偿、扣除，不看账号是否用满。无需逐一通知；未被借用的闲置额度不会保留。" : "不结转模式：本轮多用不追账、少用不补偿，可能提前耗尽其他车友计划使用的额度。请先告知所有车友。"}\n\n${data.value.enabled_account_count > 1 ? `当前有 ${data.value.enabled_account_count} 个账号，共享钱包不能按账号隔离消费。\n\n` : ""}首个账号换周期后退出爽蹬，各账号按选定模式结束本轮。本轮模式不能中途切换；提前使用重置卡仍建议沟通使用安排。`,
       confirmLabel:
         data.value.enabled_account_count > 1
           ? "了解共享余额影响，开启爽蹬"
           : "确认开启临时爽蹬",
-      acknowledgement:
-        "我已告知所有车友：共享余额、爽蹬可能提前耗尽额度，使用重置卡会改变后续重置时间。",
+      acknowledgement: carryover
+        ? undefined
+        : "我已告知所有车友：本轮不结转，多用不追账、少用不补偿，可能提前耗尽额度。",
       tone: "warning",
     }))
   )
@@ -76,7 +87,11 @@ async function start() {
   try {
     data.value = await api<TemporaryBurstData>("dashboard/temporary-burst", {
       method: "POST",
-      body: jsonBody({ confirm: true, riders_notified: true }),
+      body: jsonBody({
+        confirm: true,
+        carryover_enabled: carryover,
+        riders_notified: !carryover,
+      }),
     });
     const result = data.value.application;
     notice.value = data.value.auto_apply
@@ -85,6 +100,37 @@ async function start() {
     emit("changed");
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "开启失败";
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function stop() {
+  if (saving.value || !data.value?.can_stop) return;
+  const sessionId = data.value.session_id;
+  if (
+    !(await confirmation.value?.open({
+      title: "你确定提前终止爽蹬吗？",
+      message: `立即恢复普通额度建议，停止本轮加速采样和提醒，并取消本轮全部后续结转。已经超用的部分不追账，也不补偿少用者。此操作不可撤销，本周期不能再次开启。\n\n${data.value.auto_apply ? "系统将尝试自动应用普通余额建议；失败项需手动重试。" : "结束后请手动应用普通余额建议，收回上游的高余额。仅结束模式不会直接改动上游余额。"}`,
+      confirmLabel: "确认提前终止",
+      tone: "error",
+    }))
+  )
+    return;
+  saving.value = true;
+  error.value = notice.value = "";
+  try {
+    data.value = await api<TemporaryBurstData>("dashboard/temporary-burst", {
+      method: "DELETE",
+      body: jsonBody({ confirm: true, session_id: sessionId }),
+    });
+    const result = data.value.application;
+    notice.value = data.value.auto_apply
+      ? `已提前终止，不再产生本轮结转。普通建议已应用 ${result?.applied ?? 0} 人，失败 ${result?.failed ?? 0} 人。`
+      : "已提前终止，不再产生本轮结转。请手动应用普通余额建议。";
+    emit("changed");
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "提前终止失败";
   } finally {
     saving.value = false;
   }
@@ -144,8 +190,37 @@ defineExpose({ refresh });
       <p class="text-sm leading-6 opacity-70">
         临时把所有参与者的建议余额设为
         <strong>9999</strong
-        >，按需使用，但不停止记账。各账号换周期后，只有上周期最终观测剩余小于 5%
-        才结算借用权益；剩余大于或等于 5% 时不扣、不补，未用额度到期作废。
+        >，按需使用，照常记账。结转模式下借用的权益会在后续周期补偿或扣除；不结转模式下多用不追账、少用不补偿。
+      </p>
+      <fieldset
+        class="fieldset"
+        :disabled="saving || loading || !data?.can_start"
+      >
+        <legend class="fieldset-legend">爽蹬结算方式</legend>
+        <div class="flex flex-wrap gap-5">
+          <label class="label cursor-pointer"
+            ><input
+              v-model="carryoverEnabled"
+              type="radio"
+              name="burst-mode"
+              class="radio radio-sm"
+              :value="true"
+            />结转：借用的权益以后还</label
+          >
+          <label class="label cursor-pointer"
+            ><input
+              v-model="carryoverEnabled"
+              type="radio"
+              name="burst-mode"
+              class="radio radio-sm"
+              :value="false"
+            />不结转：本轮多用不追账</label
+          >
+        </div>
+      </fieldset>
+      <p v-if="data?.session_id" class="text-sm font-medium">
+        本轮模式：{{ data.carryover_enabled ? "结转" : "不结转"
+        }}{{ data.terminated_at ? " · 已提前终止" : "" }}
       </p>
       <p v-if="data?.active" class="text-sm">
         本轮预计结束：{{
@@ -175,7 +250,7 @@ defineExpose({ refresh });
       >
         全局共享余额 ·
         {{ data.enabled_account_count }}
-        个启用账号。不能按账号隔离消费额度；请提前告知所有车友，并在使用重置卡前协商周期变化。
+        个启用账号。不能按账号隔离消费额度；不结转模式需提前告知所有车友，使用重置卡仍建议沟通。
       </p>
       <p
         v-if="data && !data.monitoring_enabled"
@@ -201,6 +276,15 @@ defineExpose({ refresh });
           >{{ data?.active ? "临时爽蹬已开启" : "开启临时爽蹬" }}
         </button>
         <button
+          v-if="data?.can_stop"
+          type="button"
+          class="btn btn-error btn-sm"
+          :disabled="saving || loading"
+          @click="stop"
+        >
+          提前终止爽蹬
+        </button>
+        <button
           type="button"
           class="btn btn-sm"
           :class="data?.reminder_enabled ? 'btn-warning' : 'btn-outline'"
@@ -213,7 +297,7 @@ defineExpose({ refresh });
             (!data?.reminder_enabled &&
               (!data?.reminder_email_ready ||
                 !data?.session_id ||
-                data.can_start))
+                !data.can_stop))
           "
           @click="toggleReminder"
         >
@@ -251,7 +335,11 @@ defineExpose({ refresh });
         v-if="data && !data.active && !data.can_start"
         class="text-sm text-warning"
       >
-        仍有账号等待原周期结算；完成后才能开始新一轮。
+        {{
+          data.terminated_at
+            ? "本轮已提前终止，本周期不能再次开启。"
+            : "仍有账号等待原周期结束；完成后才能开始新一轮。"
+        }}
       </p>
       <details
         v-for="cycle in data?.cycles"
@@ -272,13 +360,19 @@ defineExpose({ refresh });
           {{ cycle.error }}
         </p>
         <p v-if="cycle.settlement_context" class="mt-3 text-sm">
-          {{ cycle.settlement_context.reason }}（剩余
-          {{ percent(cycle.settlement_context.remaining_percent) }}）。
-          额度观测：{{
-            dateTime(cycle.settlement_context.quota_observed_at)
-          }}，距原定重置
-          {{ Math.round(cycle.settlement_context.seconds_before_reset / 60) }}
-          分钟；不是重置瞬间的精确终值。
+          {{ cycle.settlement_context.reason }}
+          <template v-if="cycle.settlement_context.quota_observed_at">
+            （剩余 {{ percent(cycle.settlement_context.remaining_percent) }}）。
+            额度观测：{{
+              dateTime(cycle.settlement_context.quota_observed_at)
+            }}，距原定重置
+            {{
+              Math.round(
+                (cycle.settlement_context.seconds_before_reset ?? 0) / 60,
+              )
+            }}
+            分钟；不是重置瞬间的精确终值。
+          </template>
         </p>
         <div class="mt-3 overflow-x-auto">
           <table class="table table-sm">

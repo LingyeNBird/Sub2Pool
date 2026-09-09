@@ -11,6 +11,7 @@ defineProps<{
     next: number;
   }[];
   note: string;
+  carryoverEnabled: boolean;
 }>();
 const tones = ["a", "b", "c"] as const;
 </script>
@@ -95,7 +96,11 @@ const tones = ["a", "b", "c"] as const;
           </div>
         </div>
         <p class="account-total">
-          <AppIcon name="scale" />合同不变，只调整借用的权益。
+          <AppIcon name="scale" />{{
+            carryoverEnabled
+              ? "合同不变，只调整借用的权益。"
+              : "本轮不结转，下期按原合同。"
+          }}
         </p>
       </section>
     </div>

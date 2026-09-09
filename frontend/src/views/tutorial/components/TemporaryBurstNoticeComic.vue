@@ -7,7 +7,7 @@ import TemporaryBurstActor from "./TemporaryBurstActor.vue";
   <div class="notice-comic" aria-label="重置卡改变车友时间安排的小漫画">
     <section class="notice-panel">
       <span class="notice-date"
-        ><AppIcon name="calendar-days" />周一 · 原计划</span
+        ><AppIcon name="calendar-days" />不结转 · 周一的原计划</span
       >
       <div class="notice-dialogue">前两天先忙工作，<br />后五天我再来用！</div>
       <TemporaryBurstActor name="A" tone="a" compact />
@@ -34,6 +34,7 @@ import TemporaryBurstActor from "./TemporaryBurstActor.vue";
       </div>
       <TemporaryBurstActor name="A" tone="a" compact />
       <p>下次重置：周一 → <strong>周三</strong></p>
+      <p><strong>这轮没用上，下期也没有补偿。</strong></p>
     </section>
   </div>
 </template>

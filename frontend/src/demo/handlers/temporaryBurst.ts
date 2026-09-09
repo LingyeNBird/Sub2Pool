@@ -115,11 +115,10 @@ export function refreshDemoBurst(state: DemoState, apply = false) {
       0,
       100 - (finalObservation?.upstream_used_percent ?? 0),
     );
-    const total = remaining < 5 ? Math.min(spare, over) : 0;
+    const total = mode.carryover_enabled ? Math.min(spare, over) : 0;
     cycle.settlement_context = {
       remaining_percent: String(remaining),
-      threshold_percent: "5",
-      eligible: remaining < 5,
+      eligible: Boolean(mode.carryover_enabled),
       quota_observed_at: finalObservation?.observed_at ?? cycle.resets_at,
       seconds_before_reset: finalObservation
         ? Math.max(
@@ -129,10 +128,9 @@ export function refreshDemoBurst(state: DemoState, apply = false) {
               1000,
           )
         : 0,
-      reason:
-        remaining < 5
-          ? "上周期剩余小于 5%，按借用情况结算"
-          : "上周期剩余大于或等于 5%，本轮调整为 0",
+      reason: mode.carryover_enabled
+        ? "结转模式：按借用情况结算"
+        : "不结转模式：本轮不产生补偿或扣除",
     };
     cycle.settlement = cycle.members.map((member, index) => ({
       ...member,
@@ -211,11 +209,18 @@ export function refreshDemoBurst(state: DemoState, apply = false) {
           : normal,
       };
     });
+  const pending = mode.cycles.some(
+    (cycle) => cycle.is_burst_cycle && !cycle.settled_at,
+  );
   mode.can_start =
     !mode.active &&
-    !mode.cycles.some((cycle) => cycle.is_burst_cycle && !cycle.settled_at);
+    !pending &&
+    !mode.cycles.some(
+      (cycle) => cycle.is_burst_cycle && now < Date.parse(cycle.resets_at),
+    );
+  mode.can_stop = !mode.terminated_at && (mode.active || pending);
   mode.reminder_email_ready = reminderEmailReady(state);
-  if (mode.can_start) mode.reminder_enabled = false;
+  if (!pending) mode.reminder_enabled = false;
   if (
     mode.reminder_enabled &&
     mode.reminder_email_ready &&
@@ -310,6 +315,9 @@ export function handleTemporaryBurst({
   if (!demoIdentity()?.is_staff) return fail("没有管理员权限", 403);
   refreshDemoBurst(state);
   const empty: TemporaryBurstData = {
+    carryover_enabled: null,
+    terminated_at: null,
+    can_stop: false,
     active: false,
     session_id: null,
     started_at: null,
@@ -328,6 +336,34 @@ export function handleTemporaryBurst({
     reminder_email_ready: reminderEmailReady(state),
   };
   if (method === "GET") return ok(state.temporaryBurst ?? empty);
+  if (method === "DELETE") {
+    const mode = state.temporaryBurst;
+    if (payload.confirm !== true) return fail("请确认提前终止爽蹬", 400);
+    if (!mode || payload.session_id !== mode.session_id || !mode.can_stop)
+      return fail("本轮状态已变化或已经结束，请刷新", 400);
+    mode.active = false;
+    mode.ended_at = mode.ended_at ?? state.clock;
+    mode.terminated_at = state.clock;
+    mode.reminder_enabled = false;
+    for (const cycle of mode.cycles.filter((row) => !row.settled_at)) {
+      cycle.settled_at = state.clock;
+      cycle.error = "";
+      cycle.settlement_context = {
+        eligible: false,
+        reason: "提前终止：取消本轮后续结转，超用不追账",
+      };
+    }
+    refreshDemoBurst(state, true);
+    return ok({
+      ...mode,
+      application: {
+        applied: mode.auto_apply
+          ? state.participants.filter((p) => p.enabled).length
+          : 0,
+        failed: 0,
+      },
+    });
+  }
   if (method === "PATCH") {
     const mode = state.temporaryBurst;
     if (!mode || payload.session_id !== mode.session_id)
@@ -336,7 +372,7 @@ export function handleTemporaryBurst({
       return fail("请指定提醒开关", 400);
     if (
       payload.reminder_enabled &&
-      (!mode.reminder_email_ready || mode.can_start)
+      (!mode.reminder_email_ready || !mode.can_stop)
     )
       return fail("请先配置邮件通知并开启本轮爽蹬", 400);
     mode.reminder_enabled = payload.reminder_enabled;
@@ -345,8 +381,10 @@ export function handleTemporaryBurst({
   }
   if (method !== "POST") return fail("不支持此操作", 405);
   if (payload.confirm !== true) return fail("请确认开启临时爽蹬", 400);
-  if (payload.riders_notified !== true)
-    return fail("请先告知所有车友重置卡与共享余额的影响", 400);
+  if (typeof payload.carryover_enabled !== "boolean")
+    return fail("请选择结转或不结转模式", 400);
+  if (!payload.carryover_enabled && payload.riders_notified !== true)
+    return fail("不结转模式需先告知所有车友", 400);
   if (state.temporaryBurst && !state.temporaryBurst.can_start)
     return fail("本轮尚未结束结算", 409);
   const latest = state.observations.at(-1)!;
@@ -401,6 +439,7 @@ export function handleTemporaryBurst({
     ...empty,
     session_id: (state.temporaryBurst?.session_id ?? 0) + 1,
     active: true,
+    carryover_enabled: payload.carryover_enabled,
     can_start: false,
     started_at: state.clock,
     expires_at: reset,
