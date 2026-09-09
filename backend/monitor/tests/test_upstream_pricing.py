@@ -179,7 +179,7 @@ def test_upstream_http_apply_retry_conflict_and_revert():
 
 
 @pytest.mark.django_db
-def test_pricing_epoch_replay_separates_raw_cost_baselines():
+def test_pricing_changes_preserve_one_cycle_and_historical_corrections():
     from datetime import timedelta
     from decimal import Decimal
     from monitor.models import Observation
@@ -209,11 +209,65 @@ def test_pricing_epoch_replay_separates_raw_cost_baselines():
     for row in new_rows:
         row.refresh_from_db()
     assert old.selected_total_cost == Decimal("225")
-    assert new_rows[0].attribution_started_at == new_rows[0].observed_at
-    assert new_rows[1].attribution_started_at == new_rows[0].observed_at
-    assert new_rows[0].selected_total_cost == 0
-    assert new_rows[1].selected_total_cost == 60
+    assert all(row.attribution_started_at == old.attribution_started_at for row in new_rows)
+    assert new_rows[0].selected_total_cost == Decimal("325")
+    assert new_rows[1].selected_total_cost == Decimal("385")
     assert all(not row.is_manual_start for row in new_rows)
+
+
+@pytest.mark.parametrize("manual_interval", [False, True])
+@pytest.mark.django_db
+def test_incremental_replay_keeps_mixed_pricing_in_one_cycle(manual_interval):
+    from datetime import timedelta
+    from decimal import Decimal
+    from monitor.models import Observation
+    from monitor.replay import rebuild_account, rebuild_observation_suffix
+    from monitor.particle_trajectory import cycle_usage_history
+
+    config = AppSettings.load()
+    start = timezone.now() - timedelta(days=2)
+    reset = start + timedelta(days=7)
+    rows = []
+    for index, (cost, used, epoch) in enumerate([
+        (0, 0, "local"), (100, 10, "local"),
+        (300, 20, "pending"), (500, 30, "pending"),
+        (900, 40, "applied"), (1300, 50, "applied"),
+    ]):
+        rows.append(Observation.objects.create(
+            account_id=7, observed_at=start + timedelta(hours=index),
+            upstream_resets_at=reset, upstream_used_percent=used,
+            total_actual_cost=cost, total_standard_cost=cost,
+            raw_selected_total_cost=cost, selected_total_cost=cost,
+            effective_usd_per_percent=20, correction_source="none", pricing_epoch=epoch,
+        ))
+    if manual_interval:
+        rows[0].is_manual_start = True
+        rows[0].manual_start_end = rows[-1]
+        rows[0].save(update_fields=["is_manual_start", "manual_start_end"])
+    rebuild_account(7, config)
+    latest = Observation.objects.create(
+        account_id=7, observed_at=start + timedelta(hours=6),
+        upstream_resets_at=reset, upstream_used_percent=60,
+        total_actual_cost=1600, total_standard_cost=1600,
+        raw_selected_total_cost=1600, selected_total_cost=1600,
+        effective_usd_per_percent=20, correction_source="none", pricing_epoch="applied",
+    )
+    rebuild_observation_suffix(latest, config)
+    latest.refresh_from_db()
+    assert latest.attribution_started_at == rows[0].observed_at
+    assert latest.selected_total_cost == Decimal("1600")
+    assert latest.interval_used_percent == Decimal("60")
+    history = cycle_usage_history(7)
+    assert len(history) == 1
+    assert history[0]["used_usd"] == 1600
+    incremental = (
+        latest.attribution_started_at, latest.selected_total_cost, latest.interval_used_percent,
+    )
+    rebuild_account(7, config)
+    latest.refresh_from_db()
+    assert incremental == (
+        latest.attribution_started_at, latest.selected_total_cost, latest.interval_used_percent,
+    )
 
 
 @pytest.mark.django_db

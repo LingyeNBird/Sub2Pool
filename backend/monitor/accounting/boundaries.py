@@ -147,20 +147,6 @@ def manual_start_segment(observation: Observation, cost_basis: str) -> ReplaySeg
     )
 
 
-def pricing_change_segment(
-    observation: Observation,
-    cost_basis: str,
-) -> ReplaySegment:
-    """计价语义变化必须从该真实观测重置成本与用量基线。"""
-
-    return observed_baseline_segment(
-        observation,
-        reason="pricing_changed",
-        percent_baseline=observation.upstream_used_percent,
-        cost_basis=cost_basis,
-    )
-
-
 def mark_automatic_exclusion(
     observations: list[Observation],
     reason: str,
@@ -240,12 +226,11 @@ def infer_segments(
     collection_intervals: list[CPAAccountCollectionInterval] | None = None,
     collection_history: list[Observation] | None = None,
 ) -> tuple[list[ReplaySegment], list[Observation]]:
-    """按“管理员起点 > 计价 epoch > 官方窗口 > 异常检测”识别派生区间。
+    """按“管理员起点 > 官方窗口 > 异常检测”识别派生区间。
 
-    管理员区间仍保护已有的人工起点语义，但不能把不同计价 epoch 的成本
-    混在同一归属段内；区间中的 epoch 变化会建立独立的真实观测基线，且
-    不会修改任何观测的 ``is_manual_start``。开始与结束相同时保持旧版
-    单点起点语义。
+    同一额度周期允许不同历史计价规则。规则按观测冻结并逐区间累计，
+    不因计价切换重置成本或百分比基线。管理员起点区间仍优先保护人工
+    标记；开始与结束相同时保持单点起点语义。
 
     上游报告的 ``reset_at`` 显著向后推进时，首个 0% 观测建立新官方周期的
     固定基线；后续连续 0% 全部延续该周期并保留累计成本增量。首次使用
@@ -328,15 +313,6 @@ def infer_segments(
             if key <= active_manual_end:
                 if current is None:
                     raise ValueError("管理员起点区间缺少开始记录")
-                previous_epoch = (
-                    current.observations[-1].pricing_epoch
-                    if current.observations
-                    else observation.pricing_epoch
-                )
-                if observation.pricing_epoch != previous_epoch:
-                    if current.observations:
-                        segments.append(current)
-                    current = pricing_change_segment(observation, cost_basis)
                 current.resets_at = observation.upstream_resets_at
                 current.observations.append(observation)
                 index += 1
@@ -348,18 +324,6 @@ def infer_segments(
             current = manual_start_segment(observation, cost_basis)
             current.observations.append(observation)
             active_manual_end = manual_start_interval_end_key(observation)
-            index += 1
-            continue
-
-        if (
-            current is not None
-            and current.observations
-            and observation.pricing_epoch
-            != current.observations[-1].pricing_epoch
-        ):
-            segments.append(current)
-            current = pricing_change_segment(observation, cost_basis)
-            current.observations.append(observation)
             index += 1
             continue
 
