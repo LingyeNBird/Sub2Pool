@@ -1,6 +1,7 @@
 """Read upstream configuration without changing policy or pricing ownership."""
 from decimal import Decimal, InvalidOperation
 from concurrent.futures import ThreadPoolExecutor
+from fnmatch import fnmatchcase
 
 from .planning import PRICE_FIELDS, matching_card
 
@@ -53,6 +54,27 @@ def _compare_prices(row, card, source, catalog):
         row["warning"] = str(exc)
 
 
+def _ordered_fast_rows(cards, rules):
+    """Split mixed cards by their first matching policy rule, then sort before pagination."""
+    ranked = []
+    for card in cards:
+        buckets = {}
+        for model in card.get("models", []):
+            rank = next(
+                (index for index, rule in enumerate(rules)
+                 if fnmatchcase(model.casefold(), rule["model_pattern"].strip().casefold())),
+                len(rules),
+            )
+            buckets.setdefault(rank, []).append(model)
+        if not buckets:
+            buckets[len(rules)] = []
+        for rank, models in buckets.items():
+            row = {"models": models, "multiplier": card.get("fast_multiplier")}
+            ranked.append((rank, row))
+    ranked.sort(key=lambda item: (item[0], item[1]["multiplier"] is None))
+    return [row for _rank, row in ranked]
+
+
 def current_pricing(client, state, base_url, group_id, kind):
     group = client.group_pricing(group_id)
     if group.get("platform") != "openai":
@@ -64,7 +86,8 @@ def current_pricing(client, state, base_url, group_id, kind):
     cards = [card for card in group.get("model_pricing") or [] if card.get("platform", "openai") == "openai"]
     if kind == "fast":
         result["free_fast"] = bool(group.get("free_openai_fast", False))
-        result["rows"] = [{"models": card.get("models", []), "multiplier": card.get("fast_multiplier")} for card in cards]
+        rules = state.policy.get("fast_rules", [])
+        result["rows"] = _ordered_fast_rows(cards, rules)
         return result
     if kind != "model":
         raise ValueError("无效的计费查看类型")

@@ -346,3 +346,27 @@ def test_model_inspection_fetches_unique_references_with_bounded_concurrency():
     assert all(row["multiplier"] == "2" for row in result["rows"])
     assert len(requested) == len(set(requested)) == 16
     assert 2 <= peak <= 8
+
+
+@pytest.mark.parametrize("patterns, expected", [
+    (["gpt-6*", "*"], ["GPT-6-astra", "gpt-6-mini", "gpt-5", "other"]),
+    (["*", "gpt-6*"], ["gpt-5", "GPT-6-astra", "other", "gpt-6-mini"]),
+    (["gpt-6-?ini", "gpt-6[!-]*"], ["gpt-6-mini", "gpt-5", "GPT-6-astra", "other"]),
+])
+def test_fast_inspection_orders_by_first_rule_even_for_inherited_and_mixed_cards(patterns, expected):
+    from types import SimpleNamespace
+    from monitor.upstream_pricing.inspection import current_pricing
+
+    class Client:
+        def group_pricing(self, _group_id):
+            return {"platform": "openai", "model_pricing": [
+                {"models": ["gpt-5", "GPT-6-astra"], "fast_multiplier": 2},
+                {"models": ["other"], "fast_multiplier": 0},
+                {"models": ["gpt-6-mini"]},
+            ]}
+
+    result = current_pricing(Client(), SimpleNamespace(policy={
+        "fast_rules": [{"model_pattern": pattern, "multiplier": "2"} for pattern in patterns],
+    }), "", 7, "fast")
+    assert [model for row in result["rows"] for model in row["models"]] == expected
+    assert next(row for row in result["rows"] if "gpt-6-mini" in row["models"])["multiplier"] is None

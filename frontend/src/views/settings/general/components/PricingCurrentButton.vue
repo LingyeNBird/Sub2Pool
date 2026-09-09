@@ -52,12 +52,17 @@ function visibleRows<T>(
   rows: T[],
   label: (row: T) => string,
   customized: (row: T) => boolean,
+  prioritizeCustomized = true,
 ) {
   const keyword = search.value.trim().toLowerCase();
-  return rows
+  const filtered = rows
     .map((row, id) => ({ row, id, customized: customized(row) }))
-    .filter(({ row }) => label(row).toLowerCase().includes(keyword))
-    .sort((left, right) => Number(right.customized) - Number(left.customized));
+    .filter(({ row }) => label(row).toLowerCase().includes(keyword));
+  return prioritizeCustomized
+    ? filtered.sort(
+        (left, right) => Number(right.customized) - Number(left.customized),
+      )
+    : filtered;
 }
 
 const fastRows = computed(() =>
@@ -66,6 +71,7 @@ const fastRows = computed(() =>
         pricing.value.rows,
         (row) => row.models.join(" "),
         (row) => row.multiplier != null,
+        false,
       )
     : [],
 );
@@ -302,7 +308,14 @@ onBeforeUnmount(cancelRead);
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="{ row, id, customized } in fastPage" :key="id">
+                  <tr
+                    v-for="{ row, id, customized } in fastPage"
+                    :key="id"
+                    :class="{
+                      'bg-primary/5 ring-1 ring-primary/50 ring-inset':
+                        customized,
+                    }"
+                  >
                     <td class="font-mono">{{ row.models.join(", ") }}</td>
                     <td>
                       {{
@@ -343,7 +356,12 @@ onBeforeUnmount(cancelRead);
             <details
               v-for="{ row, id, customized } in modelPage"
               :key="id"
-              class="mb-2 rounded-box border border-base-300 p-3"
+              class="mb-2 rounded-box border p-3"
+              :class="
+                customized
+                  ? 'border-primary/70 bg-primary/5 ring-1 ring-primary/20'
+                  : 'border-base-300'
+              "
             >
               <summary class="cursor-pointer text-sm">
                 <span class="font-mono">{{ row.model }}</span
@@ -352,9 +370,11 @@ onBeforeUnmount(cancelRead);
                     ? "无统一倍率"
                     : factor(row.multiplier)
                 }}</strong>
-                <span class="ml-2 text-xs opacity-60">{{
-                  customized ? "已设置" : "继承上游"
-                }}</span>
+                <span
+                  class="ml-2 text-xs"
+                  :class="customized ? 'font-medium' : 'opacity-60'"
+                  >{{ customized ? "已设置" : "继承上游" }}</span
+                >
               </summary>
               <p class="mt-3 text-xs opacity-65">
                 参考：{{ row.reference || "无法确定" }}
