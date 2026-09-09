@@ -291,7 +291,10 @@ def smoke():
                 assert help_button.evaluate("(button) => getComputedStyle(button.parentElement, '::before').visibility") == "visible"
                 page.screenshot(path=str(OUTPUT / f"help-{'fast' if label.startswith('FAST') else 'model'}.png"), full_page=True)
             writes_before = sum(call["method"] == "PUT" for call in UPSTREAM["calls"])
-            card.get_by_label("倍率", exact=True).nth(1).fill("5")
+            model_multiplier = card.locator("section").filter(
+                has=page.get_by_role("heading", name="模型倍率", exact=True)
+            ).get_by_label("倍率", exact=True)
+            model_multiplier.fill("5")
             for kind, title in (("fast", "FAST 倍率"), ("model", "模型倍率"), ("context", "长上下文阶梯计费")):
                 card.get_by_role("button", name=f"查看当前{title}", exact=True).click()
                 inspector = page.get_by_role("dialog", name=f"当前{title}", exact=True)
@@ -356,8 +359,8 @@ def smoke():
             inspector = page.get_by_role("dialog", name="当前FAST 倍率", exact=True)
             expect(inspector.get_by_text("3×", exact=True)).to_be_visible()
             inspector.get_by_role("button", name="关闭", exact=True).first.click()
-            expect(card.get_by_label("倍率", exact=True).nth(1)).to_have_value("5")
-            card.get_by_label("倍率", exact=True).nth(1).fill("1.8")
+            expect(model_multiplier).to_have_value("5")
+            model_multiplier.fill("1.8")
             assert sum(call["method"] == "PUT" for call in UPSTREAM["calls"]) == writes_before
             card.get_by_role("button", name="写入 Sub2API 分组计费", exact=True).click()
             selection = page.get_by_role("dialog", name="选择目标分组并写入", exact=True)
@@ -370,7 +373,7 @@ def smoke():
             assert sum(call["method"] == "PUT" for call in UPSTREAM["calls"]) == writes_before
             check_rule_layout(page, card, OUTPUT)
             original = database_snapshot()
-            multiplier = card.get_by_label("倍率", exact=True).nth(1)
+            multiplier = model_multiplier
             multiplier.fill("0")
             card.get_by_role("button", name="写入 Sub2API 分组计费", exact=True).click()
             expect(card.get_by_role("alert").last).to_contain_text("0.01")
@@ -384,7 +387,7 @@ def smoke():
                 expect(card.get_by_role("button", name="写入 Sub2API 分组计费", exact=True)).to_be_enabled()
                 assert database_snapshot() == original
             price = next(row for row in UPSTREAM["group"]["model_pricing"] if row["models"] == ["gpt-6-astra"])
-            assert price["input_price"] == 0.00001 and price["fast_multiplier"] == 2.5
+            assert price["input_price"] == 0.00001 and price["fast_multiplier"] == 2
             assert UPSTREAM["group"]["rate_multiplier"] == 0.7
             card.screenshot(path=str(OUTPUT / "settings-card.png"))
             page.goto(FRONTEND_URL + "/observations")
@@ -453,7 +456,9 @@ def smoke():
             expect(selection).not_to_be_visible()
             expect(apply_announcement).to_have_count(0)
             assert UPSTREAM["group"]["long_context_pricing_enabled"] is False
-            assert all(row["fast_multiplier"] == 2.5 for row in UPSTREAM["group"]["model_pricing"])
+            for row in UPSTREAM["group"]["model_pricing"]:
+                for model in row["models"]:
+                    assert row["fast_multiplier"] == (2 if model.startswith("gpt-6") else 2.5)
             assert next(row for row in UPSTREAM["group"]["model_pricing"] if row["models"] == ["gpt-6-astra"])["input_price"] == 0.000009
             page.reload()
             expect(heading).to_be_visible()

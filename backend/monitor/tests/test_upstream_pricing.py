@@ -94,7 +94,9 @@ def test_upstream_http_apply_retry_conflict_and_revert():
         card = next(row for row in groups[7]["model_pricing"] if row["models"] == ["gpt-6-astra"])
         assert card["input_price"] == 0.000009
         assert card["cache_write_1h_price"] == 0.000018
-        assert card["fast_multiplier"] == 2.5
+        assert card["fast_multiplier"] == 2
+        other = next(row for row in groups[7]["model_pricing"] if row["models"] == ["gpt-5.6-sol"])
+        assert other["fast_multiplier"] == 2.5
         count = len(writes)
         unchanged_epoch = account.pricing_epoch
         state = apply_policy(state.policy, group_ids=[7, 8])

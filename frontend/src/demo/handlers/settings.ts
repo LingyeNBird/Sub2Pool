@@ -161,7 +161,10 @@ export function handleSettings({
         if (pricing.announcement_applied_at)
           return fail("公告一键应用已确认过，请在设置页调整或重试", 400);
         payload.policy = {
-          fast_rules: [{ model_pattern: "*", multiplier: "2.5" }],
+          fast_rules: [
+            { model_pattern: "gpt-6*", multiplier: "2" },
+            { model_pattern: "*", multiplier: "2.5" },
+          ],
           model_rules: [{ model_pattern: "gpt-6*", multiplier: "1.8" }],
           long_context_pricing_enabled: false,
         };

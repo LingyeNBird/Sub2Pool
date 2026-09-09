@@ -5,7 +5,10 @@ from django.utils import timezone
 
 def default_upstream_pricing_policy():
     return {
-        "fast_rules": [{"model_pattern": "*", "multiplier": "2.5"}],
+        "fast_rules": [
+            {"model_pattern": "gpt-6*", "multiplier": "2"},
+            {"model_pattern": "*", "multiplier": "2.5"},
+        ],
         "model_rules": [{"model_pattern": "gpt-6*", "multiplier": "1.8"}],
         "long_context_pricing_enabled": False,
     }

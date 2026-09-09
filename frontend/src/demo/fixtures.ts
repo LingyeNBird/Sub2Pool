@@ -400,7 +400,10 @@ function initializeState(): DemoState {
     settings: baseSettings(),
     upstreamGroupPolicies: {
       7: {
-        fast_rules: [{ model_pattern: "*", multiplier: "2.5" }],
+        fast_rules: [
+          { model_pattern: "gpt-6*", multiplier: "2" },
+          { model_pattern: "*", multiplier: "2.5" },
+        ],
         model_rules: [{ model_pattern: "gpt-6*", multiplier: "1.8" }],
         long_context_pricing_enabled: false,
       },
@@ -409,7 +412,10 @@ function initializeState(): DemoState {
     upstreamPricing: {
       selected_group_ids: [7],
       policy: {
-        fast_rules: [{ model_pattern: "*", multiplier: "2.5" }],
+        fast_rules: [
+          { model_pattern: "gpt-6*", multiplier: "2" },
+          { model_pattern: "*", multiplier: "2.5" },
+        ],
         model_rules: [{ model_pattern: "gpt-6*", multiplier: "1.8" }],
         long_context_pricing_enabled: false,
       },

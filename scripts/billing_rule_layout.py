@@ -29,8 +29,9 @@ def check_rule_layout(page: Page, card: Locator, output: Path) -> None:
             section.get_by_role("button", name="添加规则", exact=True).click()
             patterns.last.fill("synthetic-model-*")
             section.get_by_role("button", name="上移规则", exact=True).last.click()
-            expect(patterns.first).to_have_value("synthetic-model-*")
-            section.get_by_role("button", name="下移规则", exact=True).first.click()
+            moved_index = len(original) - 1
+            expect(patterns.nth(moved_index)).to_have_value("synthetic-model-*")
+            section.get_by_role("button", name="下移规则", exact=True).nth(moved_index).click()
             section.get_by_role("button", name="删除规则", exact=True).last.click()
             assert patterns.evaluate_all("inputs => inputs.map(input => input.value)") == original
         (output / "rule-layout-results.json").write_text(json.dumps({
