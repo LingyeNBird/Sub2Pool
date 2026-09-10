@@ -22,6 +22,7 @@ interface EntitlementSourceGroup {
   title: string;
   remainingEntitlement: number | null;
   usagePercent: number | null;
+  effectiveSharePercent: number;
 }
 
 const props = defineProps<{
@@ -43,6 +44,12 @@ function sourceFor(breakdown: AccountBreakdown) {
 }
 function accountUsage(account: AccountBreakdown | undefined) {
   return account?.snapshot?.selected_cost ?? account?.latest_selected_cost;
+}
+function carryAdjustment(account: AccountBreakdown | undefined) {
+  return account ? (sourceFor(account)?.carry_adjustment_percent ?? 0) : 0;
+}
+function formatCarryAdjustment(value: number) {
+  return `${value > 0 ? "+" : ""}${formatCompactPercent(value)}`;
 }
 
 function sumSourceField(
@@ -86,6 +93,14 @@ const sourceGroups = computed<EntitlementSourceGroup[]>(() =>
     const remainingEntitlement = complete
       ? sumSourceField(sources, "remaining_entitlement_usd")
       : null;
+    const estimatedCapacity = sources.reduce(
+      (total, source) => total + (source.estimated_capacity_usd ?? 0),
+      0,
+    );
+    const effectiveSharePercent =
+      estimatedCapacity > 0 && expectedEntitlement != null
+        ? (expectedEntitlement * 100) / estimatedCapacity
+        : allocation.share_percent;
     const usagePercent =
       expectedEntitlement != null &&
       expectedEntitlement > 0 &&
@@ -101,6 +116,7 @@ const sourceGroups = computed<EntitlementSourceGroup[]>(() =>
         accounts.length === 1 ? accounts[0].account_name : allocation.pool_name,
       remainingEntitlement,
       usagePercent,
+      effectiveSharePercent,
     };
   }),
 );
@@ -271,6 +287,18 @@ function edit() {
                     合同
                     {{ formatCompactPercent(group.allocation.share_percent) }}
                   </span>
+                  <span
+                    v-if="
+                      group.accounts.length === 1 &&
+                      carryAdjustment(group.accounts[0]) !== 0
+                    "
+                    class="badge badge-xs badge-warning"
+                  >
+                    结转
+                    {{
+                      formatCarryAdjustment(carryAdjustment(group.accounts[0]))
+                    }}
+                  </span>
                 </div>
               </div>
               <div class="text-right text-xs tabular-nums opacity-60">
@@ -314,6 +342,12 @@ function edit() {
                       )
                     }}
                   </div>
+                  <div
+                    v-if="carryAdjustment(account) !== 0"
+                    class="mt-0.5 text-[11px] text-warning"
+                  >
+                    结转 {{ formatCarryAdjustment(carryAdjustment(account)) }}
+                  </div>
                 </div>
                 <div class="shrink-0 text-right text-sm tabular-nums">
                   {{ formatCurrency(accountUsage(account)) }}
@@ -324,7 +358,7 @@ function edit() {
             <EntitlementProgress
               class="mt-3"
               :usage-percent="group.usagePercent"
-              :total-percent="group.allocation.share_percent"
+              :total-percent="group.effectiveSharePercent"
               :progress-label="`${group.title}的权益进度`"
             />
           </section>
