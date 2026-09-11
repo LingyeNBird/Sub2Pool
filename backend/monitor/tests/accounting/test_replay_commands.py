@@ -110,6 +110,65 @@ def test_startup_replay_command_upgrades_previous_algorithm_zero_plateau():
     assert "重放 3 条观测" in output.getvalue()
 
 
+@pytest.mark.django_db
+def test_startup_replay_anchor_keeps_first_zero_observation_in_its_cycle():
+    """上游 reset_at 抖动时，重放起点不得落进周期开头而切出假周期。"""
+
+    config = AppSettings.load()
+    create_monitored_account(7)
+    config.save()
+    first_zero_at = timezone.now().replace(microsecond=0)
+    # 上一周期的重置时间只早一小时，本轮 reset_at 的抖动会把
+    # ``reset_at - 窗口`` 推到首个 0% 观测之后（真正的假周期成因）。
+    previous_reset_at = first_zero_at + timedelta(days=7) - timedelta(hours=1)
+    reset_at = first_zero_at + timedelta(days=7) + timedelta(seconds=40)
+    previous_started_at = previous_reset_at - timedelta(seconds=604800)
+    previous = Observation.objects.create(
+        account_id=7,
+        source="manual",
+        observed_at=first_zero_at - timedelta(minutes=10),
+        window_seconds=604800,
+        upstream_resets_at=previous_reset_at,
+        attribution_started_at=previous_started_at,
+        upstream_used_percent=Decimal("100"),
+        raw_selected_total_cost=Decimal("3000"),
+        selected_total_cost=Decimal("3000"),
+        total_standard_cost=Decimal("3000"),
+        total_actual_cost=Decimal("3000"),
+        effective_usd_per_percent=Decimal("30"),
+        sample_note="上一周期已固化",
+        raw_window={"rate_method": RATE_METHOD},
+    )
+    first_zero, second_zero = [
+        Observation.objects.create(
+            account_id=7,
+            source="manual",
+            observed_at=first_zero_at + timedelta(minutes=offset),
+            window_seconds=604800,
+            upstream_resets_at=reset_at + timedelta(seconds=offset * 2),
+            upstream_used_percent=Decimal("0"),
+            raw_selected_total_cost=Decimal("0"),
+            selected_total_cost=Decimal("0"),
+            total_standard_cost=Decimal("0"),
+            total_actual_cost=Decimal("0"),
+            effective_usd_per_percent=Decimal("16"),
+            sample_note="等待派生计算",
+            raw_window={"rate_method": "particle_filter_v9"},
+        )
+        for offset in (0, 4)
+    ]
+
+    output = StringIO()
+    call_command("replayobservations", stdout=output)
+
+    for observation in (previous, first_zero, second_zero):
+        observation.refresh_from_db()
+    assert previous.attribution_started_at == previous_started_at
+    assert first_zero.attribution_started_at == first_zero.observed_at
+    assert second_zero.attribution_started_at == first_zero.observed_at
+    assert "重放 3 条观测" in output.getvalue()
+
+
 @pytest.mark.django_db(transaction=True)
 def test_manual_replay_writers_and_management_replay_respect_active_fence():
     get_user_model().objects.create_superuser(

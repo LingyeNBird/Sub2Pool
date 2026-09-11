@@ -5,6 +5,7 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.db.models import Q
 
+from monitor.accounting.replay import _replay_anchor
 from monitor.history_state import fenced_fact_write
 from monitor.models import Observation
 from monitor.replay import RATE_METHOD, rebuild_account
@@ -42,12 +43,12 @@ class Command(BaseCommand):
                 if stale is None:
                     self.stdout.write(f"账号 {account_id}：派生结果已是最新版")
                     continue
-                replay_from = (
-                    stale.observed_at
-                    if stale.is_manual_start
-                    else stale.attribution_started_at
-                    or stale.upstream_resets_at
-                    - timedelta(seconds=stale.window_seconds)
+                # 起点按“上一条已确认归属的观测”对齐。上游 reset_at 会抖动，
+                # 用 ``reset_at - 窗口`` 倒推的起点可能落进本周期的首个 0% 观测
+                # 之后，把该 0% 观测误判成新周期起点，切出假周期。
+                replay_from = _replay_anchor(
+                    stale,
+                    merge_previous=not stale.is_manual_start,
                 )
 
             with fenced_fact_write(
