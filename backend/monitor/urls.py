@@ -82,6 +82,11 @@ from .views.users import (
 )
 
 from .views.research import ResearchSettingsView, ResearchRunView
+from .views.temporary_disable import (
+    TemporaryDisableDetailView,
+    TemporaryDisableModelListView,
+    TemporaryDisableView,
+)
 from .views.upstream_pricing import (
     UpstreamPricingView,
     UpstreamPricingApplyView,
@@ -110,6 +115,18 @@ urlpatterns = [
     path("dashboard", DashboardView.as_view()),
     path("dashboard/temporary-burst", TemporaryBurstView.as_view()),
     path("account-status", AccountStatusView.as_view()),
+    path(
+        "accounts/<int:account_id>/models",
+        TemporaryDisableModelListView.as_view(),
+    ),
+    path(
+        "accounts/<int:account_id>/temporary-disables",
+        TemporaryDisableView.as_view(),
+    ),
+    path(
+        "accounts/temporary-disables/<int:disable_id>",
+        TemporaryDisableDetailView.as_view(),
+    ),
     path(
         "dashboard/participants/<int:participant_id>/apply-recommendation",
         ApplyParticipantRecommendationView.as_view(),

@@ -13,6 +13,7 @@ from monitor.balance_operations import auto_apply_recommendations
 from monitor.models import AppSettings, MonitoredAccount
 from monitor.upstream_pricing.service import run_automatic_migration
 from monitor.temporary_burst import sampling_policy
+from monitor.temporary_disable import restore_due_disables
 
 
 def schedule_next_run(
@@ -116,6 +117,14 @@ class Command(BaseCommand):
             while sleep_seconds > 0:
                 time.sleep(min(5, sleep_seconds))
                 close_old_connections()
+                # 空闲等待期间也在到点后立刻恢复上游禁用，不必等下一个探测轮次。
+                try:
+                    restored = restore_due_disables()
+                except Exception as exc:
+                    self.stderr.write(f"临时禁用自动恢复失败：{exc}")
+                else:
+                    if restored["restored"] or restored["failed"]:
+                        self.stdout.write(f"临时禁用自动恢复：{restored}")
                 sleep_seconds = schedule_next_run(
                     AppSettings.load(), cycle_started_at=cycle_started_at,
                 )

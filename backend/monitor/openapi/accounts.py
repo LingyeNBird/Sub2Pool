@@ -227,6 +227,7 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "usage",
                 "stats",
                 "warnings",
+                "temporary_disables",
             ],
             "properties": {
                 "id": {"type": "integer"},
@@ -269,6 +270,67 @@ def account_schemas(nullable_number: dict, nullable_string: dict) -> dict:
                 "warnings": {
                     "type": "array",
                     "items": {"type": "string"},
+                },
+                "temporary_disables": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/components/schemas/TemporaryDisable"
+                    },
+                },
+            },
+        },
+        "TemporaryDisable": {
+            "type": "object",
+            "required": [
+                "id",
+                "account_id",
+                "scope",
+                "model",
+                "started_at",
+                "restore_at",
+                "retry_at",
+                "restored_at",
+                "restore_source",
+                "created_by",
+                "last_error",
+            ],
+            "properties": {
+                "id": {"type": "integer"},
+                "account_id": {"type": "integer"},
+                "scope": {
+                    "type": "string",
+                    "enum": ["account", "model"],
+                    "description": "account 表示整个账号暂停调度，model 表示从模型白名单移除一个模型。",
+                },
+                "model": {
+                    "type": "string",
+                    "description": "被禁用的模型名；账号级禁用为空字符串。",
+                },
+                "started_at": {"type": "string", "format": "date-time"},
+                "restore_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "计划恢复时刻；后台到点后写回上游。",
+                },
+                "retry_at": {
+                    "oneOf": [
+                        {"type": "string", "format": "date-time"},
+                        {"type": "null"},
+                    ],
+                    "description": "自动恢复失败后的下次尝试时刻。",
+                },
+                "restored_at": _nullable("string"),
+                "restore_source": {
+                    "type": "string",
+                    "enum": ["", "manual", "auto"],
+                },
+                "created_by": {
+                    "type": "string",
+                    "description": "发起禁用的管理员；只读接口与系统用户始终为空字符串。",
+                },
+                "last_error": {
+                    "type": "string",
+                    "description": "未经确认的上游写入；为空表示上游已确认。",
                 },
             },
         },

@@ -1,4 +1,4 @@
-import type { AccountStatusData } from "@/types/accounts";
+import type { AccountStatusData, TemporaryDisable } from "@/types/accounts";
 import type { Observation } from "@/types/observations";
 import type { ParticleTrajectoryData } from "@/types/particleTrajectory";
 import type { NotificationListData } from "@/types/security";
@@ -7,7 +7,9 @@ import type { APIUsageBreakdown, StatisticsData } from "@/types/statistics";
 import type { DemoRequestContext } from "../backend";
 import {
   apiUsageData,
+  demoIdentity,
   participantUsagePoints,
+  saveDemoState,
   trajectoryData,
   type DemoState,
 } from "../state";
@@ -395,6 +397,9 @@ function accountStatusData(state: DemoState): AccountStatusData {
         name: account.name,
         enabled: account.enabled,
         quota_query_mode: account.quota_query_mode,
+        temporary_disables: state.temporaryDisables
+          .filter((disable) => disable.account_id === account.id)
+          .map((disable) => ({ ...disable })),
         cycles,
         runtime: {
           name: account.name,
@@ -502,8 +507,113 @@ function accountStatusData(state: DemoState): AccountStatusData {
   };
 }
 
+const DEMO_ACCOUNT_MODELS = [
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-codex",
+  "gpt-5.3-codex-spark",
+  "gpt-image-1.5",
+];
+
+function demoDisableResponse(
+  context: DemoRequestContext,
+  disable: TemporaryDisable,
+): Response {
+  context.state.revision += 1;
+  saveDemoState(context.state);
+  return context.ok(disable);
+}
+
+function handleTemporaryDisables(context: DemoRequestContext): Response | null {
+  const { method, pathname, payload, state, ok, fail } = context;
+  const modelsMatch = /^accounts\/(\d+)\/models$/.exec(pathname);
+  if (method === "GET" && modelsMatch) {
+    const accountId = Number(modelsMatch[1]);
+    if (!state.monitoredAccounts.some((item) => item.id === accountId)) {
+      return fail("监控账号不存在", 404);
+    }
+    return ok({ models: DEMO_ACCOUNT_MODELS });
+  }
+  const createMatch = /^accounts\/(\d+)\/temporary-disables$/.exec(pathname);
+  if (method === "POST" && createMatch) {
+    if (!demoIdentity()?.is_staff) return fail("没有管理员权限", 403);
+    const accountId = Number(createMatch[1]);
+    if (!state.monitoredAccounts.some((item) => item.id === accountId)) {
+      return fail("监控账号不存在", 404);
+    }
+    const scope = payload.scope === "model" ? "model" : "account";
+    const model = scope === "model" ? String(payload.model ?? "") : "";
+    const minutes = Number(payload.minutes);
+    if (scope === "model" && !model) return fail("请选择要禁用的模型", 400);
+    if (!Number.isInteger(minutes) || minutes < 1) {
+      return fail("禁用时长必须是整数分钟", 400);
+    }
+    if (
+      state.temporaryDisables.some(
+        (item) => item.account_id === accountId && item.scope === scope,
+      )
+    ) {
+      return fail("该账号已有一条同类临时禁用，请先调整或提前恢复", 400);
+    }
+    const now = new Date();
+    const disable: TemporaryDisable = {
+      id: state.nextTemporaryDisableId,
+      account_id: accountId,
+      scope,
+      model,
+      started_at: now.toISOString(),
+      restore_at: new Date(now.getTime() + minutes * 60_000).toISOString(),
+      retry_at: null,
+      restored_at: null,
+      restore_source: "",
+      created_by: demoIdentity()?.username ?? "",
+      last_error: "",
+    };
+    state.nextTemporaryDisableId += 1;
+    state.temporaryDisables.push(disable);
+    return demoDisableResponse(context, disable);
+  }
+  const detailMatch = /^accounts\/temporary-disables\/(\d+)$/.exec(pathname);
+  if (detailMatch && (method === "PATCH" || method === "DELETE")) {
+    if (!demoIdentity()?.is_staff) return fail("没有管理员权限", 403);
+    const disableId = Number(detailMatch[1]);
+    const index = state.temporaryDisables.findIndex(
+      (item) => item.id === disableId,
+    );
+    if (index < 0) return fail("临时禁用记录不存在", 404);
+    const current = state.temporaryDisables[index];
+    if (method === "DELETE") {
+      state.temporaryDisables.splice(index, 1);
+      return demoDisableResponse(context, {
+        ...current,
+        restored_at: new Date().toISOString(),
+        restore_source: "manual",
+        retry_at: null,
+        last_error: "",
+      });
+    }
+    const minutes = Number(payload.minutes);
+    if (!Number.isInteger(minutes) || minutes < 1) {
+      return fail("禁用时长必须是整数分钟", 400);
+    }
+    const updated: TemporaryDisable = {
+      ...current,
+      restore_at: new Date(Date.now() + minutes * 60_000).toISOString(),
+      retry_at: null,
+    };
+    state.temporaryDisables[index] = updated;
+    return demoDisableResponse(context, updated);
+  }
+  if (modelsMatch || createMatch || detailMatch) {
+    return fail("不支持的请求方法", 405);
+  }
+  return null;
+}
+
 export function handleReporting(context: DemoRequestContext): Response | null {
   const { method, pathname, state, url, ok } = context;
+  const disableResponse = handleTemporaryDisables(context);
+  if (disableResponse) return disableResponse;
   if (method === "GET" && pathname === "account-status") {
     return ok(accountStatusData(state));
   }

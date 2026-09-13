@@ -21,6 +21,7 @@ CPA usage 订阅 ───┼─> 采样证据 ─> 区间识别 ─> 账本重�
 - `monitor.accounting`：识别归属区间，重放时变账本，保存兼容现有读取路径的 legacy live projection。
 - `monitor.reporting`：把已有事实和账本投影为首页、统计和参与者数据，不改写账本。
 - `monitor.balance_operations`：手动和定时应用共用余额写入服务及原有操作日志。自动任务每轮读取一次设置，按建议层的 `needs_manual_update` 消费待应用建议，不额外复查完整性、金额、已应用状态或参与者是否消失；账号租约被占用就直接跳过，不等待、不重试、不计作应用失败。预期业务错误按参与者记录，其他异常交给外层任务报告。`runmonitor` 复用 `local_poll_minutes` 调度，不另设定时器；本轮中关闭自动应用或暂停监控，从下一轮自动任务生效。迁移 `0053` 为已有安装一次性开启，后续保留用户设置。
+- `monitor.temporary_disable`：管理员发起的临时禁用与其自动恢复。禁用只写上游账号的 `schedulable` 或 `credentials.model_mapping`，不动观测、账本、建议和合同份额；每条记录保存恢复目标，上游写入失败时保留未确认状态而不是丢弃。`runmonitor` 在轮询空闲期检查到点记录并写回上游，失败按 5 分钟退避重试。见 [temporary-disable.md](temporary-disable.md)。
 - `monitor.views`：鉴权、校验和 HTTP 编排，不实现计算公式。
 - Vue 前端：展示本地计划、blocker 和后端重放结论，不重复实现后端算法。
 

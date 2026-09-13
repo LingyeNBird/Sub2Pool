@@ -142,6 +142,8 @@ def openapi_paths() -> dict:
                     "对每个监控账号执行对应提供方的只读查询；"
                     "Sub2API 读取账号状态与请求统计，CPA 读取 Codex 周限并汇总"
                     "本地 usage 事件。单账号失败写入 warnings，不中断其他账号。"
+                    "每个账号同时返回仍在生效的临时禁用（temporary_disables）；"
+                    "该字段只描述本地记录，读取不会改动上游配置。"
                 ),
                 "operationId": "getAccountStatus",
                 "responses": {

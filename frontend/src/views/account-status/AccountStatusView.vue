@@ -1,20 +1,32 @@
 <script setup lang="ts">
 import CorrectionAmount from "@/components/common/CorrectionAmount.vue";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import PageShellHeader from "@/components/common/PageShellHeader.vue";
 import AccountCycleUsageChart from "./components/AccountCycleUsageChart.vue";
+import TemporaryDisableDialog from "./components/TemporaryDisableDialog.vue";
 import { useDateTime } from "@/composables/useDateTime";
 import { ApiError, api } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
-import type { AccountStatusAccount, AccountStatusData } from "@/types/accounts";
+import type {
+  AccountStatusAccount,
+  AccountStatusData,
+  TemporaryDisable,
+} from "@/types/accounts";
 import { formatCurrency, formatPercent } from "@/utils/formatters";
+
+import { describeDisable } from "./temporaryDisable";
 
 const data = ref<AccountStatusData | null>(null);
 const loading = ref(true);
 const message = ref("");
 const dateTime = useDateTime();
 const auth = useAuthStore();
+const disableDialog = ref<InstanceType<typeof TemporaryDisableDialog> | null>(
+  null,
+);
+const now = ref(Date.now());
+let clock: ReturnType<typeof setInterval> | null = null;
 
 async function load() {
   loading.value = true;
@@ -27,6 +39,40 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+// 禁用剩余时间随页面停留实时递减，避免管理员按旧时间判断。
+onMounted(() => {
+  void load();
+  clock = setInterval(() => {
+    now.value = Date.now();
+  }, 30_000);
+});
+onUnmounted(() => {
+  if (clock) clearInterval(clock);
+});
+
+function managesUpstream(account: AccountStatusAccount): boolean {
+  return auth.isStaff && account.provider === "sub2api";
+}
+
+function disableReason(
+  account: AccountStatusAccount,
+  disable: TemporaryDisable,
+): string {
+  return describeDisable(disable, now.value);
+}
+
+function openCreateDisable(account: AccountStatusAccount) {
+  disableDialog.value?.openCreate(account);
+}
+
+function openDisableDetail(
+  account: AccountStatusAccount,
+  disable: TemporaryDisable,
+) {
+  if (!managesUpstream(account)) return;
+  disableDialog.value?.openEdit(account, disable);
 }
 
 function accountName(account: AccountStatusAccount): string {
@@ -100,6 +146,7 @@ function hasRuntimeDetails(account: AccountStatusAccount): boolean {
   const runtime = account.runtime;
   const usage = account.usage;
   return Boolean(
+    account.temporary_disables.length ||
     usage?.five_hour ||
     usage?.needs_reauth ||
     usage?.needs_verify ||
@@ -115,8 +162,6 @@ function hasRuntimeDetails(account: AccountStatusAccount): boolean {
         runtime.current_concurrency != null)),
   );
 }
-
-onMounted(load);
 </script>
 
 <template>
@@ -223,6 +268,15 @@ onMounted(load);
             <span v-if="!account.enabled" class="badge badge-ghost badge-sm">
               本地监控已停用
             </span>
+            <button
+              v-if="managesUpstream(account)"
+              type="button"
+              class="btn btn-outline btn-xs"
+              @click.stop="openCreateDisable(account)"
+            >
+              <AppIcon name="no-symbol" class="size-3.5" />
+              临时禁用
+            </button>
           </div>
           <p class="mt-1 text-xs opacity-50">
             {{
@@ -504,6 +558,44 @@ onMounted(load);
         class="border-t border-base-300 pt-5"
       >
         <h3 class="mb-3 font-semibold">运行状态</h3>
+        <ul v-if="account.temporary_disables.length" class="mb-3 grid gap-2">
+          <li v-for="disable in account.temporary_disables" :key="disable.id">
+            <component
+              :is="managesUpstream(account) ? 'button' : 'div'"
+              :type="managesUpstream(account) ? 'button' : undefined"
+              class="flex w-full flex-wrap items-center gap-2 rounded-box bg-warning/10 px-3 py-2 text-left text-sm"
+              :class="{
+                'cursor-pointer transition-colors hover:bg-warning/20':
+                  managesUpstream(account),
+              }"
+              @click="openDisableDetail(account, disable)"
+            >
+              <AppIcon name="no-symbol" class="size-4 shrink-0 text-warning" />
+              <span>{{ disableReason(account, disable) }}</span>
+              <span
+                v-if="managesUpstream(account) && disable.created_by"
+                class="text-xs opacity-60"
+              >
+                · {{ disable.created_by }} 操作
+              </span>
+              <span v-if="disable.retry_at" class="text-xs text-error">
+                · 自动恢复待重试
+              </span>
+              <span
+                v-if="managesUpstream(account)"
+                class="ml-auto text-xs opacity-60"
+              >
+                调整
+              </span>
+            </component>
+            <p
+              v-if="disable.last_error"
+              class="mt-1 rounded-box bg-error/10 px-3 py-2 text-xs text-error"
+            >
+              {{ disable.last_error }}
+            </p>
+          </li>
+        </ul>
         <dl class="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
           <div v-if="account.usage?.five_hour?.used_percent != null">
             <dt class="text-xs opacity-50">5 小时窗口</dt>
@@ -592,4 +684,6 @@ onMounted(load);
       </div>
     </div>
   </article>
+
+  <TemporaryDisableDialog ref="disableDialog" :now="now" @changed="load" />
 </template>

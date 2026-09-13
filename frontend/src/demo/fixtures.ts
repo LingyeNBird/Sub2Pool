@@ -345,7 +345,7 @@ function initializeState(): DemoState {
     aggregateParticipant(participant);
   }
   return {
-    version: 21,
+    version: 22,
     clock: iso(DEMO_ANCHOR),
     temporaryBurst: null,
     nextParticipantId: 4,
@@ -353,6 +353,7 @@ function initializeState(): DemoState {
     nextSystemUserId: 3,
     nextObservationId: observations.length + 1,
     nextBlockedId: 1,
+    nextTemporaryDisableId: 1,
     revision: 24,
     participants,
     monitoredAccounts,
@@ -438,6 +439,7 @@ function initializeState(): DemoState {
       can_revert: true,
     },
     plans: [],
+    temporaryDisables: [],
   };
 }
 

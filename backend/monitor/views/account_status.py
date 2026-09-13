@@ -22,6 +22,7 @@ from ..models import (
     PagePermission,
 )
 from ..particle_trajectory import cycle_usage_history
+from ..temporary_disable import disables_by_account
 
 
 STATS_DAYS = 30
@@ -269,6 +270,9 @@ class AccountStatusView(PageAccessAPIView):
         )
         rows = [_base_account_row(account) for account in accounts]
         rows_by_id = {account.id: row for account, row in zip(accounts, rows)}
+        disables = disables_by_account(accounts, include_actor=request.user.is_staff)
+        for account, row in zip(accounts, rows):
+            row["temporary_disables"] = disables.get(account.id, [])
         sampled_at = timezone.now()
         sub2api_accounts = [
             account for account in accounts if account.provider == "sub2api"
