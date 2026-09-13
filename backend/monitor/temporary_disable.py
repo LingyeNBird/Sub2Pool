@@ -163,7 +163,8 @@ def _write_disable(
     if disable.scope == ACCOUNT_SCOPE:
         client.set_account_schedulable(upstream_id, False)
         return
-    models, mapping = _whitelist_state(client, account)
+    mapping = disable.restore_context.get("model_mapping") or {}
+    models = sorted(mapping) if mapping else _whitelist_state(client, account)[0]
     if disable.model not in models:
         raise ValueError(f"该账号当前的白名单中没有模型 {disable.model}")
     whitelist = {
@@ -314,16 +315,13 @@ def update_disable(*, disable_id: int, minutes: int) -> AccountTemporaryDisable:
     config = AppSettings.load()
     guard = LeaseGuard.acquire(account.fact_key)
     try:
-        if disable.last_error and disable.last_error.startswith(
-            DISABLE_PENDING_ERROR
-        ):
-            disable.refresh_from_db()
-            if not disable.is_active:
-                raise ValueError("该临时禁用已经恢复")
-            _apply_write(disable, account, config, guard)
         disable.refresh_from_db()
         if not disable.is_active:
             raise ValueError("该临时禁用已经恢复")
+        if disable.last_error and disable.last_error.startswith(
+            DISABLE_PENDING_ERROR
+        ):
+            _apply_write(disable, account, config, guard)
         disable.restore_at = timezone.now() + timedelta(minutes=minutes)
         disable.retry_at = None
         disable.save(update_fields=["restore_at", "retry_at", "updated_at"])
@@ -375,13 +373,14 @@ def restore_disable(*, disable_id: int, source: str = "manual") -> AccountTempor
     if source != "manual":
         raise ValueError("未知的恢复来源")
     disable = _load_disable(disable_id)
-    if not disable.is_active:
-        raise ValueError("该临时禁用已经恢复")
     account = _sub2api_account(disable.account_id)
     config = AppSettings.load()
     _require_connection(config)
     guard = LeaseGuard.acquire(account.fact_key)
     try:
+        disable.refresh_from_db()
+        if not disable.is_active:
+            raise ValueError("该临时禁用已经恢复")
         return _apply_restore(disable, account, config, guard, "manual")
     finally:
         guard.release()
@@ -425,6 +424,9 @@ def restore_due_disables(*, now: datetime | None = None) -> dict[str, int]:
         except LeaseBusyError:
             continue
         try:
+            disable.refresh_from_db()
+            if not disable.is_active:
+                continue
             _apply_restore(disable, account, config, guard, "auto")
         except Exception as exc:  # noqa: BLE001 - 单条记录失败不得中断轮询
             _record_restore_failure(disable, current, exc)

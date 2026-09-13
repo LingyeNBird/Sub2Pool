@@ -57,10 +57,12 @@ async function loadModels() {
     const data = await api<{ models: string[] }>(
       `accounts/${current.id}/models`,
     );
+    if (account.value !== current) return;
     models.value = data.models;
     if (!models.value.includes(model.value)) model.value = "";
     if (!models.value.length) message.value = "该账号当前没有可禁用的模型";
   } catch (error) {
+    if (account.value !== current) return;
     message.value =
       error instanceof Error ? error.message : "读取账号模型列表失败";
   } finally {

@@ -528,6 +528,7 @@ function handleTemporaryDisables(context: DemoRequestContext): Response | null {
   const { method, pathname, payload, state, ok, fail } = context;
   const modelsMatch = /^accounts\/(\d+)\/models$/.exec(pathname);
   if (method === "GET" && modelsMatch) {
+    if (!demoIdentity()?.is_staff) return fail("没有管理员权限", 403);
     const accountId = Number(modelsMatch[1]);
     if (!state.monitoredAccounts.some((item) => item.id === accountId)) {
       return fail("监控账号不存在", 404);
